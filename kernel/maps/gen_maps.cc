@@ -67,6 +67,7 @@ static void find_subst_for_map(const ring preimage_r, const ring image_r, const 
         }
     }
   }
+  return;
   //Print("elms:%d, N:%d\n",IDELEMS(image),preimage_r->N);
   //iiWriteMatrix((matrix)image,"_",1,image_r,0);
   //PrintS("\npreimage:\n");rWrite(preimage_r);
@@ -107,6 +108,7 @@ ideal maMapIdeal(const ideal map_id, const ring preimage_r,const ideal image_id,
       find_subst_for_map(preimage_r,image_r,image_id,var,p);
       if (var!=0)
       {
+        if (TEST_OPT_PROT) PrintS("map is a substitution\n");
         return id_SubstPoly(map_id,var,p,preimage_r,image_r,nMap);
       }
     }
