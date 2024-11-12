@@ -4383,10 +4383,9 @@ static proc simplifyIdeal(ideal i)
         if(size(p)<=2)
         {
           tested[j]=1;
-          imap1[j]=p+2*var(j);
+          imap1[j]=p+var(j);
           phi=r,imap1;
           iwork=phi(iwork);
-          iwork=subst(iwork,var(j),0);
           iwork[k]=var(j);
           imap1=maxideal(1);
           imap2[j]=-p;
@@ -4405,10 +4404,9 @@ static proc simplifyIdeal(ideal i)
         if(deg(iwork[k]/var(j))==0)
         {
           p=-1/leadcoef(iwork[k]/var(j))*iwork[k];
-          imap1[j]=p+2*var(j);
+          imap1[j]=p+var(j);
           phi=r,imap1;
           iwork=phi(iwork);
-          iwork=subst(iwork,var(j),0);
           iwork[k]=var(j);
           imap1=maxideal(1);
           imap2[j]=-p;
