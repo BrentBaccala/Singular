@@ -2882,8 +2882,8 @@ ideal bba (ideal F, ideal Q,intvec *w,bigintmat *hilb,kStrategy strat)
 
 #ifdef KDEBUG
     strat->P.Init();
-#endif /* KDEBUG */
     kTest_TS(strat);
+#endif /* KDEBUG */
   }
 #ifdef KDEBUG
   if (TEST_OPT_DEBUG) messageSets(strat);
