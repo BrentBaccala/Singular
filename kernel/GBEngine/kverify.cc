@@ -195,18 +195,14 @@ BOOLEAN kVerify2(ideal F, ideal Q)
   if (TEST_OPT_PROT) printf("%d pairs created\n",strat->Ll+1);
   if (TEST_OPT_DEGBOUND)
   {
-    for(int i=strat->Ll; i>=0; i--)
-    {
-      if (currRing->pFDeg(strat->L[i].p,currRing)>Kstd1_deg)
-      {
-        /*
-        * omit pairs if 24 IN test and the degree of L[i] is bigger then
-        *a predefined number Kstd1_deg
-        */
-        deleteInL(strat->L,&strat->Ll,i,strat);
-        if (TEST_OPT_PROT) { printf("D"); mflush(); }
-      }
-    }
+    strat->Lqueue.remove_if
+      ([&](LObject lobject) {
+         if (currRing->pFDeg(lobject.p,currRing)>Kstd1_deg) {
+           if (TEST_OPT_PROT) { printf("D"); mflush(); }
+           return true;
+         }
+         return false;
+       });
   }
   if (TEST_OPT_DEBUG) messageSets(strat);
   /*---------------------------------------------------------------------*/
@@ -215,7 +211,7 @@ BOOLEAN kVerify2(ideal F, ideal Q)
   if (cpus>=vspace::internals::MAX_PROCESS)
     cpus=vspace::internals::MAX_PROCESS-1;
   /* start no more than MAX_PROCESS-1 children */
-  if (cpus>strat->Ll) cpus=strat->Ll;
+  if (cpus>strat->Lqueue.size()) cpus=strat->Lqueue.size();
   /* start no more children than elements in L */
   int parent_pid=getpid();
   using namespace vspace;

@@ -10,6 +10,9 @@
 
 #include <string.h>
 
+#include <queue>
+#include <algorithm>
+
 #include "omalloc/omalloc.h"
 #ifdef HAVE_OMALLOC
 #include "omalloc/omallocClass.h"
@@ -326,6 +329,90 @@ public:
   unsigned long* sevT;
   TSet T;
   LSet L;
+
+  /* "L" is the set of critical pairs, maintained as a priority queue,
+   * and we wish to regularly pop the largest item from the queue.
+   * However, we also wish to iterate over the entire set in order,
+   * which precludes organizing it as a heap.
+   *
+   * Singular's design uses the posInL method to locate where in LSet
+   * a new LObject is to be inserted.  To use a std::priority_queue
+   * instead, we wrap posInL in a Compare type designed to mimic a
+   * single element LSet and perform a comparision by computing the
+   * "position" of the second element in the LSet.  We also need to do
+   * some trickery to get access to the outer class from the inner
+   * class.  (See the first line of the skStrategy constructor in
+   * kutil.cc to see how this gets instantiated)
+   *
+   * I don't use std::priority_queue because it blocks access to
+   * the underlying container, and we do need to delete things.
+   */
+  class CompareLObject {
+    public:
+    skStrategy * parent;
+    bool operator()(LObject &lhs, LObject &rhs)
+    {
+      /* We make lhs our "fake" Lset of size 1 (length 0), and compute
+       * rhs's position in this Lset, which will be either 0 (rhs<lhs)
+       * or 1 (lhs<rhs).  If we swap lhs and rhs and they both return
+       * 0 or they both return 1 (this can happen with, for example,
+       * posInL110), then we return false, as std::sort requires its
+       * Compare function to be strict.
+       */
+      return ((parent->posInL(&lhs,0,&rhs,parent) == 1) && (parent->posInL(&rhs,0,&lhs,parent) == 0));
+    };
+  };
+  class CompareLSbaObject {
+    public:
+    skStrategy * parent;
+    bool operator()(LObject &lhs, LObject &rhs)
+    {
+      return ((parent->posInLSba(&lhs,0,&rhs,parent) == 1) && (parent->posInLSba(&rhs,0,&lhs,parent) == 0));
+    };
+  };
+  class LQueue : std::vector<LObject> {
+    public:
+    CompareLObject compObject;
+    CompareLSbaObject compSbaObject;
+    void push(const LObject& lobject) {
+      push_back(lobject);
+      // std::push_heap(std::vector<LObject>::begin(), std::vector<LObject>::end(), compObject);
+      std::sort(std::vector<LObject>::begin(), std::vector<LObject>::end(), compObject);
+    }
+    void pushSba(const LObject& lobject) {
+      push_back(lobject);
+      //std::push_heap(std::vector<LObject>::begin(), std::vector<LObject>::end(), compSbaObject);
+      std::sort(std::vector<LObject>::begin(), std::vector<LObject>::end(), compSbaObject);
+    }
+    bool would_be_top(LObject& lobject) {
+      //return (empty() || !compObject(lobject, front()));
+      return (empty() || !compObject(lobject, back()));
+    }
+    void pop(void) {
+      //std::pop_heap(std::vector<LObject>::begin(), std::vector<LObject>::end(), compObject);
+      pop_back();
+    }
+    const LObject& top(void) {
+      //return front();
+      return back();
+    }
+    /* The class always iterates from top to bottom, which is back to front of the std::vector  */
+    typedef std::vector<sLObject>::reverse_iterator iterator;
+    iterator begin(void) {
+      return std::vector<LObject>::rbegin();
+    }
+    iterator end(void) {
+      return std::vector<LObject>::rend();
+    }
+    using std::vector<LObject>::empty;
+    using std::vector<LObject>::size;
+    template <typename F>
+    void remove_if(F&& predicate) {
+      erase(std::remove_if(std::vector<LObject>::begin(), std::vector<LObject>::end(), predicate), std::vector<LObject>::end());
+    }
+  };
+  LQueue  Lqueue;
+
   LSet    B;
   poly    kNoether;
   poly    t_kNoether; // same polys in tailring
