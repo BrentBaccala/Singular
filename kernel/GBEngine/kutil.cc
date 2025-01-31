@@ -3172,13 +3172,135 @@ void kMergeBintoLSba(kStrategy strat)
   strat->Bl = -1;
 }
 
+/**
+ * @param[in] is_ring If true, we can't remove unless the coefficient of the lcm is divisible by the coefficient of p
+ * @param[in] use_ecart If true, we check the ecart parameter using sugarDivisibleBy
+ * @param[in] check_pNext If true, if remove if either pNext(Lp.p) is flagged strat->tail or currRing has a global ordering
+ *                        Otherwise, we remove if Lp.p itself is flagged strat->tail
+ */
+void deleteIfCompareChain(poly p, int ecart, kStrategy strat, BOOLEAN (*pfCompareChain)(poly p, poly p1, poly p2, poly lcm, ring R), bool is_ring, bool use_ecart, bool check_pNext)
+{
+    strat->Lqueue.remove_if
+      ([&](LObject Lp) {
+         if ((Lp.p1!=NULL) && pfCompareChain(p,Lp.p1,Lp.p2,Lp.lcm,currRing)
+             && (!is_ring || ((Lp.lcm != NULL) && n_DivBy(pGetCoeff(Lp.lcm), pGetCoeff(p), currRing->cf)))
+             && (!use_ecart || sugarDivisibleBy(ecart, Lp.ecart)))
+               {
+		 if (! check_pNext) {
+		   if (Lp.p == strat->tail) {
+		     strat->c3++;
+		     return true;
+		   }
+		 } else {
+		   if ((pNext(Lp.p) == strat->tail)||(rHasGlobalOrdering(currRing))) {
+		     strat->c3++;
+		     return true;
+		   }
+		 }
+#if 0
+                 if(TEST_OPT_DEBUG)
+                   {
+                     PrintS("chain-crit-part: sugar:pCompareChain p=");
+                     p_wrp(p,currRing);
+                     Print(" delete L");
+                     p_wrp(Lp.lcm,currRing);
+                     PrintLn();
+                   }
+#endif
+               }
+         return false;
+       });
+}
+    /*
+    *this is our MODIFICATION of GEBAUER-MOELLER:
+    *First the elements of B enter L,
+    *then we fix a lcm and the "best" element in L
+    *(i.e the last in L with this lcm and of type (s,p))
+    *and cancel all the other elements of type (r,p) with this lcm
+    *except the case the element (s,r) has also the same lcm
+    *and is on the worst position with respect to (s,p) and (r,p)
+    */
+
+void deleteIfAble(poly p, kStrategy strat, bool is_ring)
+{
+    poly deleteFlag = pInit();
+    /* Search top to bottom for L[j] with L[j].p2 == p */
+    for (auto it=strat->Lqueue.begin(); it != strat->Lqueue.end(); it++) {
+      if (it->p2 == p)  // Was the element added from B?
+      {
+        for (auto it2=(it+1); it2 != strat->Lqueue.end(); it2++) {
+          // Element is from B and has the same lcm as "it"
+          if ((it2->p2 == p) && pLmEqual(it->lcm,it2->lcm)
+              && (!is_ring || (n_DivBy(pGetCoeff(it->lcm), pGetCoeff(it2->lcm), currRing->cf))))
+          {
+            /*L[i] could be canceled but we search for a better one to cancel*/
+            /* Search backwards (top to bottom) from L[i-1] to find L[l] */
+            strat->c3++;
+            auto it3=it2+1;
+            if (isPairsetInL(it3,it->p1,it2->p1,strat)
+            && (pNext(it3->p) == strat->tail)
+            && (!pLmEqual(it2->p,it3->p))
+            && pDivisibleBy(p,it3->lcm))
+            {
+              /*
+              *"NOT equal(...)" because in case of "equal" the element L[l]
+              *is "older" and has to be from theoretical point of view behind
+              *L[i], but we do not want to reorder L
+              */
+              it2->p2 = strat->tail;
+              /*
+              *L[l] will be canceled, we cannot cancel L[i] later on,
+              *so we mark it with "tail"
+              */
+#if 0
+              if(TEST_OPT_DEBUG)
+              {
+                PrintS("chain-crit-part: divisible_by p=");
+                p_wrp(p,currRing);
+                Print(" delete L");
+                p_wrp(it3->lcm,currRing);
+                PrintLn();
+              }
+#endif
+              it3->p2 = deleteFlag;
+            }
+            else
+            {
+#if 0
+              if(TEST_OPT_DEBUG)
+              {
+                PrintS("chain-crit-part: divisible_by(2) p=");
+                p_wrp(p,currRing);
+                Print(" delete L");
+                p_wrp(it2->lcm,currRing);
+                PrintLn();
+              }
+#endif
+              it2->p2 = deleteFlag;
+            }
+          }
+        }
+      }
+      else if (it->p2 == strat->tail)
+      {
+        /*now L[j] cannot be canceled any more and the tail can be removed*/
+        it->p2 = p;
+      }
+    }
+    strat->Lqueue.remove_if
+      ([&](LObject Lp) {
+         return (Lp.p2 == deleteFlag);
+       });
+    pLmFree(deleteFlag);
+}
+
 /*2
 *the pairset B of pairs of type (s[i],p) is complete now. It will be updated
 *using the chain-criterion in B and L and enters B to L
 */
 void chainCritNormal (poly p,int ecart,kStrategy strat)
 {
-  int i,j,l;
+  int i,j;
 
   /*
   *pairtest[i] is TRUE if spoly(S[i],p) == 0.
@@ -3237,20 +3359,7 @@ void chainCritNormal (poly p,int ecart,kStrategy strat)
     *and lcm(s,r)#lcm(s,p) and lcm(s,r)#lcm(r,p)
     *and in case the sugar is o.k. then L[j] can be canceled
     */
-      strat->Lqueue.remove_if
-	([&](LObject Lp) {
-	   if (sugarDivisibleBy(ecart,Lp.ecart)
-	       && ((pNext(Lp.p) == strat->tail) || (rHasGlobalOrdering(currRing)))
-	       && pCompareChain(p,Lp.p1,Lp.p2,Lp.lcm))
-	     {
-	       if (Lp.p == strat->tail)
-		 {
-		   strat->c3++;
-		   return true;
-		 }
-	     }
-	   return false;
-	 });
+      deleteIfCompareChain(p, ecart, strat, pCompareChain, false, true, false);
       /*
       *this is GEBAUER-MOELLER:
       *in B all elements with the same lcm except the "best"
@@ -3290,18 +3399,7 @@ void chainCritNormal (poly p,int ecart,kStrategy strat)
       *and lcm(s,r)#lcm(s,p) and lcm(s,r)#lcm(r,p)
       *and in case the sugar is o.k. then L[j] can be canceled
       */
-      strat->Lqueue.remove_if
-	([&](LObject Lp) {
-	   if (pCompareChain(p,Lp.p1,Lp.p2,Lp.lcm))
-	     {
-	       if ((pNext(Lp.p) == strat->tail)||(rHasGlobalOrdering(currRing)))
-		 {
-		   strat->c3++;
-		   return true;
-		 }
-	     }
-	   return false;
-	 });
+      deleteIfCompareChain(p, 0, strat, pCompareChain, false, false, true);
       /*
       *this is GEBAUER-MOELLER:
       *in B all elements with the same lcm except the "best"
@@ -3330,86 +3428,13 @@ void chainCritNormal (poly p,int ecart,kStrategy strat)
   }
   else
   {
-    strat->Lqueue.remove_if
-      ([&](LObject Lp) {
-         #ifdef HAVE_SHIFTBBA
-	 if ((Lp.p1!=NULL) &&
-	     pCompareChain(p,Lp.p1,Lp.p2,Lp.lcm))
-         #else
-         if (pCompareChain(p,Lp.p1,Lp.p2,Lp.lcm))
-         #endif
-	   {
-	     if ((pNext(Lp.p) == strat->tail)||(rHasGlobalOrdering(currRing)))
-	       {
-		 return true;
-		 strat->c3++;
-	       }
-	   }
-	 return false;
-       });
-    /*
-    *this is our MODIFICATION of GEBAUER-MOELLER:
-    *First the elements of B enter L,
-    *then we fix a lcm and the "best" element in L
-    *(i.e the last in L with this lcm and of type (s,p))
-    *and cancel all the other elements of type (r,p) with this lcm
-    *except the case the element (s,r) has also the same lcm
-    *and is on the worst position with respect to (s,p) and (r,p)
-    */
+    deleteIfCompareChain(p, 0, strat, pCompareChain, false, false, true);
     /*
     *B enters to L/their order with respect to B is permutated for elements
     *B[i].p with the same leading term
     */
     kMergeBintoL(strat);
-    /* Search top to bottom for L[j] with L[j].p2 == p
-     * p2/p are polys, which are pointers to terms, so comparing == sees if they are the same polynomial
-     */
-    poly deleteFlag = pInit();
-    for (auto it=strat->Lqueue.begin(); it != strat->Lqueue.end(); it++) {
-      if (it->p2 == p)
-      {
-	for (auto it2=(it+1); it2 != strat->Lqueue.end(); it2++) {
-          if ((it2->p2 == p) && pLmEqual(it->lcm,it2->lcm))
-          {
-            /*L[i] could be canceled but we search for a better one to cancel*/
-	    /* Search backwards (top to bottom) from L[i-1] to find L[l] */
-            strat->c3++;
-	    auto it3=it2+1;
-            if (isPairsetInL(it3,it->p1,it2->p1,strat)
-            && (pNext(it3->p) == strat->tail)
-            && (!pLmEqual(it2->p,it3->p))
-            && pDivisibleBy(p,it3->lcm))
-            {
-              /*
-              *"NOT equal(...)" because in case of "equal" the element L[l]
-              *is "older" and has to be from theoretical point of view behind
-              *L[i], but we do not want to reorder L
-              */
-              it2->p2 = strat->tail;
-              /*
-              *L[l] will be canceled, we cannot cancel L[i] later on,
-              *so we mark it with "tail"
-              */
-	      it3->p2 = deleteFlag;
-            }
-            else
-            {
-              it2->p2 = deleteFlag;
-            }
-          }
-        }
-      }
-      else if (it->p2 == strat->tail)
-      {
-        /*now L[j] cannot be canceled any more and the tail can be removed*/
-        it->p2 = p;
-      }
-    }
-    strat->Lqueue.remove_if
-      ([&](LObject Lp) {
-	 return (Lp.p2 == deleteFlag);
-       });
-    pLmFree(deleteFlag);
+    deleteIfAble(p, strat, false);
   }
 }
 /*2
@@ -3434,61 +3459,8 @@ void chainCritOpt_1 (poly,int,kStrategy strat)
 */
 void chainCritSig (poly p,int /*ecart*/,kStrategy strat)
 {
-  int i,j,l;
   kMergeBintoLSba(strat);
-  j = strat->Ll;
-  loop  /*cannot be changed into a for !!! */
-  {
-    if (j <= 0)
-    {
-      /*now L[0] cannot be canceled any more and the tail can be removed*/
-      if (strat->L[0].p2 == strat->tail) strat->L[0].p2 = p;
-      break;
-    }
-    if (strat->L[j].p2 == p)
-    {
-      i = j-1;
-      loop
-      {
-        if (i < 0)  break;
-        if ((strat->L[i].p2 == p) && pLmEqual(strat->L[j].lcm,strat->L[i].lcm))
-        {
-          /*L[i] could be canceled but we search for a better one to cancel*/
-          strat->c3++;
-          if (isInPairsetL(i-1,strat->L[j].p1,strat->L[i].p1,&l,strat)
-              && (pNext(strat->L[l].p) == strat->tail)
-              && (!pLmEqual(strat->L[i].p,strat->L[l].p))
-              && pDivisibleBy(p,strat->L[l].lcm))
-          {
-            /*
-             *"NOT equal(...)" because in case of "equal" the element L[l]
-             *is "older" and has to be from theoretical point of view behind
-             *L[i], but we do not want to reorder L
-             */
-            strat->L[i].p2 = strat->tail;
-            /*
-             *L[l] will be canceled, we cannot cancel L[i] later on,
-             *so we mark it with "tail"
-             */
-            deleteInL(strat->L,&strat->Ll,l,strat);
-            i--;
-          }
-          else
-          {
-            deleteInL(strat->L,&strat->Ll,i,strat);
-          }
-          j--;
-        }
-        i--;
-      }
-    }
-    else if (strat->L[j].p2 == strat->tail)
-    {
-      /*now L[j] cannot be canceled any more and the tail can be removed*/
-      strat->L[j].p2 = p;
-    }
-    j--;
-  }
+  deleteIfAble(p, strat, false);
 }
 #ifdef HAVE_RATGRING
 void chainCritPart (poly p,int ecart,kStrategy strat)
@@ -3539,27 +3511,7 @@ void chainCritPart (poly p,int ecart,kStrategy strat)
     *and lcm(s,r)#lcm(s,p) and lcm(s,r)#lcm(r,p)
     *and in case the sugar is o.k. then L[j] can be canceled
     */
-      for (j=strat->Ll; j>=0; j--)
-      {
-        if (sugarDivisibleBy(ecart,strat->L[j].ecart)
-        && ((pNext(strat->L[j].p) == strat->tail) || (rHasGlobalOrdering(currRing)))
-        && pCompareChainPart(p,strat->L[j].p1,strat->L[j].p2,strat->L[j].lcm))
-        {
-          if (strat->L[j].p == strat->tail)
-          {
-            if(TEST_OPT_DEBUG)
-            {
-               PrintS("chain-crit-part: pCompareChainPart p=");
-               p_wrp(p,currRing);
-               Print(" delete L[%d]",j);
-               p_wrp(strat->L[j].lcm,currRing);
-               PrintLn();
-            }
-            deleteInL(strat->L,&strat->Ll,j,strat);
-            strat->c3++;
-          }
-        }
-      }
+      deleteIfCompareChain(p, ecart, strat, pCompareChainPart, false, true, false);
       /*
       *this is GEBAUER-MOELLER:
       *in B all elements with the same lcm except the "best"
@@ -3615,25 +3567,7 @@ void chainCritPart (poly p,int ecart,kStrategy strat)
       *and lcm(s,r)#lcm(s,p) and lcm(s,r)#lcm(r,p)
       *and in case the sugar is o.k. then L[j] can be canceled
       */
-      for (j=strat->Ll; j>=0; j--)
-      {
-        if (pCompareChainPart(p,strat->L[j].p1,strat->L[j].p2,strat->L[j].lcm))
-        {
-          if ((pNext(strat->L[j].p) == strat->tail)||(rHasGlobalOrdering(currRing)))
-          {
-            if(TEST_OPT_DEBUG)
-            {
-              PrintS("chain-crit-part: sugar:pCompareChainPart p=");
-              p_wrp(p,currRing);
-              Print(" delete L[%d]",j);
-              p_wrp(strat->L[j].lcm,currRing);
-              PrintLn();
-            }
-            deleteInL(strat->L,&strat->Ll,j,strat);
-            strat->c3++;
-          }
-        }
-      }
+      deleteIfCompareChain(p, 0, strat, pCompareChainPart, false, false, true);
       /*
       *this is GEBAUER-MOELLER:
       *in B all elements with the same lcm except the "best"
@@ -3668,111 +3602,13 @@ void chainCritPart (poly p,int ecart,kStrategy strat)
   }
   else
   {
-    for (j=strat->Ll; j>=0; j--)
-    {
-      if (pCompareChainPart(p,strat->L[j].p1,strat->L[j].p2,strat->L[j].lcm))
-      {
-        if ((pNext(strat->L[j].p) == strat->tail)||(rHasGlobalOrdering(currRing)))
-        {
-          if(TEST_OPT_DEBUG)
-          {
-            PrintS("chain-crit-part: pCompareChainPart p=");
-            p_wrp(p,currRing);
-            Print(" delete L[%d]",j);
-            p_wrp(strat->L[j].lcm,currRing);
-            PrintLn();
-          }
-          deleteInL(strat->L,&strat->Ll,j,strat);
-          strat->c3++;
-        }
-      }
-    }
-    /*
-    *this is our MODIFICATION of GEBAUER-MOELLER:
-    *First the elements of B enter L,
-    *then we fix a lcm and the "best" element in L
-    *(i.e the last in L with this lcm and of type (s,p))
-    *and cancel all the other elements of type (r,p) with this lcm
-    *except the case the element (s,r) has also the same lcm
-    *and is on the worst position with respect to (s,p) and (r,p)
-    */
+    deleteIfCompareChain(p, 0, strat, pCompareChainPart, false, false, true);
     /*
     *B enters to L/their order with respect to B is permutated for elements
     *B[i].p with the same leading term
     */
     kMergeBintoL(strat);
-    j = strat->Ll;
-    loop  /*cannot be changed into a for !!! */
-    {
-      if (j <= 0)
-      {
-        /*now L[0] cannot be canceled any more and the tail can be removed*/
-        if (strat->L[0].p2 == strat->tail) strat->L[0].p2 = p;
-        break;
-      }
-      if (strat->L[j].p2 == p)
-      {
-        i = j-1;
-        loop
-        {
-          if (i < 0)  break;
-          if ((strat->L[i].p2 == p) && pLmEqual(strat->L[j].lcm,strat->L[i].lcm))
-          {
-            /*L[i] could be canceled but we search for a better one to cancel*/
-            strat->c3++;
-            if (isInPairsetL(i-1,strat->L[j].p1,strat->L[i].p1,&l,strat)
-            && (pNext(strat->L[l].p) == strat->tail)
-            && (!pLmEqual(strat->L[i].p,strat->L[l].p))
-            && _p_LmDivisibleByPart(p,currRing,
-                           strat->L[l].lcm,currRing,
-                           currRing->real_var_start, currRing->real_var_end))
-
-            {
-              /*
-              *"NOT equal(...)" because in case of "equal" the element L[l]
-              *is "older" and has to be from theoretical point of view behind
-              *L[i], but we do not want to reorder L
-              */
-              strat->L[i].p2 = strat->tail;
-              /*
-              *L[l] will be canceled, we cannot cancel L[i] later on,
-              *so we mark it with "tail"
-              */
-              if(TEST_OPT_DEBUG)
-              {
-                PrintS("chain-crit-part: divisible_by p=");
-                p_wrp(p,currRing);
-                Print(" delete L[%d]",l);
-                p_wrp(strat->L[l].lcm,currRing);
-                PrintLn();
-              }
-              deleteInL(strat->L,&strat->Ll,l,strat);
-              i--;
-            }
-            else
-            {
-              if(TEST_OPT_DEBUG)
-              {
-                PrintS("chain-crit-part: divisible_by(2) p=");
-                p_wrp(p,currRing);
-                Print(" delete L[%d]",i);
-                p_wrp(strat->L[i].lcm,currRing);
-                PrintLn();
-              }
-              deleteInL(strat->L,&strat->Ll,i,strat);
-            }
-            j--;
-          }
-          i--;
-        }
-      }
-      else if (strat->L[j].p2 == strat->tail)
-      {
-        /*now L[j] cannot be canceled any more and the tail can be removed*/
-        strat->L[j].p2 = p;
-      }
-      j--;
-    }
+    deleteIfAble(p, strat, false);
   }
 }
 #endif
@@ -3969,7 +3805,7 @@ void initenterpairsSigRing (poly h,poly hSig,int hFrom,int k,int ecart,int isFro
 */
 void chainCritRing (poly p,int, kStrategy strat)
 {
-  int i,j,l;
+  int i,j;
   /*
   *pairtest[i] is TRUE if spoly(S[i],p) == 0.
   *In this case all elements in B such
@@ -4013,111 +3849,13 @@ void chainCritRing (poly p,int, kStrategy strat)
     strat->pairtest=NULL;
   }
   assume(!(strat->Gebauer || strat->fromT));
-  for (j=strat->Ll; j>=0; j--)
-  {
-    if ((strat->L[j].lcm != NULL) && n_DivBy(pGetCoeff(strat->L[j].lcm), pGetCoeff(p), currRing->cf))
-    {
-      if (pCompareChain(p,strat->L[j].p1,strat->L[j].p2,strat->L[j].lcm))
-      {
-        if ((pNext(strat->L[j].p) == strat->tail) || (rHasGlobalOrdering(currRing)))
-        {
-          deleteInL(strat->L,&strat->Ll,j,strat);
-          strat->c3++;
-#ifdef KDEBUG
-          if (TEST_OPT_DEBUG)
-          {
-            PrintS("--- chain criterion func chainCritRing type 2\n");
-            PrintS("strat->L[j].p:");
-            wrp(strat->L[j].p);
-            PrintS("  p:");
-            wrp(p);
-            PrintLn();
-          }
-#endif
-        }
-      }
-    }
-  }
-  /*
-  *this is our MODIFICATION of GEBAUER-MOELLER:
-  *First the elements of B enter L,
-  *then we fix a lcm and the "best" element in L
-  *(i.e the last in L with this lcm and of type (s,p))
-  *and cancel all the other elements of type (r,p) with this lcm
-  *except the case the element (s,r) has also the same lcm
-  *and is on the worst position with respect to (s,p) and (r,p)
-  */
+  deleteIfCompareChain(p, 0, strat, pCompareChain, true, false, true);
   /*
   *B enters to L/their order with respect to B is permutated for elements
   *B[i].p with the same leading term
   */
   kMergeBintoL(strat);
-  j = strat->Ll;
-  loop  /*cannot be changed into a for !!! */
-  {
-    if (j <= 0)
-    {
-      /*now L[0] cannot be canceled any more and the tail can be removed*/
-      if (strat->L[0].p2 == strat->tail) strat->L[0].p2 = p;
-      break;
-    }
-    if (strat->L[j].p2 == p) // Was the element added from B?
-    {
-      i = j-1;
-      loop
-      {
-        if (i < 0)  break;
-        // Element is from B and has the same lcm as L[j]
-        if ((strat->L[i].p2 == p) && n_DivBy(pGetCoeff(strat->L[j].lcm), pGetCoeff(strat->L[i].lcm), currRing->cf)
-             && pLmEqual(strat->L[j].lcm,strat->L[i].lcm))
-        {
-          /*L[i] could be canceled but we search for a better one to cancel*/
-          strat->c3++;
-#ifdef KDEBUG
-          if (TEST_OPT_DEBUG)
-          {
-            PrintS("--- chain criterion func chainCritRing type 3\n");
-            PrintS("strat->L[j].lcm:");
-            wrp(strat->L[j].lcm);
-            PrintS("  strat->L[i].lcm:");
-            wrp(strat->L[i].lcm);
-            PrintLn();
-          }
-#endif
-          if (isInPairsetL(i-1,strat->L[j].p1,strat->L[i].p1,&l,strat)
-          && (pNext(strat->L[l].p) == strat->tail)
-          && (!pLmEqual(strat->L[i].p,strat->L[l].p))
-          && pDivisibleBy(p,strat->L[l].lcm))
-          {
-            /*
-            *"NOT equal(...)" because in case of "equal" the element L[l]
-            *is "older" and has to be from theoretical point of view behind
-            *L[i], but we do not want to reorder L
-            */
-            strat->L[i].p2 = strat->tail;
-            /*
-            *L[l] will be canceled, we cannot cancel L[i] later on,
-            *so we mark it with "tail"
-            */
-            deleteInL(strat->L,&strat->Ll,l,strat);
-            i--;
-          }
-          else
-          {
-            deleteInL(strat->L,&strat->Ll,i,strat);
-          }
-          j--;
-        }
-        i--;
-      }
-    }
-    else if (strat->L[j].p2 == strat->tail)
-    {
-      /*now L[j] cannot be canceled any more and the tail can be removed*/
-      strat->L[j].p2 = p;
-    }
-    j--;
-  }
+  deleteIfAble(p, strat, true);
 }
 
 /*2
