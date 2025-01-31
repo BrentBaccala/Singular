@@ -346,11 +346,17 @@ public:
    *
    * I don't use std::priority_queue because it blocks access to
    * the underlying container, and we do need to delete things.
+   *
+   * I've started using std::stable_sort instead of std::sort because
+   * in the original design, when a new LObject compared equal to
+   * existing LObjects, it was added at the end of those objects.
+   * Mimic this by adding the LObject with push_back and then
+   * std::stable_sort.
    */
   class CompareLObject {
     public:
     skStrategy * parent;
-    bool operator()(LObject &lhs, LObject &rhs)
+    bool operator()(const LObject &lhs, const LObject &rhs)
     {
       /* We make lhs our "fake" Lset of size 1 (length 0), and compute
        * rhs's position in this Lset, which will be either 0 (rhs<lhs)
@@ -359,15 +365,19 @@ public:
        * posInL110), then we return false, as std::sort requires its
        * Compare function to be strict.
        */
-      return ((parent->posInL(&lhs,0,&rhs,parent) == 1) && (parent->posInL(&rhs,0,&lhs,parent) == 0));
+      LObject * lhsp = const_cast<LObject *>(&lhs);
+      LObject * rhsp = const_cast<LObject *>(&rhs);
+      return ((parent->posInL(lhsp,0,rhsp,parent) == 1) && (parent->posInL(rhsp,0,lhsp,parent) == 0));
     };
   };
   class CompareLSbaObject {
     public:
     skStrategy * parent;
-    bool operator()(LObject &lhs, LObject &rhs)
+    bool operator()(const LObject &lhs, const LObject &rhs)
     {
-      return ((parent->posInLSba(&lhs,0,&rhs,parent) == 1) && (parent->posInLSba(&rhs,0,&lhs,parent) == 0));
+      LObject * lhsp = const_cast<LObject *>(&lhs);
+      LObject * rhsp = const_cast<LObject *>(&rhs);
+      return ((parent->posInLSba(lhsp,0,rhsp,parent) == 1) && (parent->posInLSba(rhsp,0,lhsp,parent) == 0));
     };
   };
   class LQueue : std::vector<LObject> {
@@ -377,12 +387,12 @@ public:
     void push(const LObject& lobject) {
       push_back(lobject);
       // std::push_heap(std::vector<LObject>::begin(), std::vector<LObject>::end(), compObject);
-      std::sort(std::vector<LObject>::begin(), std::vector<LObject>::end(), compObject);
+      std::stable_sort(std::vector<LObject>::begin(), std::vector<LObject>::end(), compObject);
     }
     void pushSba(const LObject& lobject) {
       push_back(lobject);
       //std::push_heap(std::vector<LObject>::begin(), std::vector<LObject>::end(), compSbaObject);
-      std::sort(std::vector<LObject>::begin(), std::vector<LObject>::end(), compSbaObject);
+      std::stable_sort(std::vector<LObject>::begin(), std::vector<LObject>::end(), compSbaObject);
     }
     bool would_be_top(LObject& lobject) {
       //return (empty() || !compObject(lobject, front()));
