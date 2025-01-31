@@ -700,7 +700,7 @@ BOOLEAN isInPairsetL(int length,poly p1,poly p2,int*  k,kStrategy strat)
   }
 }
 
-BOOLEAN isPairsetInL(skStrategy::LQueue::iterator &it,poly p1,poly p2,kStrategy strat)
+BOOLEAN isPairsetInL(LQueue::iterator &it,poly p1,poly p2,kStrategy strat)
 {
   for (; it != strat->Lqueue.end(); it++) {
     if (((p1 == it->p1) && (p2 == it->p2))
