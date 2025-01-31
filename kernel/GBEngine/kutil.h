@@ -394,6 +394,10 @@ public:
       //std::push_heap(std::vector<LObject>::begin(), std::vector<LObject>::end(), compSbaObject);
       std::stable_sort(std::vector<LObject>::begin(), std::vector<LObject>::end(), compSbaObject);
     }
+    void reorder(void) {
+      /* required after changes made to objects that can change their sort order */
+      std::stable_sort(std::vector<LObject>::begin(), std::vector<LObject>::end(), compObject);
+    }
     bool would_be_top(LObject& lobject) {
       //return (empty() || !compObject(lobject, front()));
       return (empty() || !compObject(lobject, back()));

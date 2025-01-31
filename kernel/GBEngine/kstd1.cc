@@ -1211,6 +1211,8 @@ static void reorderL(kStrategy strat)
 {
   int i,j,at;
 
+  strat->Lqueue.reorder();
+
   for (i=1; i<=strat->Ll; i++)
   {
     at = strat->posInL(strat->L,i-1,&(strat->L[i]),strat);
