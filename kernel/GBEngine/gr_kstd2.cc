@@ -1050,7 +1050,8 @@ ideal k_gnc_gr_bba(const ideal F, const ideal Q, const intvec *, const bigintmat
 
   // intvec *w=NULL;
   // intvec *hilb=NULL;
-  int   olddeg,reduc;
+  int   olddeg;
+  LQueue::size_type reduc;
   int red_result=1;
   int /*hilbeledeg=1,*/hilbcount=0/*,minimcnt=0*/;
 

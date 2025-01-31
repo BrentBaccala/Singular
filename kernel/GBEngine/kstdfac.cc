@@ -540,7 +540,8 @@ static void completeReduceFac (kStrategy strat, ideal_list FL)
 
 ideal bbafac (ideal /*F*/, ideal Q,intvec* /*w*/,kStrategy strat, ideal_list FL)
 {
-  int   olddeg,reduc=0;
+  int   olddeg;
+  LQueue::size_type reduc;
   int red_result = 1;
   reduc = olddeg = 0;
   /* compute------------------------------------------------------- */

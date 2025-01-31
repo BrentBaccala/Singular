@@ -1878,7 +1878,7 @@ void kDebugPrint(kStrategy strat);
 ideal mora (ideal F, ideal Q,intvec *w,bigintmat *hilb,kStrategy strat)
 {
   int olddeg = 0;
-  int reduc = 0;
+  LQueue::size_type reduc = 0;
   int red_result = 1;
   int hilbeledeg=1,hilbcount=0;
   BITSET save1;
@@ -3547,7 +3547,8 @@ ideal kInterRedBba (ideal F, ideal Q, int &need_retry)
 {
   need_retry=0;
   int   red_result = 1;
-  int   olddeg,reduc;
+  int   olddeg;
+  LQueue::size_type reduc;
   BOOLEAN withT = FALSE;
   // BOOLEAN toReset=FALSE;
   kStrategy strat=new skStrategy;

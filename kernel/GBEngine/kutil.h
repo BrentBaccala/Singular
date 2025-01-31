@@ -626,7 +626,7 @@ void enterpairs (poly h, int k, int ec, int pos,kStrategy strat, int atR = -1);
 void entersets (LObject h);
 void pairs ();
 BOOLEAN sbaCheckGcdPair (LObject* h,kStrategy strat);
-void message (int i,int* reduc,int* olddeg,kStrategy strat,int red_result);
+void message (int i,int* olddeg,LQueue::size_type* reduc,kStrategy strat,int red_result);
 void messageStat (int hilbcount,kStrategy strat);
 void messageStatSBA (int hilbcount,kStrategy strat);
 #ifdef KDEBUG
@@ -781,7 +781,7 @@ ideal kNF2Bound (ideal F,ideal Q,ideal q,int bound, kStrategy strat, int lazyRed
 void initBba(kStrategy strat);
 void initSba(ideal F,kStrategy strat);
 void f5c (kStrategy strat, int& olddeg, int& minimcnt, int& hilbeledeg,
-          int& hilbcount, int& srmax, int& lrmax, int& reduc, ideal Q,
+          int& hilbcount, int& srmax, int& lrmax, LQueue::size_type& reduc, ideal Q,
           intvec *w,bigintmat *hilb );
 
 /***************************************************************

@@ -7159,7 +7159,7 @@ poly redtailBba_Ring (LObject* L, int end_pos, kStrategy strat )
 /*2
 *checks the change degree and write progress report
 */
-void message (int i,int* reduc,int* olddeg,kStrategy strat, int red_result)
+void message (int i,int* olddeg,LQueue::size_type* reduc,kStrategy strat, int red_result)
 {
   if (i != *olddeg)
   {
@@ -7168,13 +7168,13 @@ void message (int i,int* reduc,int* olddeg,kStrategy strat, int red_result)
   }
   if (TEST_OPT_OLDSTD)
   {
-    if (strat->Ll != *reduc)
+    if (strat->Lqueue.size() != *reduc+1)
     {
-      if (strat->Ll != *reduc-1)
-        Print("(%d)",strat->Ll+1);
+      if (strat->Lqueue.size() != *reduc)
+        Print("(%zu)",strat->Lqueue.size());
       else
         PrintS("-");
-      *reduc = strat->Ll;
+      *reduc = strat->Lqueue.size()-1;
     }
     else
       PrintS(".");
@@ -7186,12 +7186,12 @@ void message (int i,int* reduc,int* olddeg,kStrategy strat, int red_result)
       PrintS("-");
     else if (red_result < 0)
       PrintS(".");
-    if ((red_result > 0) || ((strat->Ll % 100)==99))
+    if ((red_result > 0) || ((strat->Lqueue.size() % 100)==0))
     {
-      if (strat->Ll != *reduc && strat->Ll > 0)
+      if (strat->Lqueue.size() != *reduc+1 && strat->Lqueue.size() > 1)
       {
-        Print("(%d)",strat->Ll+1);
-        *reduc = strat->Ll;
+        Print("(%zu)",strat->Lqueue.size());
+        *reduc = strat->Lqueue.size()-1;
       }
     }
   }

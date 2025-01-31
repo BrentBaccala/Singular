@@ -2605,7 +2605,8 @@ void kDebugPrint(kStrategy strat);
 ideal bba (ideal F, ideal Q,intvec *w,bigintmat *hilb,kStrategy strat)
 {
   int   red_result = 1;
-  int   olddeg,reduc;
+  int   olddeg;
+  LQueue::size_type reduc;
   int hilbeledeg=1,hilbcount=0,minimcnt=0;
   BOOLEAN withT = FALSE;
   BITSET save;
@@ -3101,7 +3102,8 @@ ideal sba (ideal F0, ideal Q,intvec *w,bigintmat *hilb,kStrategy strat)
   printf("\n");
 #endif
   int   srmax,lrmax, red_result = 1;
-  int   olddeg,reduc;
+  int   olddeg;
+  LQueue::size_type reduc;
   int hilbeledeg=1,hilbcount=0,minimcnt=0;
   LObject L;
   BOOLEAN withT     = TRUE;
@@ -4262,7 +4264,7 @@ ideal kNF2Bound (ideal F,ideal Q,ideal q,int bound,kStrategy strat, int lazyRedu
 * 3. strat->S and strat->T are completely new computed in these steps
 ********************************************************************/
 void f5c (kStrategy strat, int& olddeg, int& minimcnt, int& hilbeledeg,
-          int& hilbcount, int& srmax, int& lrmax, int& reduc, ideal Q,
+          int& hilbcount, int& srmax, int& lrmax, LQueue::size_type& reduc, ideal Q,
           intvec *w,bigintmat *hilb )
 {
   int Ll_old, red_result = 1;
@@ -4574,7 +4576,8 @@ void f5c (kStrategy strat, int& olddeg, int& minimcnt, int& hilbeledeg,
 ideal bbaShift(ideal F, ideal Q,intvec *w,bigintmat *hilb,kStrategy strat)
 {
   int   red_result = 1;
-  int   olddeg,reduc;
+  int   olddeg;
+  LQueue::size_type reduc;
   int hilbeledeg=1,hilbcount=0,minimcnt=0;
   BOOLEAN withT = TRUE; // currently only T contains the shifts
   BITSET save;
