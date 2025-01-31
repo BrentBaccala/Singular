@@ -7261,7 +7261,7 @@ void messageSets (kStrategy strat)
     strat->newt = FALSE;
   }
   PrintS("\nset L");
-  i=0;
+  i=strat->Lqueue.size()-1;
   for (auto& Lp: strat->Lqueue) {
     Print("\n%d:",i);
     p_wrp(Lp.p1, currRing, strat->tailRing);
@@ -7272,7 +7272,7 @@ void messageSets (kStrategy strat)
     Lp.wrp();
     Print("  o:%ld e:%d l:%d",
           Lp.pFDeg(),Lp.ecart,Lp.length);
-    i++;
+    i--;
   }
   PrintLn();
 }
