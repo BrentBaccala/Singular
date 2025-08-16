@@ -1602,7 +1602,7 @@ BOOLEAN iiCheckRing(int i)
   return FALSE;
 }
 
-/// the smallest monomial not in R/I
+/// the largest monomial in R/I
 poly    iiHighCorner(ideal I, int ak)
 {
   int i;
@@ -1614,7 +1614,7 @@ poly    iiHighCorner(ideal I, int ak)
     if (po!=NULL)
     {
       pGetCoeff(po)=nInit(1);
-      for (i=rVar(currRing)-1; i>0; i--)
+      for (i=rVar(currRing); i>0; i--)
       {
         int e;
         if ((e=pGetExp(po, i)) > 0) pSetExp(po,i,e-1);
