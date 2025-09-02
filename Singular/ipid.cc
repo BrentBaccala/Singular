@@ -455,7 +455,7 @@ void killhdl2(idhdl h, idhdl * ih, ring r)
     || ((currRing!=NULL)&&((*ih)==currRing->idroot)))
       Warn("kill global `%s` at line >>%s<<\n",IDID(h),my_yylinebuf);
   }
-  if (h->attribute!=NULL)
+  if ((IDTYP(h)!=PROC_CMD) && (h->attribute!=NULL))
   {
     if ((IDTYP(h)==RING_CMD)&&(IDRING(h)!=r))
        h->attribute->killAll(IDRING(h));
@@ -761,16 +761,13 @@ BOOLEAN piKill(procinfov pi)
         }
         p=p->next;
       }
-    }
-    if (pi->libname != NULL) // OB: ????
-      omFreeBinAddr((ADDRESS)pi->libname);
-    if (pi->procname != NULL) // OB: ????
-      omFreeBinAddr((ADDRESS)pi->procname);
-
-    if( pi->language == LANG_SINGULAR)
-    {
       if (pi->data.s.body != NULL) // OB: ????
         omFree((ADDRESS)pi->data.s.body);
+      if (pi->libname != NULL) // OB: ????
+        omFreeBinAddr((ADDRESS)pi->libname);
+      if (pi->procname != NULL) // OB: ????
+        omFreeBinAddr((ADDRESS)pi->procname);
+
     }
     if( pi->language == LANG_C)
     {
