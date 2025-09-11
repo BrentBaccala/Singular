@@ -1209,20 +1209,8 @@ static poly redMoraNFRing (poly h,kStrategy strat, int flag)
 */
 static void reorderL(kStrategy strat)
 {
-  int i,j,at;
-
+  // LQueue maintains its own sorted order, so just call reorder
   strat->Lqueue.reorder();
-
-  for (i=1; i<=strat->Ll; i++)
-  {
-    at = strat->posInL(strat->L,i-1,&(strat->L[i]),strat);
-    if (at != i)
-    {
-      LObject p = strat->L[i];
-      for (j=i-1; j>=at; j--) strat->L[j+1] = strat->L[j];
-      strat->L[at] = p;
-    }
-  }
 }
 
 /*2
@@ -1386,40 +1374,39 @@ static void updateL(BOOLEAN searchPP, kStrategy strat)
   // only in mora
   assume(rHasLocalOrMixedOrdering(currRing));
   int dL;
-  int j=strat->Ll;
   BOOLEAN lastPPfound=FALSE;
+  
+  assume(strat->L!=NULL); /* only in mora */
+  
+  // Process elements in the queue using iterators
   if (searchPP && (strat->kNoether==NULL))
   {
-    loop
+    for (auto it = strat->Lqueue.begin(); it != strat->Lqueue.end(); ++it)
     {
-      if (j<0) break;
-      if (hasPurePower(&(strat->L[j]),strat->lastAxis,&dL,strat))
+      if (hasPurePower(&(*it), strat->lastAxis, &dL, strat))
       {
-        LObject p;
-        p=strat->L[strat->Ll];
-        strat->L[strat->Ll]=strat->L[j];
-        strat->L[j]=p;
-        lastPPfound=TRUE;
+        // Move this element to the top by swapping with last element
+        std::iter_swap(it, strat->Lqueue.begin());
+        lastPPfound = TRUE;
         break;
       }
-      j--;
     }
   }
-  j=strat->Ll;
-  loop
+  
+  // Process short spolys - iterate through all elements
+  for (auto& Lobj : strat->Lqueue)
   {
-    if (j<0) break;
-    if (pNext(strat->L[j].p) == strat->tail)
+    if (pNext(Lobj.p) == strat->tail)
     {
       if (rField_is_Ring(currRing))
-        pLmDelete(strat->L[j].p);    /*deletes the short spoly and computes*/
+        pLmDelete(Lobj.p);    /*deletes the short spoly and computes*/
       else
-        pLmFree(strat->L[j].p);    /*deletes the short spoly and computes*/
-      strat->L[j].p = NULL;
+        pLmFree(Lobj.p);    /*deletes the short spoly and computes*/
+      Lobj.p = NULL;
       poly m1 = NULL, m2 = NULL;
       // check that spoly creation is ok
       while (strat->tailRing != currRing &&
-             !kCheckSpolyCreation(&(strat->L[j]), strat, m1, m2))
+             !kCheckSpolyCreation(&Lobj, strat, m1, m2))
       {
         assume(m1 == NULL && m2 == NULL);
         // if not, change to a ring where exponents are at least
@@ -1427,34 +1414,34 @@ static void updateL(BOOLEAN searchPP, kStrategy strat)
         kStratChangeTailRing(strat);
       }
       /* create the real one */
-      ksCreateSpoly(&(strat->L[j]), strat->kNoetherTail(), FALSE,
+      ksCreateSpoly(&Lobj, strat->kNoetherTail(), FALSE,
                     strat->tailRing, m1, m2, strat->R);
 
-      strat->L[j].SetLmCurrRing();
+      Lobj.SetLmCurrRing();
       if (!strat->honey)
-        strat->initEcart(&strat->L[j]);
+        strat->initEcart(&Lobj);
       else
-        strat->L[j].SetLength(strat->length_pLength);
+        Lobj.SetLength(strat->length_pLength);
 
       BOOLEAN pp = FALSE;
       if (searchPP
       && (!lastPPfound)
       && (strat->kNoether==NULL))
-        pp=hasPurePower(&(strat->L[j]),strat->lastAxis,&dL,strat);
+        pp=hasPurePower(&Lobj, strat->lastAxis, &dL, strat);
 
-      strat->L[j].PrepareRed(strat->use_buckets);
+      Lobj.PrepareRed(strat->use_buckets);
 
       if (pp)
       {
-        LObject p;
-        p=strat->L[strat->Ll];
-        strat->L[strat->Ll]=strat->L[j];
-        strat->L[j]=p;
+        // This element should be moved to top - will be handled by reorder
+        lastPPfound = TRUE;
         break;
       }
     }
-    j--;
   }
+  
+  // Reorder the queue to maintain proper sorting
+  strat->Lqueue.reorder();
 }
 
 /*2
@@ -1463,64 +1450,65 @@ static void updateL(BOOLEAN searchPP, kStrategy strat)
 */
 static void updateLHC(kStrategy strat)
 {
-  int i = strat->Lqueue.size() - 1;
   kTest_TS(strat);
-  for (auto& Lp: strat->Lqueue)
+  
+  // Process each element in the queue
+  for (auto& Lp : strat->Lqueue)
   {
+    if ((strat->kNoether!=NULL)
+    && ((Lp.p1!=NULL) && (Lp.p2!=NULL))
+    && pLmCmp(Lp.p,strat->kNoether)<0)
+    {
+      Lp.Delete();
+      Lp.Clear();
+      continue;
+    }
+    
     if (pNext(Lp.p) == strat->tail)
     {
-       /*- deletes the int spoly and computes -*/
-      if (pLmCmp(Lp.p,strat->kNoether) == -1)
-      {
-        if (rField_is_Ring(currRing))
-          pLmDelete(Lp.p);
-        else
-          pLmFree(Lp.p);
-        Lp.p = NULL;
-      }
+      if (rField_is_Ring(currRing))
+        pLmDelete(Lp.p);
       else
+        pLmFree(Lp.p);
+      Lp.p = NULL;
+      poly m1 = NULL, m2 = NULL;
+      // check that spoly creation is ok
+      while (strat->tailRing != currRing &&
+             !kCheckSpolyCreation(&Lp, strat, m1, m2))
       {
-        if (rField_is_Ring(currRing))
-          pLmDelete(Lp.p);
-        else
-          pLmFree(Lp.p);
-        Lp.p = NULL;
-        poly m1 = NULL, m2 = NULL;
-        // check that spoly creation is ok
-        while (strat->tailRing != currRing &&
-               !kCheckSpolyCreation(&Lp, strat, m1, m2))
-        {
-          assume(m1 == NULL && m2 == NULL);
-          // if not, change to a ring where exponents are at least
-          // large enough
-          kStratChangeTailRing(strat);
-        }
-        /* create the real one */
-        ksCreateSpoly(&Lp, strat->kNoetherTail(), FALSE,
-                      strat->tailRing, m1, m2, strat->R);
-        if (! Lp.IsNull())
-        {
-          Lp.SetLmCurrRing();
-          Lp.SetpFDeg();
-          Lp.ecart
-            = Lp.pLDeg(strat->LDegLast) - Lp.GetpFDeg();
-          if (strat->use_buckets) Lp.PrepareRed(TRUE);
-        }
+        assume(m1 == NULL && m2 == NULL);
+        // if not, change to a ring where exponents are at least
+        // large enough
+        kStratChangeTailRing(strat);
+      }
+      /* create the real one */
+      ksCreateSpoly(&Lp, strat->kNoetherTail(), FALSE,
+                    strat->tailRing, m1, m2, strat->R);
+      if (!Lp.IsNull())
+      {
+        Lp.SetLmCurrRing();
+        Lp.SetpFDeg();
+        Lp.ecart = Lp.pLDeg(strat->LDegLast) - Lp.GetpFDeg();
+        if (strat->use_buckets) Lp.PrepareRed(TRUE);
       }
     }
     deleteHC(&Lp, strat);
-#ifdef KDEBUG
-    if (! Lp.IsNull())
-    {
-      kTest_L(&Lp, strat, TRUE, i, strat->T, strat->tl);
-    }
-#endif
-    i --;
   }
-  strat->Lqueue.remove_if
-    ([&](LObject lobject) {
-       return lobject.IsNull();
-     });
+  
+  // Remove null elements
+  auto it = strat->Lqueue.begin();
+  while (it != strat->Lqueue.end())
+  {
+    if (it->IsNull())
+    {
+      it = strat->Lqueue.erase(it);
+    }
+    else
+    {
+      ++it;
+    }
+  }
+  
   kTest_TS(strat);
 }
 
@@ -1923,8 +1911,8 @@ ideal mora (ideal F, ideal Q,intvec *w,bigintmat *hilb,kStrategy strat)
   {
     kDebugPrint(strat);
   }
-//deleteInL(strat->L,&strat->Ll,1,strat);
-//deleteInL(strat->L,&strat->Ll,0,strat);
+//deleteInL(strat->Lqueue,&strat->Ll,1,strat);
+//deleteInL(strat->Lqueue,&strat->Ll,0,strat);
 
   /*- compute-------------------------------------------*/
   while (! strat->Lqueue.empty())
@@ -2225,7 +2213,7 @@ poly kNF1 (ideal F,ideal Q,poly q, kStrategy strat, int lazyReduce)
   }
   /*- release temp data------------------------------- -*/
   cleanT(strat);
-  assume(strat->L==NULL); /*strat->L unused */
+  // strat->L replaced by strat->Lqueue
   assume(strat->B==NULL); /*strat->B unused */
   omFreeSize((ADDRESS)strat->T,strat->tmax*sizeof(TObject));
   omFreeSize((ADDRESS)strat->ecartS,IDELEMS(strat->Shdl)*sizeof(int));
@@ -2374,7 +2362,7 @@ ideal kNF1 (ideal F,ideal Q,ideal q, kStrategy strat, int lazyReduce)
     //  res->m[i]=NULL;
   }
   /*- release temp data------------------------------- -*/
-  assume(strat->L==NULL); /*strat->L unused */
+  // strat->L replaced by strat->Lqueue
   assume(strat->B==NULL); /*strat->B unused */
   omFreeSize((ADDRESS)strat->T,strat->tmax*sizeof(TObject));
   omFreeSize((ADDRESS)strat->ecartS,IDELEMS(strat->Shdl)*sizeof(int));

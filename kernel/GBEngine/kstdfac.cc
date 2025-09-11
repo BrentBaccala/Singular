@@ -62,91 +62,14 @@ static void copyT (kStrategy o,kStrategy n)
 */
 static void copyL (kStrategy o,kStrategy n)
 {
-  int i,j;
-  poly  p;
-  LSet l=(LSet)omAlloc(o->Lmax*sizeof(LObject));
-
-  for (j=0; j<=o->Ll; j++)
-  {
-    l[j] = o->L[j];
-    // copy .p ----------------------------------------------
-    if (pNext(o->L[j].p)!=o->tail)
-      l[j].p=pCopy(o->L[j].p);
-    else
-    {
-      l[j].p=p_LmInit(o->L[j].p,currRing);
-      if (pGetCoeff(o->L[j].p)!=NULL) pSetCoeff0(l[j].p,nCopy(pGetCoeff(o->L[j].p)));
-      pNext(l[j].p)=n->tail;
-    }
-    // copy .lcm ----------------------------------------------
-    if (o->L[j].lcm!=NULL)
-      l[j].lcm=pLmInit(o->L[j].lcm);
-    else
-      l[j].lcm=NULL;
-    l[j].p1=NULL;
-    l[j].p2=NULL;
-    l[j].t_p = NULL;
-
-    // copy .p1 , i_r1----------------------------------------------
-    p = o->L[j].p1;
-    i = -1;
-    loop
-    {
-      if(p==NULL) break;
-      i++;
-      if(i>o->tl)
-      {
-        WarnS("poly p1 not found in T:");wrp(p);PrintLn();
-        l[j].p1=pCopy(p);
-        l[j].i_r1=-1;
-        break;
-      }
-      if (p == o->T[i].p)
-      {
-        l[j].p1=n->T[i].p;
-        l[j].i_r1=n->T[i].i_r;
-        break;
-      }
-    }
-
-    // copy .p2 , i_r2----------------------------------------------
-    p = o->L[j].p2;
-    i = -1;
-    loop
-    {
-      if(p==NULL) break;
-      i++;
-      if(i>o->tl)
-      {
-        WarnS("poly p2 not found in T:");wrp(p);PrintLn();
-        l[j].p2=pCopy(p);
-        l[j].i_r2=-1;
-        break;
-      }
-      if (p == o->T[i].p)
-      {
-        l[j].p2=n->T[i].p;
-        l[j].i_r2=n->T[i].i_r;
-        break;
-      }
-    }
-
-    // copy .ecart ---------------------------------------------
-    l[j].ecart=o->L[j].ecart;
-    // copy .length --------------------------------------------
-    l[j].length=o->L[j].length;
-    // copy .pLength -------------------------------------------
-    l[j].pLength=o->L[j].pLength;
-    // copy .sev -----------------------------------------------
-    l[j].sev=o->L[j].sev;
-    l[j].i_r = o->L[j].i_r;
-    //l[j].i_r1 = o->L[j].i_r1;
-    //l[j].i_r2 = o->L[j].i_r2;
-  }
-  n->L=l;
-
   n->Lqueue = o->Lqueue;
-  for (auto& Lp: n->Lqueue) {
+
+  // Update references in the copied LQueue to point to new T array
+  for (auto& Lp : n->Lqueue)
+  {
+    poly p;
+    int i;
+    
     // copy .p ----------------------------------------------
     if (pNext(Lp.p)!=o->tail)
       Lp.p=pCopy(Lp.p);
@@ -266,7 +189,7 @@ kStrategy kStratCopy(kStrategy o)
   s->mu=o->mu;
   s->tl=o->tl;
   s->tmax=o->tmax;
-  s->Ll=o->Ll;
+  // Ll removed - LQueue manages its own size
   s->Lmax=o->Lmax;
   s->Bl=-1;
   s->Bmax=setmaxL;

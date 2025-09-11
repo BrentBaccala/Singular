@@ -343,8 +343,18 @@ public:
   using std::vector<LObject>::size_type;
   template <typename F>
   void remove_if(F&& predicate) {
-    erase(std::remove_if(std::vector<LObject>::begin(), std::vector<LObject>::end(), predicate), std::vector<LObject>::end());
+    std::vector<LObject>::erase(std::remove_if(std::vector<LObject>::begin(), std::vector<LObject>::end(), predicate), std::vector<LObject>::end());
   }
+  
+  iterator erase(iterator it) {
+    // Convert reverse iterator to forward iterator for erase
+    auto forward_it = std::next(it).base();
+    auto result = std::vector<LObject>::erase(forward_it);
+    // Convert back to reverse iterator
+    return iterator(result);
+  }
+  
+  using std::vector<LObject>::erase;
 };
 
 class skStrategy
@@ -403,8 +413,6 @@ public:
   unsigned long* sevSig;
   unsigned long* sevT;
   TSet T;
-  LSet L;
-
   LQueue  Lqueue;
 
   LSet    B;
@@ -430,7 +438,7 @@ public:
   int sl,mu;
   int syzl,syzmax,syzidxmax;
   int tl,tmax;
-  int Ll,Lmax;
+  int Lmax;
   int Bl,Bmax;
   int ak,LazyDegree,LazyPass;
   int syzComp;
@@ -522,6 +530,8 @@ static inline LSet initL (int nr=setmaxL)
 { return (LSet)omAlloc(nr*sizeof(LObject)); }
 void deleteInL(LSet set, int *length, int j,kStrategy strat);
 void enterL (LSet *set,int *length, int *LSetmax, LObject p,int at);
+void enterLQueue(LQueue& queue, LObject p, kStrategy strat);
+void deleteInLQueue(LQueue& queue, LQueue::iterator it, kStrategy strat);
 void enterSBba (LObject &p,int atS,kStrategy strat, int atR = -1);
 void enterSBbaShift (LObject &p,int atS,kStrategy strat, int atR = -1);
 void enterSSba (LObject &p,int atS,kStrategy strat, int atR = -1);
@@ -569,6 +579,8 @@ int posInL11 (const LSet set, const int length,
 int posInL11Ring (const LSet set, const int length,
              LObject* L,const kStrategy strat);
 int posInLF5CRing (const LSet set, int start , const int length,
+             LObject* L,const kStrategy strat);
+int posInLF5CRing (const LQueue& queue, int start , const int length,
              LObject* L,const kStrategy strat);
 int posInL11Ringls (const LSet set, const int length,
              LObject* L,const kStrategy strat);
@@ -953,9 +965,10 @@ KINLINE void clearS (poly p, unsigned long p_sev, int* at, int* k,
 #ifdef HAVE_SHIFTBBA
 static inline int kFindInL1(const poly p, const kStrategy strat)
 {
-  for(int i=strat->Ll;i>=0;i--)
+  int i = 0;
+  for(auto it = strat->Lqueue.begin(); it != strat->Lqueue.end(); ++it, ++i)
   {
-    if (p==strat->L[i].p1) return i;
+    if (p == it->p1) return i;
   }
   return -1;
 }

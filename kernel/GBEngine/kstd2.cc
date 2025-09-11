@@ -3176,13 +3176,13 @@ ideal sba (ideal F0, ideal Q,intvec *w,bigintmat *hilb,kStrategy strat)
        //stops computation if
        // 24 IN test and the degree +ecart of L[strat->Ll] is bigger then
        //a predefined number Kstd1_deg
-      while ((strat->Ll >= 0)
+      while ((!strat->Lqueue.empty())
         && (strat->Lqueue.top().p1!=NULL) && (strat->Lqueue.top().p2!=NULL)
         && ((strat->honey && (strat->Lqueue.top().ecart+currRing->pFDeg(strat->Lqueue.top().p,currRing)>Kstd1_deg))
             || ((!strat->honey) && (currRing->pFDeg(strat->Lqueue.top().p,currRing)>Kstd1_deg)))
         )
-        deleteInL(strat->L,&strat->Ll,strat->Ll,strat);
-      if (strat->Ll<0) break;
+        strat->Lqueue.pop();
+      if (strat->Lqueue.empty()) break;
       else strat->noClearS=TRUE;
     }
     */
@@ -3813,7 +3813,7 @@ ideal sba (ideal F0, ideal Q,intvec *w,bigintmat *hilb,kStrategy strat)
     // 1 - adds just the unused ones, 0 - adds everything
     while (!strat->Lqueue.empty() && (strat->Lqueue.top().p1 != NULL || strat->Lqueue.top().p2 != NULL))
     {
-      //printf("\nDeleted k = %i, %p\n",k,strat->L[k].p);pWrite(strat->L[k].p);pWrite(strat->L[k].p1);pWrite(strat->L[k].p2);
+      //printf("\nDeleted element from queue\n");
       strat->Lqueue.pop();
     }
     #endif
@@ -4277,7 +4277,7 @@ void f5c (kStrategy strat, int& olddeg, int& minimcnt, int& hilbeledeg,
   // we cannot use strat->T anymore
   //cleanT(strat);
   //strat->tl = -1;
-  Ll_old    = strat->Ll;
+  Ll_old    = strat->Lqueue.size() - 1;
   while (strat->tl >= 0)
   {
     if(!strat->T[strat->tl].is_redundant)
@@ -4305,11 +4305,11 @@ void f5c (kStrategy strat, int& olddeg, int& minimcnt, int& hilbeledeg,
           }
           strat->initEcart(&h);
           if(rField_is_Ring(currRing))
-            pos = posInLF5CRing(strat->L, Ll_old+1,strat->Ll,&h,strat);
+            pos = posInLF5CRing(strat->Lqueue, Ll_old+1,strat->Lqueue.size()-1,&h,strat);
           else
-            pos = strat->Ll+1;
+            pos = strat->Lqueue.size();
           h.sev = pGetShortExpVector(h.p);
-          enterL(&strat->L,&strat->Ll,&strat->Lmax,h,pos);
+          enterLQueue(strat->Lqueue,h,strat);
         }
       }
     }
@@ -4324,7 +4324,7 @@ void f5c (kStrategy strat, int& olddeg, int& minimcnt, int& hilbeledeg,
   //enterpairs(pOne(),0,0,-1,strat,strat->tl);
   //strat->sl = -1;
   /* picks the last element from the lazyset L */
-  while (strat->Ll>Ll_old)
+  while ((int)strat->Lqueue.size()-1 > Ll_old)
   {
     strat->P = strat->Lqueue.top();
     strat->Lqueue.pop();

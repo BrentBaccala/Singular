@@ -680,25 +680,6 @@ void initPairtest(kStrategy strat)
   strat->pairtest = (BOOLEAN *)omAlloc0((strat->sl+2)*sizeof(BOOLEAN));
 }
 
-/*2
-*test whether (p1,p2) or (p2,p1) is in L up position length
-*it returns TRUE if yes and the position k
-*/
-BOOLEAN isInPairsetL(int length,poly p1,poly p2,int*  k,kStrategy strat)
-{
-  LObject *p=&(strat->L[length]);
-
-  *k = length;
-  loop
-  {
-    if ((*k) < 0) return FALSE;
-    if (((p1 == (*p).p1) && (p2 == (*p).p2))
-    ||  ((p1 == (*p).p2) && (p2 == (*p).p1)))
-      return TRUE;
-    (*k)--;
-    p--;
-  }
-}
 
 BOOLEAN isPairsetInL(LQueue::iterator &it,poly p1,poly p2,kStrategy strat)
 {
@@ -1041,7 +1022,7 @@ BOOLEAN kTest (kStrategy strat)
       //if (strat->use_buckets && Lp.Next() != strat->tail &&
       //    Lp.Next() != NULL && Lp.p1 != NULL)
       //{
-      //  assume(strat->L[i].bucket != NULL);
+      //  assume(strat->Lqueue[i].bucket != NULL);
       //}
   }
 
@@ -1100,7 +1081,7 @@ BOOLEAN kTest_TS(kStrategy strat)
                             i, strat->S_2_R[i], j, strat->T[j].i_r);
     }
   }
-  // test strat->L[i].i_r1
+  // test strat->Lqueue[i].i_r1
   i=0;
   #ifdef HAVE_SHIFTBBA
   if (!rIsLPRing(currRing)) // in the Letterplace ring we currently don't set/use i_r1 and i_r2
@@ -1290,6 +1271,66 @@ void enterL (LSet *set,int *length, int *LSetmax, LObject p,int at)
   else at = 0;
   (*set)[at] = p;
   (*length)++;
+}
+
+/*2
+*enters p into LQueue using proper insertion method
+*/
+void enterLQueue(LQueue& queue, LObject p, kStrategy strat)
+{
+  assume(p.FDeg == p.pFDeg());
+  
+  if (strat->sbaOrder == 1)
+    queue.pushSba(p);
+  else
+    queue.push(p);
+}
+
+/*2
+*deletes element at iterator position from LQueue
+*/
+void deleteInLQueue(LQueue& queue, LQueue::iterator it, kStrategy strat)
+{
+  if (it->lcm != NULL)
+  {
+    kDeleteLcm(&(*it));
+  }
+  if (it->sig != NULL)
+  {
+    if (pGetCoeff(it->sig) != NULL)
+      pLmDelete(it->sig);
+    else
+      pLmFree(it->sig);
+  }
+  if (it->p != NULL)
+  {
+    if (pNext(it->p) == strat->tail)
+    {
+      if (pGetCoeff(it->p) != NULL)
+        pLmDelete(it->p);
+      else
+        pLmFree(it->p);
+    }
+    else
+    {
+      // search p in T, if it is there, do not delete it
+      if (rHasGlobalOrdering(currRing) || (kFindInT(it->p, strat) < 0))
+      {
+        it->Delete();
+      }
+    }
+  }
+  #ifdef HAVE_SHIFTBBA
+  if (is_shifted_p1(strat->P.p1,strat))
+  {
+    // clean up strat->P.p1: may be shifted
+    pLmDelete(strat->P.p1);
+    strat->P.p1=NULL;
+  }
+  #endif
+  
+  // Remove the element from the queue
+  queue.erase(it);
 }
 
 /*2
@@ -3636,7 +3677,7 @@ void initenterpairs (poly h,int k,int ecart,int isFromQ,kStrategy strat, int atR
           {
             new_pair=TRUE;
             strat->enterOnePair(j,h,ecart,isFromQ,strat, atR);
-          //Print("j:%d, Ll:%d\n",j,strat->Ll);
+          //Print("j:%d, Lqueue.size():%d\n",j,(int)strat->Lqueue.size());
           }
         }
       }
@@ -3646,7 +3687,7 @@ void initenterpairs (poly h,int k,int ecart,int isFromQ,kStrategy strat, int atR
         for (j=0; j<=k; j++)
         {
           strat->enterOnePair(j,h,ecart,isFromQ,strat, atR);
-          //Print("j:%d, Ll:%d\n",j,strat->Ll);
+          //Print("j:%d, Lqueue.size():%d\n",j,(int)strat->Lqueue.size());
         }
       }
     }
@@ -3701,7 +3742,7 @@ void initenterpairsSig (poly h,poly hSig,int hFrom,int k,int ecart,int isFromQ,k
           {
             new_pair=TRUE;
             enterOnePairSig(j,h,hSig,hFrom,ecart,isFromQ,strat, atR);
-          //Print("j:%d, Ll:%d\n",j,strat->Ll);
+          //Print("j:%d, Lqueue.size():%d\n",j,(int)strat->Lqueue.size());
           }
         }
       }
@@ -3711,7 +3752,7 @@ void initenterpairsSig (poly h,poly hSig,int hFrom,int k,int ecart,int isFromQ,k
         for (j=0; j<=k; j++)
         {
           enterOnePairSig(j,h,hSig,hFrom,ecart,isFromQ,strat, atR);
-          //Print("j:%d, Ll:%d\n",j,strat->Ll);
+          //Print("j:%d, Lqueue.size():%d\n",j,(int)strat->Lqueue.size());
         }
       }
     }
@@ -3759,7 +3800,7 @@ void initenterpairsSigRing (poly h,poly hSig,int hFrom,int k,int ecart,int isFro
           if (!strat->fromQ[j])
           {
             enterOnePairSigRing(j,h,hSig,hFrom,ecart,isFromQ,strat, atR);
-          //Print("j:%d, Ll:%d\n",j,strat->Ll);
+          //Print("j:%d, Lqueue.size():%d\n",j,(int)strat->Lqueue.size());
           }
         }
       }
@@ -3768,7 +3809,7 @@ void initenterpairsSigRing (poly h,poly hSig,int hFrom,int k,int ecart,int isFro
         for (j=0; j<=k && !strat->sigdrop; j++)
         {
           enterOnePairSigRing(j,h,hSig,hFrom,ecart,isFromQ,strat, atR);
-          //Print("j:%d, Ll:%d\n",j,strat->Ll);
+          //Print("j:%d, Lqueue.size():%d\n",j,(int)strat->Lqueue.size());
         }
       }
     }
@@ -4102,8 +4143,8 @@ void enterExtendedSpolySig(poly h,poly hSig,kStrategy strat)
       }
       #else
       Lp.sig = pOne();
-      if(strat->Ll >= 0)
-        p_SetComp(Lp.sig,pGetComp(strat->L[0].sig)+1,currRing);
+      if(!strat->Lqueue.empty())
+        p_SetComp(Lp.sig,pGetComp(strat->Lqueue.begin()->sig)+1,currRing);
       else
         p_SetComp(Lp.sig,pGetComp(hSig)+1,currRing);
       #endif
@@ -5489,7 +5530,7 @@ int posInSyz (const kStrategy strat, poly sig)
 int posInLF5C (const LSet /*set*/, const int /*length*/,
                LObject* /*p*/,const kStrategy strat)
 {
-  return strat->Ll+1;
+  return strat->Lqueue.size();
 }
 
 /*2
@@ -5595,17 +5636,28 @@ int posInLF5CRing (const LSet set, int start,const int length,
       op = set[an].GetpFDeg();
       if ((op > o)
       || ((op == o) && (pLtCmpOrdSgnDiffM(set[an].p,p->p))))
-        return en;
-      return an;
+        return an;
+      return en;
     }
     i=(an+en) / 2;
     op = set[i].GetpFDeg();
     if ((op > o)
     || ((op == o) && (pLtCmpOrdSgnDiffM(set[i].p,p->p))))
-      an=i;
-    else
       en=i;
+    else
+      an=i;
   }
+}
+
+/*2
+* LQueue version of posInLF5CRing
+*/
+int posInLF5CRing (const LQueue& queue, int start, const int length,
+              LObject* p, const kStrategy)
+{
+  // For LQueue, we simply return the size to append at the end
+  // since LQueue maintains its own sorted order
+  return queue.size();
 }
 
 int posInL11Ringls (const LSet set, const int length,
@@ -9447,8 +9499,8 @@ void initBuchMora (ideal F,ideal Q,kStrategy strat)
   strat->sl = -1;
   /*- set L -*/
   strat->Lmax = ((IDELEMS(F)+setmaxLinc-1)/setmaxLinc)*setmaxLinc;
-  strat->Ll = -1;
-  strat->L = initL(strat->Lmax);
+  // Ll removed - LQueue manages its own size
+  // strat->L = initL(strat->Lmax); // L removed, using LQueue
   /*- set B -*/
   strat->Bmax = setmaxL;
   strat->Bl = -1;
@@ -9531,7 +9583,7 @@ void exitBuchMora (kStrategy strat)
   omFreeSize((ADDRESS)strat->sevS,IDELEMS(strat->Shdl)*sizeof(unsigned long));
   omFreeSize(strat->S_2_R,IDELEMS(strat->Shdl)*sizeof(int));
   /*- set L: should be empty -*/
-  omFreeSize(strat->L,(strat->Lmax)*sizeof(LObject));
+  // omFreeSize(strat->L,(strat->Lmax)*sizeof(LObject)); // L removed, using LQueue
   /*- set B: should be empty -*/
   omFreeSize(strat->B,(strat->Bmax)*sizeof(LObject));
   pLmFree(&strat->tail);
@@ -9662,8 +9714,8 @@ void initSbaBuchMora (ideal F,ideal Q,kStrategy strat)
   strat->syzl = -1;
   /*- set L -*/
   strat->Lmax = ((IDELEMS(F)+setmaxLinc-1)/setmaxLinc)*setmaxLinc;
-  strat->Ll = -1;
-  strat->L = initL(strat->Lmax);
+  // Ll removed - LQueue manages its own size
+  // strat->L = initL(strat->Lmax); // L removed, using LQueue
   /*- set B -*/
   strat->Bmax = setmaxL;
   strat->Bl = -1;
@@ -9747,7 +9799,7 @@ void exitSba (kStrategy strat)
   }
   omFreeSize(strat->S_2_R,IDELEMS(strat->Shdl)*sizeof(int));
   /*- set L: should be empty -*/
-  omFreeSize(strat->L,(strat->Lmax)*sizeof(LObject));
+  // omFreeSize(strat->L,(strat->Lmax)*sizeof(LObject)); // L removed, using LQueue
   /*- set B: should be empty -*/
   omFreeSize(strat->B,(strat->Bmax)*sizeof(LObject));
   /*- set sig: no need for the signatures anymore -*/
