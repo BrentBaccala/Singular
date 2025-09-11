@@ -1375,10 +1375,7 @@ static void updateL(BOOLEAN searchPP, kStrategy strat)
   assume(rHasLocalOrMixedOrdering(currRing));
   int dL;
   BOOLEAN lastPPfound=FALSE;
-  
-  assume(strat->L!=NULL); /* only in mora */
-  
-  // Process elements in the queue using iterators
+
   if (searchPP && (strat->kNoether==NULL))
   {
     for (auto it = strat->Lqueue.begin(); it != strat->Lqueue.end(); ++it)
@@ -1392,21 +1389,20 @@ static void updateL(BOOLEAN searchPP, kStrategy strat)
       }
     }
   }
-  
-  // Process short spolys - iterate through all elements
-  for (auto& Lobj : strat->Lqueue)
+
+  for (auto it = strat->Lqueue.begin(); it != strat->Lqueue.end(); ++it)
   {
-    if (pNext(Lobj.p) == strat->tail)
+    if (pNext(it->p) == strat->tail)
     {
       if (rField_is_Ring(currRing))
-        pLmDelete(Lobj.p);    /*deletes the short spoly and computes*/
+        pLmDelete(it->p);    /*deletes the short spoly and computes*/
       else
-        pLmFree(Lobj.p);    /*deletes the short spoly and computes*/
-      Lobj.p = NULL;
+        pLmFree(it->p);    /*deletes the short spoly and computes*/
+      it->p = NULL;
       poly m1 = NULL, m2 = NULL;
       // check that spoly creation is ok
       while (strat->tailRing != currRing &&
-             !kCheckSpolyCreation(&Lobj, strat, m1, m2))
+             !kCheckSpolyCreation(&(*it), strat, m1, m2))
       {
         assume(m1 == NULL && m2 == NULL);
         // if not, change to a ring where exponents are at least
@@ -1414,34 +1410,30 @@ static void updateL(BOOLEAN searchPP, kStrategy strat)
         kStratChangeTailRing(strat);
       }
       /* create the real one */
-      ksCreateSpoly(&Lobj, strat->kNoetherTail(), FALSE,
+      ksCreateSpoly(&(*it), strat->kNoetherTail(), FALSE,
                     strat->tailRing, m1, m2, strat->R);
 
-      Lobj.SetLmCurrRing();
+      it->SetLmCurrRing();
       if (!strat->honey)
-        strat->initEcart(&Lobj);
+        strat->initEcart(&(*it));
       else
-        Lobj.SetLength(strat->length_pLength);
+        it->SetLength(strat->length_pLength);
 
       BOOLEAN pp = FALSE;
       if (searchPP
       && (!lastPPfound)
       && (strat->kNoether==NULL))
-        pp=hasPurePower(&Lobj, strat->lastAxis, &dL, strat);
+        pp=hasPurePower(&(*it), strat->lastAxis, &dL, strat);
 
-      Lobj.PrepareRed(strat->use_buckets);
+      it->PrepareRed(strat->use_buckets);
 
       if (pp)
       {
-        // This element should be moved to top - will be handled by reorder
-        lastPPfound = TRUE;
+        std::iter_swap(it, strat->Lqueue.begin());
         break;
       }
     }
   }
-  
-  // Reorder the queue to maintain proper sorting
-  strat->Lqueue.reorder();
 }
 
 /*2
@@ -1450,65 +1442,64 @@ static void updateL(BOOLEAN searchPP, kStrategy strat)
 */
 static void updateLHC(kStrategy strat)
 {
+  int i = strat->Lqueue.size() - 1;
   kTest_TS(strat);
-  
-  // Process each element in the queue
-  for (auto& Lp : strat->Lqueue)
+  for (auto& Lp: strat->Lqueue)
   {
-    if ((strat->kNoether!=NULL)
-    && ((Lp.p1!=NULL) && (Lp.p2!=NULL))
-    && pLmCmp(Lp.p,strat->kNoether)<0)
-    {
-      Lp.Delete();
-      Lp.Clear();
-      continue;
-    }
-    
     if (pNext(Lp.p) == strat->tail)
     {
-      if (rField_is_Ring(currRing))
-        pLmDelete(Lp.p);
-      else
-        pLmFree(Lp.p);
-      Lp.p = NULL;
-      poly m1 = NULL, m2 = NULL;
-      // check that spoly creation is ok
-      while (strat->tailRing != currRing &&
-             !kCheckSpolyCreation(&Lp, strat, m1, m2))
+       /*- deletes the int spoly and computes -*/
+      if (pLmCmp(Lp.p,strat->kNoether) == -1)
       {
-        assume(m1 == NULL && m2 == NULL);
-        // if not, change to a ring where exponents are at least
-        // large enough
-        kStratChangeTailRing(strat);
+        if (rField_is_Ring(currRing))
+          pLmDelete(Lp.p);
+        else
+          pLmFree(Lp.p);
+        Lp.p = NULL;
       }
-      /* create the real one */
-      ksCreateSpoly(&Lp, strat->kNoetherTail(), FALSE,
-                    strat->tailRing, m1, m2, strat->R);
-      if (!Lp.IsNull())
+      else
       {
-        Lp.SetLmCurrRing();
-        Lp.SetpFDeg();
-        Lp.ecart = Lp.pLDeg(strat->LDegLast) - Lp.GetpFDeg();
-        if (strat->use_buckets) Lp.PrepareRed(TRUE);
+        if (rField_is_Ring(currRing))
+          pLmDelete(Lp.p);
+        else
+          pLmFree(Lp.p);
+        Lp.p = NULL;
+        poly m1 = NULL, m2 = NULL;
+        // check that spoly creation is ok
+        while (strat->tailRing != currRing &&
+               !kCheckSpolyCreation(&Lp, strat, m1, m2))
+        {
+          assume(m1 == NULL && m2 == NULL);
+          // if not, change to a ring where exponents are at least
+          // large enough
+          kStratChangeTailRing(strat);
+        }
+        /* create the real one */
+        ksCreateSpoly(&Lp, strat->kNoetherTail(), FALSE,
+                      strat->tailRing, m1, m2, strat->R);
+        if (! Lp.IsNull())
+        {
+          Lp.SetLmCurrRing();
+          Lp.SetpFDeg();
+          Lp.ecart
+            = Lp.pLDeg(strat->LDegLast) - Lp.GetpFDeg();
+          if (strat->use_buckets) Lp.PrepareRed(TRUE);
+        }
       }
     }
     deleteHC(&Lp, strat);
-  }
-  
-  // Remove null elements
-  auto it = strat->Lqueue.begin();
-  while (it != strat->Lqueue.end())
-  {
-    if (it->IsNull())
+#ifdef KDEBUG
+    if (! Lp.IsNull())
     {
-      it = strat->Lqueue.erase(it);
+      kTest_L(&Lp, strat, TRUE, i, strat->T, strat->tl);
     }
-    else
-    {
-      ++it;
-    }
+#endif
+    i --;
   }
-  
+  strat->Lqueue.remove_if
+    ([&](LObject lobject) {
+       return lobject.IsNull();
+     });
   kTest_TS(strat);
 }
 
