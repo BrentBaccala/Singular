@@ -200,36 +200,37 @@ void id_ShallowDelete (ideal *h, ring r)
 /// gives an ideal/module the minimal possible size
 void idSkipZeroes (ideal ide)
 {
-  assume (ide != NULL);
-
-  int k;
-  int j = -1;
-  int idelems=IDELEMS(ide);
-  BOOLEAN change=FALSE;
-
-  for (k=0; k<idelems; k++)
+  if(ide!=NULL)
   {
-    if (ide->m[k] != NULL)
+    int k;
+    int j = -1;
+    int idelems=IDELEMS(ide);
+    BOOLEAN change=FALSE;
+  
+    for (k=0; k<idelems; k++)
     {
-      j++;
-      if (change)
+      if (ide->m[k] != NULL)
       {
-        ide->m[j] = ide->m[k];
-        ide->m[k] = NULL;
+        j++;
+        if (change)
+        {
+          ide->m[j] = ide->m[k];
+          ide->m[k] = NULL;
+        }
+      }
+      else
+      {
+        change=TRUE;
       }
     }
-    else
+    if (change)
     {
-      change=TRUE;
+      if (j == -1)
+        j = 0;
+      j++;
+      pEnlargeSet(&(ide->m),idelems,j-idelems);
+      IDELEMS(ide) = j;
     }
-  }
-  if (change)
-  {
-    if (j == -1)
-      j = 0;
-    j++;
-    pEnlargeSet(&(ide->m),idelems,j-idelems);
-    IDELEMS(ide) = j;
   }
 }
 
