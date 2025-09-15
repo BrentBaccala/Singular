@@ -34,6 +34,8 @@ void t_destroyTable(stablerec* t)
         omFreeSize(pp,sizeof(stelem));
       }
     }
+    omFreeSize(t->t,t->max*sizeof(telem));
+    omFreeSize(t,sizeof(stablerec));
   }
 }
 
@@ -46,20 +48,23 @@ stablerec* copyTable(stablerec* t)
 char* stringTable(stablerec* t)
 {
   StringSetS("table:\n");
+  char *s;
   for(int i=t->max-1;i>=0;i--)
   {
     telem p=t->t[i];
     while(p!=NULL)
     {
         StringAppendS(p->key);
-        StringAppendS("->");
-        StringAppendS(p->val.String());
+        StringAppendS(" -> ");
+        s=p->val.String();
+        StringAppendS(s);
+        omFree(s);
         StringAppendS("\n");
         telem pp=p;
         p=p->next;
     }
-    return StringEndS();
   }
+  return StringEndS();
 }
 
 /// find the entry to key s
@@ -84,16 +89,37 @@ leftv t_findTabelVal(stablerec* t,const char *s)
   return &(p->val);
 }
 
-/// add a new entry (key s, data v) to table t
-void t_addTable(stablerec* t,const char *s, leftv v)
+/// add a new entry (key s, data v) to table t, eats s, copies v
+void t_addTable(stablerec* t,char *s, leftv v)
 {
   uint32_t h=hashlittle(s,strlen(s));
-  telem p=(telem)omAlloc(sizeof(stelem));
+  telem p=(telem)omAlloc(sizeof(*p));
   p->next=NULL;
-  p->key=omStrDup(s);
-  p->val.Copy(v);
+  p->key=s;
+  p->val.Init();
+  p->val.rtyp=v->Typ();
+  p->val.data=v->CopyD();
   p->hash=h;
   h=h%t->max;
   p->next=t->t[h];
   t->t[h]=p;
+}
+//-------------------------------------------------------
+void htable_Print(stablerec *d)
+{
+  stablerec* lt=(stablerec*)d;
+  char* s=stringTable(lt);
+  PrintS(s);
+  omFree(s);
+  int cnt=0;int cnt2=0;
+  for(int i=0;i<lt->max;i++)
+  {
+    if (lt->t[i]!=NULL)
+    {
+      cnt++;
+      telem p=lt->t[i];
+      while(p!=NULL) { cnt2++;p=p->next;}
+    }
+  }
+  Print("%d colums, %d entries, size:%d",cnt,cnt2,lt->max);
 }
