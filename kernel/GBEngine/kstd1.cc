@@ -2563,6 +2563,7 @@ ideal kStd_internal(ideal F, ideal Q, tHomog h,intvec ** w, bigintmat *hilb,
       }
     }
   }
+  if(errorreported) return NULL;
 #ifdef KDEBUG
   idTest(r);
 #endif

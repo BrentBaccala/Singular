@@ -837,9 +837,8 @@ static number naInvers(number a, const coeffs cf)
 // singclap_extgcd!
   const BOOLEAN ret = singclap_extgcd ((poly)a, naMinpoly, theGcd, aFactor, mFactor, naRing);
 
-  assume( !ret );
-
-//  if( ret ) theGcd = p_ExtGcd((poly)a, aFactor, naMinpoly, mFactor, naRing);
+  if (ret) return NULL;
+  // if( ret ) theGcd = p_ExtGcd((poly)a, aFactor, naMinpoly, mFactor, naRing);
 
   naTest((number)theGcd); naTest((number)aFactor); naTest((number)mFactor);
   p_Delete(&mFactor, naRing);

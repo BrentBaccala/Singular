@@ -3183,6 +3183,7 @@ void p_ProjectiveUnique(poly ph, const ring r)
   {
     h = p_GetCoeff(p, C);
     number hInv = n_Invers(h, C);
+    if(errorreported) return;
     pIter(p);
     while (p!=NULL)
     {
