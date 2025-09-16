@@ -75,8 +75,9 @@ static void copyL (kStrategy o,kStrategy n)
       Lp.p=pCopy(Lp.p);
     else
     {
+      p = Lp.p;
       Lp.p=p_LmInit(Lp.p,currRing);
-      if (pGetCoeff(Lp.p)!=NULL) pSetCoeff0(Lp.p,nCopy(pGetCoeff(Lp.p)));
+      if (pGetCoeff(p)!=NULL) pSetCoeff0(Lp.p,nCopy(pGetCoeff(p)));
       pNext(Lp.p)=n->tail;
     }
     // copy .lcm ----------------------------------------------
