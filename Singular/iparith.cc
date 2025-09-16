@@ -5455,7 +5455,9 @@ static BOOLEAN jjTYPEOF(leftv res, leftv v)
     case PACKAGE_CMD:
     case LINK_CMD:
     case RESOLUTION_CMD:
+    #ifdef HTABLE
     case HTABLE_CMD:
+    #endif
          res->data=omStrDup(Tok2Cmdname(t)); break;
     case DEF_CMD:
     case NONE:           res->data=omStrDup("none"); break;
