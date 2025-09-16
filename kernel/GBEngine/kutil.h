@@ -963,14 +963,13 @@ KINLINE void clearS (poly p, unsigned long p_sev, int* at, int* k,
 #include "kernel/GBEngine/shiftgb.h"
 
 #ifdef HAVE_SHIFTBBA
-static inline int kFindInL1(const poly p, const kStrategy strat)
+static inline BOOLEAN kExistsInL1(const poly p, const kStrategy strat)
 {
-  int i = 0;
-  for(auto it = strat->Lqueue.begin(); it != strat->Lqueue.end(); ++it, ++i)
+  for(auto it = strat->Lqueue.begin(); it != strat->Lqueue.end(); ++it)
   {
-    if (p == it->p1) return i;
+    if (p == it->p1) return TRUE;
   }
-  return -1;
+  return FALSE;
 }
 
 void enterTShift(LObject p, kStrategy strat, int atT = -1);

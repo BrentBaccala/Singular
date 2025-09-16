@@ -1179,7 +1179,7 @@ static BOOLEAN is_shifted_p1(const poly p, const kStrategy strat)
       if (pGetExp(p,i)!=0) { is_shifted=FALSE; break;}
     }
     if (is_shifted
-    && (kFindInL1(p, strat)<0)
+    && (! kExistsInL1(p, strat))
     && (kFindInT(p, strat->T, strat->tl) < 0)
     )
     {
