@@ -71,6 +71,7 @@ long farey_cnt=0L;
 #include "Singular/linearAlgebra_ip.h"
 
 #include "Singular/number2.h"
+#include "Singular/htable.h"
 
 #include "Singular/fglm.h"
 
@@ -2601,7 +2602,7 @@ static BOOLEAN jjLIFT(leftv res, leftv u, leftv v)
 #endif
   ideal m = idLift((ideal)u->Data(),(ideal)v->Data(),NULL,FALSE,
                    hasFlag(u,FLAG_STD));
-  if (m==NULL) return TRUE;
+  if ((m==NULL)||(errorreported)) return TRUE;
   res->data = (char *)id_Module2formatedMatrix(m,ul,vl,currRing);
   return FALSE;
 }
@@ -3485,6 +3486,7 @@ static BOOLEAN jjSTD_HILB(leftv res, leftv u, leftv v)
   }
   bigintmat *vv=(bigintmat*)v->Data();
   result=kStd2(u_id,currRing->qideal,hom,&w,vv);
+  if (errorreported) return TRUE;
   idSkipZeroes(result);
   res->data = (char *)result;
   setFlag(res,FLAG_STD);
@@ -3499,6 +3501,10 @@ static BOOLEAN jjSTD_1(leftv res, leftv u, leftv v)
   int ii1=idElem(i1); /* size of i1 */
   ideal i0;
   int r=v->Typ();
+  BITSET save1;
+  SI_SAVE_OPT1(save1);
+  intvec *w=(intvec *)atGet(u,"isHomog",INTVEC_CMD);
+  tHomog hom=testHomog;
   if ((/*v->Typ()*/r==POLY_CMD) ||(r==VECTOR_CMD))
   {
     poly p=(poly)v->Data();
@@ -3507,8 +3513,6 @@ static BOOLEAN jjSTD_1(leftv res, leftv u, leftv v)
     i1=idSimpleAdd(i1,i0); //
     i0->m[0]=NULL;
     idDelete(&i0);
-    intvec *w=(intvec *)atGet(u,"isHomog",INTVEC_CMD);
-    tHomog hom=testHomog;
 
     if (w!=NULL)
     {
@@ -3524,17 +3528,10 @@ static BOOLEAN jjSTD_1(leftv res, leftv u, leftv v)
         hom=isHomog;
       }
     }
-    BITSET save1;
-    SI_SAVE_OPT1(save1);
     si_opt_1|=Sy_bit(OPT_SB_1);
     /* ii1 appears to be the position of the first element of il that
        does not belong to the old SB ideal */
     result=kStd2(i1,currRing->qideal,hom,&w,(bigintmat*)NULL,0,ii1);
-    SI_RESTORE_OPT1(save1);
-    idDelete(&i1);
-    idSkipZeroes(result);
-    if (w!=NULL) atSet(res,omStrDup("isHomog"),w,INTVEC_CMD);
-    res->data = (char *)result;
   }
   else /*IDEAL/MODULE*/
   {
@@ -3542,8 +3539,6 @@ static BOOLEAN jjSTD_1(leftv res, leftv u, leftv v)
     i1=idSimpleAdd(i1,i0); //
     memset(i0->m,0,sizeof(poly)*IDELEMS(i0));
     idDelete(&i0);
-    intvec *w=(intvec *)atGet(u,"isHomog",INTVEC_CMD);
-    tHomog hom=testHomog;
 
     if (w!=NULL)
     {
@@ -3560,18 +3555,17 @@ static BOOLEAN jjSTD_1(leftv res, leftv u, leftv v)
         hom=isHomog;
       }
     }
-    BITSET save1;
-    SI_SAVE_OPT1(save1);
     si_opt_1|=Sy_bit(OPT_SB_1);
     /* ii1 appears to be the position of the first element of i1 that
      does not belong to the old SB ideal */
     result=kStd2(i1,currRing->qideal,hom,&w,(bigintmat*)NULL,0,ii1);
-    SI_RESTORE_OPT1(save1);
-    idDelete(&i1);
-    idSkipZeroes(result);
-    if (w!=NULL) atSet(res,omStrDup("isHomog"),w,INTVEC_CMD);
-    res->data = (char *)result;
   }
+  SI_RESTORE_OPT1(save1);
+  idDelete(&i1);
+  if (errorreported) return TRUE;
+  idSkipZeroes(result);
+  if (w!=NULL) atSet(res,omStrDup("isHomog"),w,INTVEC_CMD);
+  res->data = (char *)result;
   if(!TEST_OPT_DEGBOUND) setFlag(res,FLAG_STD);
   return FALSE;
 }
@@ -3638,6 +3632,15 @@ static BOOLEAN jjSYZ_2(leftv res, leftv u, leftv v)
   if (TEST_OPT_RETURN_SB) setFlag(res,FLAG_STD);
   return FALSE;
 }
+#ifdef HTABLE
+static BOOLEAN jjTABLE_GET(leftv res, leftv u, leftv v)
+{
+  stablerec* t=(stablerec*)u->Data();
+  leftv r=t_findTabelVal(t,(char*)v->Data());
+  if (r!=NULL) res->Copy(r);
+  return (r==NULL);
+}
+#endif
 static BOOLEAN jjTENSOR(leftv res, leftv u, leftv v)
 {
   ideal A=(ideal)u->Data();
@@ -5096,6 +5099,7 @@ static BOOLEAN jjSBA(leftv res, leftv v)
     }
   }
   result=kSba(v_id,currRing->qideal,hom,&w,1,0,NULL);
+  if (errorreported) return TRUE;
   idSkipZeroes(result);
   res->data = (char *)result;
   if(!TEST_OPT_DEGBOUND) setFlag(res,FLAG_STD);
@@ -5122,6 +5126,7 @@ static BOOLEAN jjSBA_1(leftv res, leftv v, leftv u)
     }
   }
   result=kSba(v_id,currRing->qideal,hom,&w,(int)(long)u->Data(),0,NULL);
+  if (errorreported) return TRUE;
   idSkipZeroes(result);
   res->data = (char *)result;
   if(!TEST_OPT_DEGBOUND) setFlag(res,FLAG_STD);
@@ -5148,6 +5153,7 @@ static BOOLEAN jjSBA_2(leftv res, leftv v, leftv u, leftv t)
     }
   }
   result=kSba(v_id,currRing->qideal,hom,&w,(int)(long)u->Data(),(int)(long)t->Data(),NULL);
+  if (errorreported) return TRUE;
   idSkipZeroes(result);
   res->data = (char *)result;
   if(!TEST_OPT_DEGBOUND) setFlag(res,FLAG_STD);
@@ -5176,6 +5182,7 @@ static BOOLEAN jjSTD(leftv res, leftv v)
     }
   }
   result=kStd2(v_id,currRing->qideal,hom,&w,(bigintmat*)NULL);
+  if (errorreported) return TRUE;
   idSkipZeroes(result);
   res->data = (char *)result;
   if(!TEST_OPT_DEGBOUND) setFlag(res,FLAG_STD);
@@ -5379,6 +5386,7 @@ static BOOLEAN jjRIGHTSTD(leftv res, leftv v)
     /* } */
     /* result=kStd2(v_id,currRing->qideal,hom,&w); */
     result = rightgb(v_id, currRing->qideal);
+    if (errorreported) return TRUE;
     idSkipZeroes(result);
     res->data = (char *)result;
     if(!TEST_OPT_DEGBOUND) setFlag(res,FLAG_STD);
@@ -5394,6 +5402,7 @@ static BOOLEAN jjRIGHTSTD(leftv res, leftv v)
     currRing = Aopp;
     ideal Iopp = idOppose(A, I, Aopp);
     ideal Jopp = kStd2(Iopp,currRing->qideal,testHomog,NULL,(bigintmat*)NULL);
+    if (errorreported) return TRUE;
     currRing = A;
     ideal J = idOppose(Aopp, Jopp, A);
 
@@ -5446,6 +5455,7 @@ static BOOLEAN jjTYPEOF(leftv res, leftv v)
     case PACKAGE_CMD:
     case LINK_CMD:
     case RESOLUTION_CMD:
+    case HTABLE_CMD:
          res->data=omStrDup(Tok2Cmdname(t)); break;
     case DEF_CMD:
     case NONE:           res->data=omStrDup("none"); break;
@@ -6737,6 +6747,15 @@ static BOOLEAN jjPREIMAGE(leftv res, leftv u, leftv v, leftv w)
   if (kernel_cmd) idDelete(&image);
   return (res->data==NULL/* is of type ideal, should not be NULL*/);
 }
+#ifdef HTABLE
+static BOOLEAN jjTABLE_ADD(leftv res, leftv u, leftv v, leftv w)
+{
+  stablerec* lt=(stablerec*)u->Data();
+  char *key=(char*)v->CopyD();
+  t_addTable(lt,key,w);
+  return FALSE;
+}
+#endif
 static BOOLEAN jjRANDOM_Im(leftv res, leftv u, leftv v, leftv w)
 {
   int di, k;
@@ -7297,6 +7316,7 @@ static BOOLEAN jjSTD_HILB_W(leftv res, leftv u, leftv v, leftv w)
               vv,  // hilbert series
               0,0,  // syzComp, newIdeal
               vw);  // weights of vars
+  if (errorreported) return TRUE;
   idSkipZeroes(result);
   res->data = (char *)result;
   setFlag(res,FLAG_STD);
@@ -8914,6 +8934,7 @@ static BOOLEAN jjSTD_HILB_WP(leftv res, leftv INPUT)
               IDELEMS(i1)-ii0,      // new ideal
               vw);                  // weights of vars
   SI_RESTORE_OPT1(save1);
+  if (errorreported) return TRUE;
   idDelete(&i1);
   idSkipZeroes(result);
   res->data = (char *)result;

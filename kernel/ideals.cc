@@ -1164,7 +1164,7 @@ ideal idLift(ideal mod, ideal submod,ideal *rest, BOOLEAN goodShape,
   }
   else
   {
-    s_mod = mod;
+    s_mod = idCopy(mod);
     s_temp = idCopy(submod);
   }
   BITSET save2;
