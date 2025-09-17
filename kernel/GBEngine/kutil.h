@@ -322,7 +322,7 @@ public:
     std::stable_sort(std::vector<LObject>::begin(), std::vector<LObject>::end(), compObject);
   }
   bool would_be_top(LObject& lobject) {
-    return (empty() || !compObject(lobject, back()));
+    return (empty() || compObject(back(), lobject));
   }
   void pop(void) {
     pop_back();
