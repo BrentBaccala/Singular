@@ -69,7 +69,7 @@ static void copyL (kStrategy o,kStrategy n)
   {
     poly p;
     int i;
-    
+
     // copy .p ----------------------------------------------
     if (pNext(Lp.p)!=o->tail)
       Lp.p=pCopy(Lp.p);

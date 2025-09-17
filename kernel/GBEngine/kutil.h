@@ -339,7 +339,7 @@ public:
   void remove_if(F&& predicate) {
     std::vector<LObject>::erase(std::remove_if(std::vector<LObject>::begin(), std::vector<LObject>::end(), predicate), std::vector<LObject>::end());
   }
-  
+
   iterator erase(iterator it) {
     // Convert reverse iterator to forward iterator for erase
     auto forward_it = std::next(it).base();
@@ -347,7 +347,7 @@ public:
     // Convert back to reverse iterator
     return iterator(result);
   }
-  
+
   using std::vector<LObject>::erase;
 };
 

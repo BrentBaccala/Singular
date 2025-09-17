@@ -1279,7 +1279,7 @@ void enterL (LSet *set,int *length, int *LSetmax, LObject p,int at)
 void enterLQueue(LQueue& queue, LObject p, kStrategy strat)
 {
   assume(p.FDeg == p.pFDeg());
-  
+
   if (strat->sbaOrder == 1)
     queue.pushSba(p);
   else
@@ -1328,7 +1328,7 @@ void deleteInLQueue(LQueue& queue, LQueue::iterator it, kStrategy strat)
     strat->P.p1=NULL;
   }
   #endif
-  
+
   // Remove the element from the queue
   queue.erase(it);
 }
