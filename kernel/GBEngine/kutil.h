@@ -309,20 +309,14 @@ class LQueue : std::vector<LObject> {
 public:
   CompareLObject compObject;
   CompareLSbaObject compSbaObject;
-  void push(const LObject& lobject) {
-    push_back(lobject);
-    std::stable_sort(std::vector<LObject>::begin(), std::vector<LObject>::end(), compObject);
-  }
-  void pushSba(const LObject& lobject) {
-    push_back(lobject);
-    std::stable_sort(std::vector<LObject>::begin(), std::vector<LObject>::end(), compSbaObject);
-  }
+  void push(const LObject& lobject);
+  void pushSba(const LObject& lobject);
   void reorder(void) {
     /* required after changes made to objects that can change their sort order */
     std::stable_sort(std::vector<LObject>::begin(), std::vector<LObject>::end(), compObject);
   }
   bool would_be_top(LObject& lobject) {
-    return (empty() || compObject(back(), lobject));
+    return (empty() || !compObject(lobject, back()));
   }
   void pop(void) {
     pop_back();
@@ -646,6 +640,18 @@ void messageSets (kStrategy strat);
 #else
 #define messageSets(s)  do {} while (0)
 #endif
+
+inline void LQueue::push(const LObject& lobject)
+{
+    auto at = compObject.parent->posInL(data(),size()-1,const_cast<LObject *>(&lobject),compObject.parent);
+    insert(std::vector<LObject>::begin() + at, lobject);
+}
+
+inline void LQueue::pushSba(const LObject& lobject)
+{
+    auto at = compObject.parent->posInLSba(data(),size()-1,const_cast<LObject *>(&lobject),compObject.parent);
+    insert(std::vector<LObject>::begin() + at, lobject);
+}
 
 void initEcartNormal (TObject* h);
 void initEcartBBA (TObject* h);
