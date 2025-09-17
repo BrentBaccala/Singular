@@ -7520,7 +7520,7 @@ void initSL (ideal F, ideal Q,kStrategy strat)
        && n_IsUnit(pGetCoeff(strat->Lqueue.top().p), currRing->cf)
        && pIsConstant(strat->Lqueue.top().p))
   {
-    auto& unit = strat->Lqueue.top();
+    auto unit = strat->Lqueue.top();  // Make a copy, not a reference
     while (! strat->Lqueue.empty()) strat->Lqueue.pop();
     strat->Lqueue.push(unit);
   }
@@ -7670,7 +7670,7 @@ void initSLSba (ideal F, ideal Q,kStrategy strat)
        && n_IsUnit(pGetCoeff(strat->Lqueue.top().p), currRing->cf)
        && pIsConstant(strat->Lqueue.top().p))
   {
-    auto& unit = strat->Lqueue.top();
+    auto unit = strat->Lqueue.top();  // Make a copy, not a reference
     while (! strat->Lqueue.empty()) strat->Lqueue.pop();
     strat->Lqueue.push(unit);
   }
