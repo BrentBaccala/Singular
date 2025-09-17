@@ -1754,7 +1754,7 @@ int redSigRing (LObject* h,kStrategy strat)
       if (!TEST_OPT_REDTHROUGH && (! strat->Lqueue.empty()) && (pass > strat->LazyPass))
       {
         h->SetLmCurrRing();
-        if (strat->Lqueue.would_be_top(*h))
+        if (! strat->Lqueue.would_be_top(*h))
         {
           int dummy=strat->sl;
           if (kFindDivisibleByInS(strat, &dummy, h) < 0)
