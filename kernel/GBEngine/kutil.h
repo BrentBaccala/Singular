@@ -10,6 +10,9 @@
 
 #include <string.h>
 
+#include <queue>
+#include <algorithm>
+
 #include "omalloc/omalloc.h"
 #ifdef HAVE_OMALLOC
 #include "omalloc/omallocClass.h"
@@ -269,6 +272,85 @@ public:
 
 EXTERN_VAR int HCord;
 
+/** @class LQueue
+ *
+ * "L" is the set of critical pairs, maintained as a priority queue,
+ * and we wish to regularly pop the largest item from the queue.
+ * However, we also wish to iterate over the entire set in order,
+ * which precludes organizing it as a heap, so we maintain it as a
+ * sorted std::vector<LObject>.
+ *
+ * Singular's design uses the posInL method to locate where in the
+ * queue a new LObject is to be inserted.  To use std::sort, we wrap
+ * posInL in a Compare type designed to mimic a single element LSet
+ * and perform a comparision by computing the "position" of the second
+ * element in the LSet.
+ *
+ * I've started using std::stable_sort instead of std::sort because
+ * in the original design, when a new LObject compared equal to
+ * existing LObjects, it was added at the end of those objects.
+ * Mimic this by adding the LObject with push_back and then
+ * std::stable_sort.
+ */
+
+class CompareLObject {
+public:
+  skStrategy * parent;
+  bool operator()(const LObject &lhs, const LObject &rhs);
+};
+
+class CompareLSbaObject {
+public:
+  skStrategy * parent;
+  bool operator()(const LObject &lhs, const LObject &rhs);
+};
+
+class LQueue : std::vector<LObject> {
+public:
+  CompareLObject compObject;
+  CompareLSbaObject compSbaObject;
+  void push(const LObject& lobject);
+  void pushSba(const LObject& lobject);
+  void reorder(void) {
+    /* required after changes made to objects that can change their sort order */
+    std::stable_sort(std::vector<LObject>::begin(), std::vector<LObject>::end(), compObject);
+  }
+  bool would_be_top(LObject& lobject) {
+    return (empty() || !compObject(lobject, back()));
+  }
+  void pop(void) {
+    pop_back();
+  }
+  const LObject& top(void) {
+    return back();
+  }
+  /* The class always iterates from top to bottom, which is back to front of the std::vector  */
+  typedef std::vector<sLObject>::reverse_iterator iterator;
+  iterator begin(void) {
+    return std::vector<LObject>::rbegin();
+  }
+  iterator end(void) {
+    return std::vector<LObject>::rend();
+  }
+  using std::vector<LObject>::empty;
+  using std::vector<LObject>::size;
+  using std::vector<LObject>::size_type;
+  template <typename F>
+  void remove_if(F&& predicate) {
+    std::vector<LObject>::erase(std::remove_if(std::vector<LObject>::begin(), std::vector<LObject>::end(), predicate), std::vector<LObject>::end());
+  }
+
+  iterator erase(iterator it) {
+    // Convert reverse iterator to forward iterator for erase
+    auto forward_it = std::next(it).base();
+    auto result = std::vector<LObject>::erase(forward_it);
+    // Convert back to reverse iterator
+    return iterator(result);
+  }
+
+  using std::vector<LObject>::erase;
+};
+
 class skStrategy
 #ifdef HAVE_OMALLOC
                  : public omallocClass
@@ -325,7 +407,8 @@ public:
   unsigned long* sevSig;
   unsigned long* sevT;
   TSet T;
-  LSet L;
+  LQueue  Lqueue;
+
   LSet    B;
   poly    kNoether;
   poly    t_kNoether; // same polys in tailring
@@ -349,7 +432,7 @@ public:
   int sl,mu;
   int syzl,syzmax,syzidxmax;
   int tl,tmax;
-  int Ll,Lmax;
+  int Lmax;
   int Bl,Bmax;
   int ak,LazyDegree,LazyPass;
   int syzComp;
@@ -412,6 +495,27 @@ public:
   KINLINE TObject* s_2_t(int i);
 };
 
+inline bool CompareLObject::operator()(const LObject &lhs, const LObject &rhs)
+{
+  /* We make lhs our "fake" Lset of size 1 (length 0), and compute
+   * rhs's position in this Lset, which will be either 0 (rhs<lhs) or
+   * 1 (lhs<rhs).  If we swap lhs and rhs and they both return 0 or
+   * they both return 1 (this can happen with, for example,
+   * posInL110), then we return false, as std::sort requires its
+   * Compare function to be strict.
+   */
+  LObject * lhsp = const_cast<LObject *>(&lhs);
+  LObject * rhsp = const_cast<LObject *>(&rhs);
+  return ((parent->posInL(lhsp,0,rhsp,parent) == 1) && (parent->posInL(rhsp,0,lhsp,parent) == 0));
+};
+
+inline bool CompareLSbaObject::operator()(const LObject &lhs, const LObject &rhs)
+{
+  LObject * lhsp = const_cast<LObject *>(&lhs);
+  LObject * rhsp = const_cast<LObject *>(&rhs);
+  return ((parent->posInLSba(lhsp,0,rhsp,parent) == 1) && (parent->posInLSba(rhsp,0,lhsp,parent) == 0));
+};
+
 void deleteHC(poly *p, int *e, int *l, kStrategy strat);
 void deleteHC(LObject* L, kStrategy strat, BOOLEAN fromNext = FALSE);
 void deleteInS (int i,kStrategy strat);
@@ -420,6 +524,8 @@ static inline LSet initL (int nr=setmaxL)
 { return (LSet)omAlloc(nr*sizeof(LObject)); }
 void deleteInL(LSet set, int *length, int j,kStrategy strat);
 void enterL (LSet *set,int *length, int *LSetmax, LObject p,int at);
+void enterLQueue(LQueue& queue, LObject p, kStrategy strat);
+void deleteInLQueue(LQueue& queue, LQueue::iterator it, kStrategy strat);
 void enterSBba (LObject &p,int atS,kStrategy strat, int atR = -1);
 void enterSBbaShift (LObject &p,int atS,kStrategy strat, int atR = -1);
 void enterSSba (LObject &p,int atS,kStrategy strat, int atR = -1);
@@ -467,6 +573,8 @@ int posInL11 (const LSet set, const int length,
 int posInL11Ring (const LSet set, const int length,
              LObject* L,const kStrategy strat);
 int posInLF5CRing (const LSet set, int start , const int length,
+             LObject* L,const kStrategy strat);
+int posInLF5CRing (const LQueue& queue, int start , const int length,
              LObject* L,const kStrategy strat);
 int posInL11Ringls (const LSet set, const int length,
              LObject* L,const kStrategy strat);
@@ -524,7 +632,7 @@ void enterpairs (poly h, int k, int ec, int pos,kStrategy strat, int atR = -1);
 void entersets (LObject h);
 void pairs ();
 BOOLEAN sbaCheckGcdPair (LObject* h,kStrategy strat);
-void message (int i,int* olddeg,int* reduc,kStrategy strat,int red_result);
+void message (int i,int* olddeg,LQueue::size_type* reduc,kStrategy strat,int red_result);
 void messageStat (int hilbcount,kStrategy strat);
 void messageStatSBA (int hilbcount,kStrategy strat);
 #ifdef KDEBUG
@@ -532,6 +640,18 @@ void messageSets (kStrategy strat);
 #else
 #define messageSets(s)  do {} while (0)
 #endif
+
+inline void LQueue::push(const LObject& lobject)
+{
+    auto at = compObject.parent->posInL(data(),size()-1,const_cast<LObject *>(&lobject),compObject.parent);
+    insert(std::vector<LObject>::begin() + at, lobject);
+}
+
+inline void LQueue::pushSba(const LObject& lobject)
+{
+    auto at = compObject.parent->posInLSba(data(),size()-1,const_cast<LObject *>(&lobject),compObject.parent);
+    insert(std::vector<LObject>::begin() + at, lobject);
+}
 
 void initEcartNormal (TObject* h);
 void initEcartBBA (TObject* h);
@@ -679,7 +799,7 @@ ideal kNF2Bound (ideal F,ideal Q,ideal q,int bound, kStrategy strat, int lazyRed
 void initBba(kStrategy strat);
 void initSba(ideal F,kStrategy strat);
 void f5c (kStrategy strat, int& olddeg, int& minimcnt, int& hilbeledeg,
-          int& hilbcount, int& srmax, int& lrmax, int& reduc, ideal Q,
+          int& hilbcount, int& srmax, int& lrmax, LQueue::size_type& reduc, ideal Q,
           intvec *w,bigintmat *hilb );
 
 /***************************************************************
@@ -849,13 +969,13 @@ KINLINE void clearS (poly p, unsigned long p_sev, int* at, int* k,
 #include "kernel/GBEngine/shiftgb.h"
 
 #ifdef HAVE_SHIFTBBA
-static inline int kFindInL1(const poly p, const kStrategy strat)
+static inline BOOLEAN kExistsInL1(const poly p, const kStrategy strat)
 {
-  for(int i=strat->Ll;i>=0;i--)
+  for(auto it = strat->Lqueue.begin(); it != strat->Lqueue.end(); ++it)
   {
-    if (p==strat->L[i].p1) return i;
+    if (p == it->p1) return TRUE;
   }
-  return -1;
+  return FALSE;
 }
 
 void enterTShift(LObject p, kStrategy strat, int atT = -1);

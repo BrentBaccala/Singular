@@ -726,7 +726,6 @@ int redRing_Z (LObject* h,kStrategy strat)
   if (h->IsNull()) return 0; // spoly is zero (can only occur with zero divisors)
   if (strat->tl<0) return 1;
 
-  int at;
   long d;
   int j = 0;
   int pass = 0;
@@ -839,18 +838,16 @@ int redRing_Z (LObject* h,kStrategy strat)
     /*- try to reduce the s-polynomial -*/
     pass++;
     if (!TEST_OPT_REDTHROUGH &&
-        (strat->Ll >= 0) && ((d > reddeg) || (pass > strat->LazyPass)))
+        (! strat->Lqueue.empty()) && ((d > reddeg) || (pass > strat->LazyPass)))
     {
       h->SetLmCurrRing();
       if (strat->posInLDependsOnLength)
         h->SetLength(strat->length_pLength);
-      at = strat->posInL(strat->L,strat->Ll,h,strat);
-      if (at <= strat->Ll)
-      {
+      if (! strat->Lqueue.would_be_top(*h)) {
 #ifdef KDEBUG
-        if (TEST_OPT_DEBUG) Print(" ->L[%d]\n",at);
+        if (TEST_OPT_DEBUG) Print(" ->L\n");
 #endif
-        enterL(&strat->L,&strat->Ll,&strat->Lmax,*h,at);     // NOT RING CHECKED OLIVER
+        strat->Lqueue.push(*h);
         h->Clear();
         return -1;
       }
@@ -864,13 +861,12 @@ int redRing_Z (LObject* h,kStrategy strat)
           strat->overflow=TRUE;
           //Print("OVERFLOW in redRing d=%ld, max=%ld\n",d,strat->tailRing->bitmask);
           h->GetP();
-          at = strat->posInL(strat->L,strat->Ll,h,strat);
-          enterL(&strat->L,&strat->Ll,&strat->Lmax,*h,at);
+          strat->Lqueue.push(*h);
           h->Clear();
           return -1;
         }
       }
-      else if ((TEST_OPT_PROT) && (strat->Ll < 0))
+      else if ((TEST_OPT_PROT) && (strat->Lqueue.empty()))
       {
         Print(".%ld",d);mflush();
         reddeg = d;
@@ -994,7 +990,6 @@ int redRing (LObject* h,kStrategy strat)
   if (strat->tl<0) return 1;
   if (h->IsNull()) return 0; // spoly is zero (can only occur with zero divisors)
 
-  int at/*,i*/;
   long d;
   int j = 0;
   int pass = 0;
@@ -1051,18 +1046,16 @@ int redRing (LObject* h,kStrategy strat)
     /*- try to reduce the s-polynomial -*/
     pass++;
     if (!TEST_OPT_REDTHROUGH &&
-        (strat->Ll >= 0) && ((d > reddeg) || (pass > strat->LazyPass)))
+        (! strat->Lqueue.empty()) && ((d > reddeg) || (pass > strat->LazyPass)))
     {
       h->SetLmCurrRing();
       if (strat->posInLDependsOnLength)
         h->SetLength(strat->length_pLength);
-      at = strat->posInL(strat->L,strat->Ll,h,strat);
-      if (at <= strat->Ll)
-      {
+      if (! strat->Lqueue.would_be_top(*h)) {
 #ifdef KDEBUG
-        if (TEST_OPT_DEBUG) Print(" ->L[%d]\n",at);
+        if (TEST_OPT_DEBUG) Print(" ->L\n");
 #endif
-        enterL(&strat->L,&strat->Ll,&strat->Lmax,*h,at);     // NOT RING CHECKED OLIVER
+        strat->Lqueue.push(*h);
         h->Clear();
         return -1;
       }
@@ -1076,13 +1069,12 @@ int redRing (LObject* h,kStrategy strat)
           strat->overflow=TRUE;
           //Print("OVERFLOW in redRing d=%ld, max=%ld\n",d,strat->tailRing->bitmask);
           h->GetP();
-          at = strat->posInL(strat->L,strat->Ll,h,strat);
-          enterL(&strat->L,&strat->Ll,&strat->Lmax,*h,at);
+          strat->Lqueue.push(*h);
           h->Clear();
           return -1;
         }
       }
-      else if ((TEST_OPT_PROT) && (strat->Ll < 0))
+      else if ((TEST_OPT_PROT) && (strat->Lqueue.empty()))
       {
         Print(".%ld",d);mflush();
         reddeg = d;
@@ -1158,7 +1150,7 @@ int redHomog (LObject* h,kStrategy strat)
   assume(h->FDeg == h->pFDeg());
 
   poly h_p;
-  int i,j,at,pass,cnt,ii;
+  int i,j,pass,cnt,ii;
   // long reddeg,d;
   int li;
   BOOLEAN test_opt_length=TEST_OPT_LENGTH;
@@ -1295,11 +1287,10 @@ int redHomog (LObject* h,kStrategy strat)
      */
     cnt--;
     pass++;
-    if (!TEST_OPT_REDTHROUGH && (strat->Ll >= 0) && (pass > strat->LazyPass))
+    if (!TEST_OPT_REDTHROUGH && (! strat->Lqueue.empty()) && (pass > strat->LazyPass))
     {
       h->SetLmCurrRing();
-      at = strat->posInL(strat->L,strat->Ll,h,strat);
-      if (at <= strat->Ll)
+      if (! strat->Lqueue.would_be_top(*h))
       {
 #ifdef HAVE_SHIFTBBA
         if (rIsLPRing(currRing))
@@ -1314,10 +1305,10 @@ int redHomog (LObject* h,kStrategy strat)
           if (kFindDivisibleByInS(strat, &dummy, h) < 0)
             return 1;
         }
-        enterL(&strat->L,&strat->Ll,&strat->Lmax,*h,at);
+        strat->Lqueue.push(*h);
 #ifdef KDEBUG
         if (TEST_OPT_DEBUG)
-          Print(" lazy: -> L%d\n",at);
+          Print(" lazy: -> L\n");
 #endif
         h->Clear();
         return -1;
@@ -1388,7 +1379,7 @@ int redSig (LObject* h,kStrategy strat)
   PrintS("---------------------------\n");
 #endif
   poly h_p;
-  int i,j,at,pass, ii;
+  int i,j,pass, ii;
   int start=0;
   int sigSafe;
   unsigned long not_sev;
@@ -1512,21 +1503,20 @@ int redSig (LObject* h,kStrategy strat)
       *-if the number of pre-defined reductions jumps
       */
       pass++;
-      if (!TEST_OPT_REDTHROUGH && (strat->Ll >= 0) && (pass > strat->LazyPass))
+      if (!TEST_OPT_REDTHROUGH && (! strat->Lqueue.empty()) && (pass > strat->LazyPass))
       {
         h->SetLmCurrRing();
-        at = strat->posInL(strat->L,strat->Ll,h,strat);
-        if (at <= strat->Ll)
+        if (! strat->Lqueue.would_be_top(*h))
         {
           int dummy=strat->sl;
           if (kFindDivisibleByInS(strat, &dummy, h) < 0)
           {
             return 1;
           }
-          enterL(&strat->L,&strat->Ll,&strat->Lmax,*h,at);
+          strat->Lqueue.push(*h);
 #ifdef KDEBUG
           if (TEST_OPT_DEBUG)
-            Print(" lazy: -> L%d\n",at);
+            Print(" lazy: -> L\n");
 #endif
           h->Clear();
           return -1;
@@ -1568,7 +1558,7 @@ int redSigRing (LObject* h,kStrategy strat)
   Print("---------------------------\n");
 #endif
   poly h_p;
-  int i,j,at,pass, ii;
+  int i,j,pass, ii;
   int start=0;
   int sigSafe;
   unsigned long not_sev;
@@ -1761,21 +1751,20 @@ int redSigRing (LObject* h,kStrategy strat)
       *-if the number of pre-defined reductions jumps
       */
       pass++;
-      if (!TEST_OPT_REDTHROUGH && (strat->Ll >= 0) && (pass > strat->LazyPass))
+      if (!TEST_OPT_REDTHROUGH && (! strat->Lqueue.empty()) && (pass > strat->LazyPass))
       {
         h->SetLmCurrRing();
-        at = strat->posInL(strat->L,strat->Ll,h,strat);
-        if (at <= strat->Ll)
+        if (! strat->Lqueue.would_be_top(*h))
         {
           int dummy=strat->sl;
           if (kFindDivisibleByInS(strat, &dummy, h) < 0)
           {
             return 1;
           }
-          enterL(&strat->L,&strat->Ll,&strat->Lmax,*h,at);
+          strat->Lqueue.push(*h);
 #ifdef KDEBUG
           if (TEST_OPT_DEBUG)
-            Print(" lazy: -> L%d\n",at);
+            Print(" lazy: -> L\n");
 #endif
           h->Clear();
           return -1;
@@ -1909,7 +1898,7 @@ poly redtailSba (LObject* L, int pos, kStrategy strat, BOOLEAN withT, BOOLEAN no
 int redLazy (LObject* h,kStrategy strat)
 {
   if (strat->tl<0) return 1;
-  int at,i,ii,li;
+  int i,ii,li;
   int j = 0;
   int pass = 0;
   int cnt = RED_CANONICALIZE;
@@ -2048,11 +2037,10 @@ int redLazy (LObject* h,kStrategy strat)
     cnt--;
     pass++;
     if (//!TEST_OPT_REDTHROUGH &&
-        (strat->Ll >= 0) && ((d > reddeg) || (pass > strat->LazyPass)))
+        (! strat->Lqueue.empty()) && ((d > reddeg) || (pass > strat->LazyPass)))
     {
       h->SetLmCurrRing();
-      at = strat->posInL(strat->L,strat->Ll,h,strat);
-      if (at <= strat->Ll)
+      if (! strat->Lqueue.would_be_top(*h))
       {
 #if 1
 #ifdef HAVE_SHIFTBBA
@@ -2070,9 +2058,9 @@ int redLazy (LObject* h,kStrategy strat)
         }
 #endif
 #ifdef KDEBUG
-        if (TEST_OPT_DEBUG) Print(" ->L[%d]\n",at);
+        if (TEST_OPT_DEBUG) Print(" ->L\n");
 #endif
-        enterL(&strat->L,&strat->Ll,&strat->Lmax,*h,at);
+        strat->Lqueue.push(*h);
         h->Clear();
         return -1;
       }
@@ -2086,13 +2074,12 @@ int redLazy (LObject* h,kStrategy strat)
           strat->overflow=TRUE;
           //Print("OVERFLOW in redLazy d=%ld, max=%ld\n",d,strat->tailRing->bitmask);
           h->GetP();
-          at = strat->posInL(strat->L,strat->Ll,h,strat);
-          enterL(&strat->L,&strat->Ll,&strat->Lmax,*h,at);
+          strat->Lqueue.push(*h);
           h->Clear();
           return -1;
         }
       }
-      else if ((TEST_OPT_PROT) && (strat->Ll < 0))
+      else if ((TEST_OPT_PROT) && (strat->Lqueue.empty()))
       {
         Print(".%ld",d);mflush();
         reddeg = d;
@@ -2116,7 +2103,7 @@ int redHoney (LObject* h, kStrategy strat)
   if (strat->tl<0) return 1;
   //if (h->GetLmTailRing()==NULL) return 0; // HS: SHOULD NOT BE NEEDED!
   assume(h->FDeg == h->pFDeg());
-  int j,at,pass,ei, ii, h_d;
+  int j,pass,ei, ii, h_d;
   long reddeg,d;
 
   pass = j = 0;
@@ -2148,15 +2135,14 @@ int redHoney (LObject* h, kStrategy strat)
        * if possible h goes to the lazy-set L,i.e
        * if its position in L would be not the last one
        */
-      if (strat->Ll >= 0) /* L is not empty */
+      if (! strat->Lqueue.empty())
       {
-        at = strat->posInL(strat->L,strat->Ll,h,strat);
-        if(at <= strat->Ll)
+        if (! strat->Lqueue.would_be_top(*h))
           /*- h will not become the next element to reduce -*/
         {
-          enterL(&strat->L,&strat->Ll,&strat->Lmax,*h,at);
+          strat->Lqueue.push(*h);
 #ifdef KDEBUG
-          if (TEST_OPT_DEBUG) Print(" ecart too big: -> L%d\n",at);
+          if (TEST_OPT_DEBUG) Print(" ecart too big: -> L\n");
 #endif
           h->Clear();
           return -1;
@@ -2249,13 +2235,12 @@ int redHoney (LObject* h, kStrategy strat)
     pass++;
     d = h_d + h->ecart;
     if (UNLIKELY(!TEST_OPT_REDTHROUGH
-    && (strat->Ll >= 0)
+    && (! strat->Lqueue.empty())
     && ((d > reddeg) || (pass > strat->LazyPass))))
     {
       h->GetTP(); // clear bucket
       h->SetLmCurrRing();
-      at = strat->posInL(strat->L,strat->Ll,h,strat);
-      if (at <= strat->Ll)
+      if (! strat->Lqueue.would_be_top(*h))
       {
 #ifdef HAVE_SHIFTBBA
         if (rIsLPRing(currRing))
@@ -2270,10 +2255,10 @@ int redHoney (LObject* h, kStrategy strat)
           if (kFindDivisibleByInS(strat, &dummy, h) < 0)
             return 1;
         }
-        enterL(&strat->L,&strat->Ll,&strat->Lmax,*h,at);
+        strat->Lqueue.push(*h);
 #ifdef KDEBUG
         if (TEST_OPT_DEBUG)
-          Print(" degree jumped: -> L%d\n",at);
+          Print(" degree jumped: -> L\n");
 #endif
         h->Clear();
         return -1;
@@ -2288,13 +2273,12 @@ int redHoney (LObject* h, kStrategy strat)
           strat->overflow=TRUE;
           //Print("OVERFLOW in redHoney d=%ld, max=%ld\n",d,strat->tailRing->bitmask);
           h->GetP();
-          at = strat->posInL(strat->L,strat->Ll,h,strat);
-          enterL(&strat->L,&strat->Ll,&strat->Lmax,*h,at);
+          strat->Lqueue.push(*h);
           h->Clear();
           return -1;
         }
       }
-      else if (UNLIKELY(TEST_OPT_PROT && (strat->Ll < 0) ))
+      else if (UNLIKELY(TEST_OPT_PROT && (strat->Lqueue.empty()) ))
       {
         //h->wrp(); Print("<%d>\n",h->GetpLength());
         reddeg = d;
@@ -2618,7 +2602,8 @@ void kDebugPrint(kStrategy strat);
 ideal bba (ideal F, ideal Q,intvec *w,bigintmat *hilb,kStrategy strat)
 {
   int   red_result = 1;
-  int   olddeg,reduc;
+  int   olddeg;
+  LQueue::size_type reduc;
   int hilbeledeg=1,hilbcount=0,minimcnt=0;
   BOOLEAN withT = FALSE;
   BITSET save;
@@ -2665,42 +2650,42 @@ ideal bba (ideal F, ideal Q,intvec *w,bigintmat *hilb,kStrategy strat)
   //kDebugPrint(strat);
 #endif
   /* compute------------------------------------------------------- */
-  while (strat->Ll >= 0)
+  while (! strat->Lqueue.empty())
   {
     #ifdef KDEBUG
       if (TEST_OPT_DEBUG) messageSets(strat);
     #endif
     if (siCntrlc)
     {
-      while (strat->Ll >= 0)
-        deleteInL(strat->L,&strat->Ll,strat->Ll,strat);
+      while (! strat->Lqueue.empty())
+        strat->Lqueue.pop();
       strat->noClearS=TRUE;
     }
     if (TEST_OPT_DEGBOUND
-        && ((strat->honey && (strat->L[strat->Ll].ecart+currRing->pFDeg(strat->L[strat->Ll].p,currRing)>Kstd1_deg))
-            || ((!strat->honey) && (currRing->pFDeg(strat->L[strat->Ll].p,currRing)>Kstd1_deg))))
+        && ((strat->honey && (strat->Lqueue.top().ecart+currRing->pFDeg(strat->Lqueue.top().p,currRing)>Kstd1_deg))
+            || ((!strat->honey) && (currRing->pFDeg(strat->Lqueue.top().p,currRing)>Kstd1_deg))))
     {
       /*
        *stops computation if
-       * 24 IN test and the degree +ecart of L[strat->Ll] is bigger then
+       * 24 IN test and the degree +ecart of Lqueue.top() is bigger then
        *a predefined number Kstd1_deg
        */
-      while ((strat->Ll >= 0)
-        && (strat->L[strat->Ll].p1!=NULL) && (strat->L[strat->Ll].p2!=NULL)
-        && ((strat->honey && (strat->L[strat->Ll].ecart+currRing->pFDeg(strat->L[strat->Ll].p,currRing)>Kstd1_deg))
-            || ((!strat->honey) && (currRing->pFDeg(strat->L[strat->Ll].p,currRing)>Kstd1_deg)))
+      while ((! strat->Lqueue.empty())
+        && (strat->Lqueue.top().p1!=NULL) && (strat->Lqueue.top().p2!=NULL)
+        && ((strat->honey && (strat->Lqueue.top().ecart+currRing->pFDeg(strat->Lqueue.top().p,currRing)>Kstd1_deg))
+            || ((!strat->honey) && (currRing->pFDeg(strat->Lqueue.top().p,currRing)>Kstd1_deg)))
       )
       {
-        deleteInL(strat->L,&strat->Ll,strat->Ll,strat);
+	strat->Lqueue.pop();
         if(TEST_OPT_PROT) PrintS("D");
       }
-      if (strat->Ll<0) break;
+      if (strat->Lqueue.empty()) break;
       else strat->noClearS=TRUE;
     }
-    if (strat->Ll== 0) strat->interpt=TRUE;
+    if (strat->Lqueue.size() == 1) strat->interpt=TRUE;
     /* picks the last element from the lazyset L */
-    strat->P = strat->L[strat->Ll];
-    strat->Ll--;
+    strat->P = strat->Lqueue.top();
+    strat->Lqueue.pop();
 
     if (pNext(strat->P.p) == strat->tail)
     {
@@ -3117,7 +3102,8 @@ ideal sba (ideal F0, ideal Q,intvec *w,bigintmat *hilb,kStrategy strat)
   printf("\n");
 #endif
   int   srmax,lrmax, red_result = 1;
-  int   olddeg,reduc;
+  int   olddeg;
+  LQueue::size_type reduc;
   int hilbeledeg=1,hilbcount=0,minimcnt=0;
   LObject L;
   BOOLEAN withT     = TRUE;
@@ -3162,10 +3148,11 @@ ideal sba (ideal F0, ideal Q,intvec *w,bigintmat *hilb,kStrategy strat)
     {
       //Update: now the element is at the correct place
       //i+1 because on the 0 position is the sigdrop element
-      enterT(strat->L[strat->Ll-(i)],strat);
-      strat->enterS(strat->L[strat->Ll-(i)], strat->sl+1, strat, strat->tl);
+      auto Lp = strat->Lqueue.top();
+      strat->Lqueue.pop();
+      enterT(Lp,strat);
+      strat->enterS(Lp, strat->sl+1, strat, strat->tl);
     }
-    strat->Ll = strat->Ll - strat->sbaEnterS;
     strat->sbaEnterS = -1;
   }
   kTest_TS(strat);
@@ -3173,35 +3160,35 @@ ideal sba (ideal F0, ideal Q,intvec *w,bigintmat *hilb,kStrategy strat)
   //kDebugPrint(strat);
 #endif
   /* compute------------------------------------------------------- */
-  while (strat->Ll >= 0)
+  while (! strat->Lqueue.empty())
   {
-    if (strat->Ll > lrmax) lrmax =strat->Ll;/*stat.*/
+    if (strat->Lqueue.size() > lrmax) lrmax =strat->Lqueue.size();/*stat.*/
     #ifdef KDEBUG
       if (TEST_OPT_DEBUG) messageSets(strat);
     #endif
-    if (strat->Ll== 0) strat->interpt=TRUE;
+    if (strat->Lqueue.size() == 1) strat->interpt=TRUE;
     /*
     if (TEST_OPT_DEGBOUND
-        && ((strat->honey && (strat->L[strat->Ll].ecart+currRing->pFDeg(strat->L[strat->Ll].p,currRing)>Kstd1_deg))
-            || ((!strat->honey) && (currRing->pFDeg(strat->L[strat->Ll].p,currRing)>Kstd1_deg))))
+        && ((strat->honey && (strat->Lqueue.top().ecart+currRing->pFDeg(strat->Lqueue.top().p,currRing)>Kstd1_deg))
+            || ((!strat->honey) && (currRing->pFDeg(strat->Lqueue.top().p,currRing)>Kstd1_deg))))
     {
 
        //stops computation if
        // 24 IN test and the degree +ecart of L[strat->Ll] is bigger then
        //a predefined number Kstd1_deg
-      while ((strat->Ll >= 0)
-        && (strat->L[strat->Ll].p1!=NULL) && (strat->L[strat->Ll].p2!=NULL)
-        && ((strat->honey && (strat->L[strat->Ll].ecart+currRing->pFDeg(strat->L[strat->Ll].p,currRing)>Kstd1_deg))
-            || ((!strat->honey) && (currRing->pFDeg(strat->L[strat->Ll].p,currRing)>Kstd1_deg)))
+      while ((!strat->Lqueue.empty())
+        && (strat->Lqueue.top().p1!=NULL) && (strat->Lqueue.top().p2!=NULL)
+        && ((strat->honey && (strat->Lqueue.top().ecart+currRing->pFDeg(strat->Lqueue.top().p,currRing)>Kstd1_deg))
+            || ((!strat->honey) && (currRing->pFDeg(strat->Lqueue.top().p,currRing)>Kstd1_deg)))
         )
-        deleteInL(strat->L,&strat->Ll,strat->Ll,strat);
-      if (strat->Ll<0) break;
+        strat->Lqueue.pop();
+      if (strat->Lqueue.empty()) break;
       else strat->noClearS=TRUE;
     }
     */
-    if (strat->sbaOrder == 1 && pGetComp(strat->L[strat->Ll].sig) != strat->currIdx)
+    if (strat->sbaOrder == 1 && pGetComp(strat->Lqueue.top().sig) != strat->currIdx)
     {
-      strat->currIdx  = pGetComp(strat->L[strat->Ll].sig);
+      strat->currIdx  = pGetComp(strat->Lqueue.top().sig);
 #if F5C
       // 1. interreduction of the current standard basis
       // 2. generation of new principal syzygy rules for syzCriterion
@@ -3216,8 +3203,8 @@ ideal sba (ideal F0, ideal Q,intvec *w,bigintmat *hilb,kStrategy strat)
       * step of the signature-based algorithm
       ********************************************************************/
     /* picks the last element from the lazyset L */
-    strat->P = strat->L[strat->Ll];
-    strat->Ll--;
+    strat->P = strat->Lqueue.top();
+    strat->Lqueue.pop();
 
     if(rField_is_Ring(currRing))
       strat->sbaEnterS = pGetComp(strat->P.sig) - 1;
@@ -3818,28 +3805,26 @@ ideal sba (ideal F0, ideal Q,intvec *w,bigintmat *hilb,kStrategy strat)
   if(!rField_is_Ring(currRing))
       exitSba(strat);
   // I have to add the initial input polynomials which where not used (p1 and p2 = NULL)
-  int k;
   if(rField_is_Ring(currRing))
   {
-    //for(k = strat->sl;k>=0;k--)
+    //for(int k = strat->sl;k>=0;k--)
     //  {printf("\nS[%i] = %p\n",k,strat->Shdl->m[k]);pWrite(strat->Shdl->m[k]);}
-    k = strat->Ll;
     #if 1
     // 1 - adds just the unused ones, 0 - adds everything
-    for(;k>=0 && (strat->L[k].p1 != NULL || strat->L[k].p2 != NULL);k--)
+    while (!strat->Lqueue.empty() && (strat->Lqueue.top().p1 != NULL || strat->Lqueue.top().p2 != NULL))
     {
-      //printf("\nDeleted k = %i, %p\n",k,strat->L[k].p);pWrite(strat->L[k].p);pWrite(strat->L[k].p1);pWrite(strat->L[k].p2);
-      deleteInL(strat->L,&strat->Ll,k,strat);
+      //printf("\nDeleted element from queue\n");
+      strat->Lqueue.pop();
     }
     #endif
     //for(int kk = strat->sl;kk>=0;kk--)
     //  {printf("\nS[%i] = %p\n",kk,strat->Shdl->m[kk]);pWrite(strat->Shdl->m[kk]);}
     //idPrint(strat->Shdl);
     //printf("\nk = %i\n",k);
-    for(;k>=0 && strat->L[k].p1 == NULL && strat->L[k].p2 == NULL;k--)
+    for (auto it=strat->Lqueue.begin(); it != strat->Lqueue.end() && it->p1 == NULL && it->p2 == NULL; it++)
     {
       //printf("\nAdded k = %i\n",k);
-      strat->enterS(strat->L[k], strat->sl+1, strat, strat->tl);
+      strat->enterS(*it, strat->sl+1, strat, strat->tl);
       //printf("\nThis elements was added from L on pos %i\n",strat->sl);pWrite(strat->S[strat->sl]);pWrite(strat->sig[strat->sl]);
     }
   }
@@ -4012,7 +3997,6 @@ poly kNF2 (ideal F,ideal Q,poly q,kStrategy strat, int lazyReduce)
     }
   }
   /*- release temp data------------------------------- -*/
-  assume(strat->L==NULL); /* strat->L unused */
   assume(strat->B==NULL); /* strat->B unused */
   omFree(strat->sevS);
   omFree(strat->ecartS);
@@ -4087,7 +4071,6 @@ poly kNF2Bound (ideal F,ideal Q,poly q,int bound,kStrategy strat, int lazyReduce
     }
   }
   /*- release temp data------------------------------- -*/
-  assume(strat->L==NULL); /* strat->L unused */
   assume(strat->B==NULL); /* strat->B unused */
   omFree(strat->sevS);
   omFree(strat->ecartS);
@@ -4173,7 +4156,6 @@ ideal kNF2 (ideal F,ideal Q,ideal q,kStrategy strat, int lazyReduce)
     //  res->m[i]=NULL;
   }
   /*- release temp data------------------------------- -*/
-  assume(strat->L==NULL); /* strat->L unused */
   assume(strat->B==NULL); /* strat->B unused */
   omFree(strat->sevS);
   omFree(strat->ecartS);
@@ -4254,7 +4236,6 @@ ideal kNF2Bound (ideal F,ideal Q,ideal q,int bound,kStrategy strat, int lazyRedu
     //  res->m[i]=NULL;
   }
   /*- release temp data------------------------------- -*/
-  assume(strat->L==NULL); /* strat->L unused */
   assume(strat->B==NULL); /* strat->B unused */
   omFree(strat->sevS);
   omFree(strat->ecartS);
@@ -4279,7 +4260,7 @@ ideal kNF2Bound (ideal F,ideal Q,ideal q,int bound,kStrategy strat, int lazyRedu
 * 3. strat->S and strat->T are completely new computed in these steps
 ********************************************************************/
 void f5c (kStrategy strat, int& olddeg, int& minimcnt, int& hilbeledeg,
-          int& hilbcount, int& srmax, int& lrmax, int& reduc, ideal Q,
+          int& hilbcount, int& srmax, int& lrmax, LQueue::size_type& reduc, ideal Q,
           intvec *w,bigintmat *hilb )
 {
   int Ll_old, red_result = 1;
@@ -4292,7 +4273,7 @@ void f5c (kStrategy strat, int& olddeg, int& minimcnt, int& hilbeledeg,
   // we cannot use strat->T anymore
   //cleanT(strat);
   //strat->tl = -1;
-  Ll_old    = strat->Ll;
+  Ll_old    = strat->Lqueue.size() - 1;
   while (strat->tl >= 0)
   {
     if(!strat->T[strat->tl].is_redundant)
@@ -4320,11 +4301,11 @@ void f5c (kStrategy strat, int& olddeg, int& minimcnt, int& hilbeledeg,
           }
           strat->initEcart(&h);
           if(rField_is_Ring(currRing))
-            pos = posInLF5CRing(strat->L, Ll_old+1,strat->Ll,&h,strat);
+            pos = posInLF5CRing(strat->Lqueue, Ll_old+1,strat->Lqueue.size()-1,&h,strat);
           else
-            pos = strat->Ll+1;
+            pos = strat->Lqueue.size();
           h.sev = pGetShortExpVector(h.p);
-          enterL(&strat->L,&strat->Ll,&strat->Lmax,h,pos);
+          enterLQueue(strat->Lqueue,h,strat);
         }
       }
     }
@@ -4339,10 +4320,10 @@ void f5c (kStrategy strat, int& olddeg, int& minimcnt, int& hilbeledeg,
   //enterpairs(pOne(),0,0,-1,strat,strat->tl);
   //strat->sl = -1;
   /* picks the last element from the lazyset L */
-  while (strat->Ll>Ll_old)
+  while ((int)strat->Lqueue.size()-1 > Ll_old)
   {
-    strat->P = strat->L[strat->Ll];
-    strat->Ll--;
+    strat->P = strat->Lqueue.top();
+    strat->Lqueue.pop();
 //#if 1
 #ifdef DEBUGF5
     PrintS("NEXT PAIR TO HANDLE IN INTERRED ALGORITHM\n");
@@ -4535,9 +4516,9 @@ void f5c (kStrategy strat, int& olddeg, int& minimcnt, int& hilbeledeg,
   // NOTE:  this needs to be set here, as otherwise initSyzRules cannot compute
   //        the corresponding syzygy rules correctly
   strat->currIdx = cc+1;
-  for (int cd=strat->Ll; cd>=0; cd--)
+  for (auto& Lp: strat->Lqueue)
   {
-    p_SetComp(strat->L[cd].sig,cc+1,currRing);
+    p_SetComp(Lp.sig,cc+1,currRing);
     cc++;
   }
   for (cc=strat->sl+1; cc<IDELEMS(strat->Shdl); ++cc)
@@ -4571,15 +4552,13 @@ void f5c (kStrategy strat, int& olddeg, int& minimcnt, int& hilbeledeg,
   }
   PrintS("-------------------------------------------------\n");
   PrintS("------------------- STRAT L ---------------------\n");
-  cc = 0;
-  while (cc<strat->Ll+1)
+  for (auto it: strat->Lqueue)
   {
-    pWrite(pHead(strat->L[cc].p));
-    pWrite(pHead(strat->L[cc].p1));
-    pWrite(pHead(strat->L[cc].p2));
-    pWrite(strat->L[cc].sig);
+    pWrite(pHead(it->p));
+    pWrite(pHead(it->p1));
+    pWrite(pHead(it->p2));
+    pWrite(it->sig);
     printf("- - - - - -\n");
-    cc++;
   }
   PrintS("-------------------------------------------------\n");
   printf("F5C DONE\nSTRAT SL: %d -- %d\n",strat->sl, strat->currIdx);
@@ -4593,7 +4572,8 @@ void f5c (kStrategy strat, int& olddeg, int& minimcnt, int& hilbeledeg,
 ideal bbaShift(ideal F, ideal Q,intvec *w,bigintmat *hilb,kStrategy strat)
 {
   int   red_result = 1;
-  int   olddeg,reduc;
+  int   olddeg;
+  LQueue::size_type reduc;
   int hilbeledeg=1,hilbcount=0,minimcnt=0;
   BOOLEAN withT = TRUE; // currently only T contains the shifts
   BITSET save;
@@ -4638,39 +4618,39 @@ ideal bbaShift(ideal F, ideal Q,intvec *w,bigintmat *hilb,kStrategy strat)
   //kDebugPrint(strat);
 #endif
   /* compute------------------------------------------------------- */
-  while (strat->Ll >= 0)
+  while (! strat->Lqueue.empty())
   {
     #ifdef KDEBUG
       if (TEST_OPT_DEBUG) messageSets(strat);
     #endif
     if (siCntrlc)
     {
-      while (strat->Ll >= 0)
-        deleteInL(strat->L,&strat->Ll,strat->Ll,strat);
+      while (! strat->Lqueue.empty())
+        strat->Lqueue.pop();
       strat->noClearS=TRUE;
     }
     if (TEST_OPT_DEGBOUND
-        && ((strat->honey && (strat->L[strat->Ll].ecart+currRing->pFDeg(strat->L[strat->Ll].p,currRing)>Kstd1_deg))
-            || ((!strat->honey) && (currRing->pFDeg(strat->L[strat->Ll].p,currRing)>Kstd1_deg))))
+        && ((strat->honey && (strat->Lqueue.top().ecart+currRing->pFDeg(strat->Lqueue.top().p,currRing)>Kstd1_deg))
+            || ((!strat->honey) && (currRing->pFDeg(strat->Lqueue.top().p,currRing)>Kstd1_deg))))
     {
       /*
        *stops computation if
        * 24 IN test and the degree +ecart of L[strat->Ll] is bigger then
        *a predefined number Kstd1_deg
        */
-      while ((strat->Ll >= 0)
-        && (strat->L[strat->Ll].p1!=NULL) && (strat->L[strat->Ll].p2!=NULL)
-        && ((strat->honey && (strat->L[strat->Ll].ecart+currRing->pFDeg(strat->L[strat->Ll].p,currRing)>Kstd1_deg))
-            || ((!strat->honey) && (currRing->pFDeg(strat->L[strat->Ll].p,currRing)>Kstd1_deg)))
+      while ((! strat->Lqueue.empty())
+        && (strat->Lqueue.top().p1!=NULL) && (strat->Lqueue.top().p2!=NULL)
+        && ((strat->honey && (strat->Lqueue.top().ecart+currRing->pFDeg(strat->Lqueue.top().p,currRing)>Kstd1_deg))
+            || ((!strat->honey) && (currRing->pFDeg(strat->Lqueue.top().p,currRing)>Kstd1_deg)))
         )
-        deleteInL(strat->L,&strat->Ll,strat->Ll,strat);
-      if (strat->Ll<0) break;
+        strat->Lqueue.pop();
+      if (strat->Lqueue.empty()) break;
       else strat->noClearS=TRUE;
     }
-    if (strat->Ll== 0) strat->interpt=TRUE;
+    if (strat->Lqueue.size() == 1) strat->interpt=TRUE;
     /* picks the last element from the lazyset L */
-    strat->P = strat->L[strat->Ll];
-    strat->Ll--;
+    strat->P = strat->Lqueue.top();
+    strat->Lqueue.pop();
 
     if (pNext(strat->P.p) == strat->tail)
     {
@@ -4974,7 +4954,7 @@ int redFirstShift (LObject* h,kStrategy strat)
 {
   if (h->IsNull()) return 0;
 
-  int at, reddeg,d;
+  int reddeg,d;
   int pass = 0;
   int j = 0;
 
@@ -5059,29 +5039,28 @@ int redFirstShift (LObject* h,kStrategy strat)
        *-if the degree jumps
        *-if the number of pre-defined reductions jumps
        */
-      if (!TEST_OPT_REDTHROUGH && (strat->Ll >= 0)
+      if (!TEST_OPT_REDTHROUGH && (! strat->Lqueue.empty())
           && ((d >= reddeg) || (pass > strat->LazyPass)))
       {
         h->SetLmCurrRing();
         if (strat->posInLDependsOnLength)
           h->SetLength(strat->length_pLength);
-        at = strat->posInL(strat->L,strat->Ll,h,strat);
-        if (at <= strat->Ll)
+        if (! strat->Lqueue.would_be_top(*h))
         {
           //int dummy=strat->sl;
           /*          if (kFindDivisibleByInS(strat,&dummy, h) < 0) */
           //if (kFindDivisibleByInT(strat->T,strat->sevT, dummy, h) < 0)
           if (kFindDivisibleByInT(strat, h) < 0)
             return 1;
-          enterL(&strat->L,&strat->Ll,&strat->Lmax,*h,at);
+          strat->Lqueue.push(*h);
 #ifdef KDEBUG
-          if (TEST_OPT_DEBUG) Print(" degree jumped; ->L%d\n",at);
+          if (TEST_OPT_DEBUG) Print(" degree jumped; ->L\n");
 #endif
           h->Clear();
           return -1;
         }
       }
-      if ((TEST_OPT_PROT) && (strat->Ll < 0) && (d >= reddeg))
+      if ((TEST_OPT_PROT) && (strat->Lqueue.empty()) && (d >= reddeg))
       {
         reddeg = d+1;
         Print(".%d",d);mflush();
