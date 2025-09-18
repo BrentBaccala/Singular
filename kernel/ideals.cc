@@ -1187,8 +1187,12 @@ ideal idLift(ideal mod, ideal submod,ideal *rest, BOOLEAN goodShape,
   {
     s_h3 = idPrepare(s_mod,NULL,(tHomog)FALSE,k+comps_to_add,NULL,alg);
   }
-  if (errorreported) return NULL;
   SI_RESTORE_OPT2(save2);
+  if (errorreported)
+  {
+    rChangeCurrRing(orig_ring);
+    return NULL;
+  }
 
   if (!goodShape)
   {
