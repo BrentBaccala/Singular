@@ -102,7 +102,10 @@ static FORCE_INLINE BOOLEAN nlIsInteger(number q, const coeffs r)
   return ( q->s == 3 );
 }
 
+/// get numerator as mpz_t
 void nlMPZ(mpz_t m, number &n, const coeffs r);
+/// get demoninator as mpz_t
+void nlMPZ2(mpz_t m, number &n, const coeffs r);
 number nlModP(number q, const coeffs Q, const coeffs Zp);
 void   nlNormalize(number &x, const coeffs r);
 void   nlInpGcd(number &a, number b, const coeffs r);
@@ -118,9 +121,6 @@ number   nlInit2 (int i, int j, const coeffs r);
 /// NOTE: make sure to use correct Q in debug mode
 number   nlInit2gmp (mpz_t i, mpz_t j, const coeffs r);
 
-#if 0 // substituted by nlMPZ
-void   nlGMP(number &i, mpz_t n, const coeffs r);
-#endif
 // for ring similar to Q/Z (char 0 required):
 number   nlChineseRemainderSym(number *x, number *q,int rl, BOOLEAN sym, CFArray &inv_cache,const coeffs CF);
 

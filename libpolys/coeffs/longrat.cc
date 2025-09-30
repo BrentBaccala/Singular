@@ -1608,26 +1608,6 @@ number nlModP(number q, const coeffs /*Q*/, const coeffs Zp)
 }
 
 /*2
-* convert number i (from Q) to GMP and warn if denom != 1
-*/
-void nlGMP(number &i, mpz_t n, const coeffs r)
-{
-  // Hier brauche ich einfach die GMP Zahl
-  nlTest(i, r);
-  nlNormalize(i, r);
-  if (SR_HDL(i) & SR_INT)
-  {
-    mpz_set_si(n, SR_TO_INT(i));
-    return;
-  }
-  if (i->s!=3)
-  {
-    WarnS("Omitted denominator during coefficient mapping !");
-  }
-  mpz_set(n, i->z);
-}
-
-/*2
 * access to denominator, other 1 for integers
 */
 number nlGetDenom(number &n, const coeffs r)
@@ -2813,6 +2793,15 @@ void nlMPZ(mpz_t m, number &n, const coeffs r)
   nlNormalize(n, r);
   if (SR_HDL(n) & SR_INT) mpz_init_set_si(m, SR_TO_INT(n));     /* n fits in an int */
   else             mpz_init_set(m, (mpz_ptr)n->z);
+}
+
+void nlMPZ2(mpz_t m, number &n, const coeffs r)
+{
+  nlTest(n, r);
+  nlNormalize(n, r);
+  if (SR_HDL(n) & SR_INT) mpz_init_set_si(m,1); /* small int*/
+  else if (n->s==3)       mpz_init_set_si(m,1); /* large int*/
+  else                    mpz_init_set(m, (mpz_ptr)n->n);
 }
 
 
