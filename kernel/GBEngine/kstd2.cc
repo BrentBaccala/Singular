@@ -4264,8 +4264,9 @@ void f5c (kStrategy strat, int& olddeg, int& minimcnt, int& hilbeledeg,
           int& hilbcount, int& srmax, int& lrmax, LQueue::size_type& reduc, ideal Q,
           intvec *w,bigintmat *hilb )
 {
-  int Ll_old, red_result = 1;
+  int red_result = 1;
   int pos  = 0;
+  LQueue Lqueue;
   hilbeledeg=1;
   hilbcount=0;
   minimcnt=0;
@@ -4274,7 +4275,11 @@ void f5c (kStrategy strat, int& olddeg, int& minimcnt, int& hilbeledeg,
   // we cannot use strat->T anymore
   //cleanT(strat);
   //strat->tl = -1;
-  Ll_old    = strat->Lqueue.size() - 1;
+  Lqueue.compObject.parent = NULL;
+  if(rField_is_Ring(currRing))
+    Lqueue.compObject.posInL = posInLF5CRing;
+  else
+    Lqueue.compObject.posInL = posInLF5C;
   while (strat->tl >= 0)
   {
     if(!strat->T[strat->tl].is_redundant)
@@ -4301,12 +4306,8 @@ void f5c (kStrategy strat, int& olddeg, int& minimcnt, int& hilbeledeg,
             h.pNorm();
           }
           strat->initEcart(&h);
-          if(rField_is_Ring(currRing))
-            pos = posInLF5CRing(strat->Lqueue, Ll_old+1,strat->Lqueue.size()-1,&h,strat);
-          else
-            pos = strat->Lqueue.size();
           h.sev = pGetShortExpVector(h.p);
-          enterLQueue(strat->Lqueue,h,strat);
+	  Lqueue.push(h);
         }
       }
     }
@@ -4321,10 +4322,10 @@ void f5c (kStrategy strat, int& olddeg, int& minimcnt, int& hilbeledeg,
   //enterpairs(pOne(),0,0,-1,strat,strat->tl);
   //strat->sl = -1;
   /* picks the last element from the lazyset L */
-  while ((int)strat->Lqueue.size()-1 > Ll_old)
+  while (! Lqueue.empty())
   {
-    strat->P = strat->Lqueue.top();
-    strat->Lqueue.pop();
+    strat->P = Lqueue.top();
+    Lqueue.pop();
 //#if 1
 #ifdef DEBUGF5
     PrintS("NEXT PAIR TO HANDLE IN INTERRED ALGORITHM\n");

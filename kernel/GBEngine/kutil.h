@@ -296,6 +296,8 @@ EXTERN_VAR int HCord;
 class CompareLObject {
 public:
   skStrategy * parent;
+  int (*posInL)(LSet set, const int length,
+                LObject* L,const kStrategy strat);
   bool operator()(const LObject &lhs, const LObject &rhs);
 };
 
@@ -572,9 +574,7 @@ int posInL11 (const LSet set, const int length,
              LObject* L,const kStrategy strat);
 int posInL11Ring (const LSet set, const int length,
              LObject* L,const kStrategy strat);
-int posInLF5CRing (const LSet set, int start , const int length,
-             LObject* L,const kStrategy strat);
-int posInLF5CRing (const LQueue& queue, int start , const int length,
+int posInLF5CRing (const LSet set, const int length,
              LObject* L,const kStrategy strat);
 int posInL11Ringls (const LSet set, const int length,
              LObject* L,const kStrategy strat);
@@ -643,8 +643,13 @@ void messageSets (kStrategy strat);
 
 inline void LQueue::push(const LObject& lobject)
 {
-    auto at = compObject.parent->posInL(data(),size()-1,const_cast<LObject *>(&lobject),compObject.parent);
-    insert(std::vector<LObject>::begin() + at, lobject);
+    if (compObject.parent != NULL) {
+      auto at = compObject.parent->posInL(data(),size()-1,const_cast<LObject *>(&lobject),compObject.parent);
+      insert(std::vector<LObject>::begin() + at, lobject);
+    } else {
+      auto at = compObject.posInL(data(),size()-1,const_cast<LObject *>(&lobject),NULL);
+      insert(std::vector<LObject>::begin() + at, lobject);
+    }
 }
 
 inline void LQueue::pushSba(const LObject& lobject)

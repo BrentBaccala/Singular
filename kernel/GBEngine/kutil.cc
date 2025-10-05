@@ -5527,10 +5527,10 @@ int posInSyz (const kStrategy strat, poly sig)
 * critical pairs to strat->L only behind all other critical pairs which are
 * still in strat->L!
 */
-int posInLF5C (const LSet /*set*/, const int /*length*/,
+int posInLF5C (const LSet /*set*/, const int length,
                LObject* /*p*/,const kStrategy strat)
 {
-  return strat->Lqueue.size();
+  return length+1;
 }
 
 /*2
@@ -5615,11 +5615,11 @@ int posInL11Ring (const LSet set, const int length,
   }
 }
 
-int posInLF5CRing (const LSet set, int start,const int length,
+int posInLF5CRing (const LSet set, const int length,
               LObject* p,const kStrategy)
 {
   if (length<0) return 0;
-  if(start == (length +1)) return (length+1);
+
   int o = p->GetpFDeg();
   int op = set[length].GetpFDeg();
 
@@ -5627,7 +5627,7 @@ int posInLF5CRing (const LSet set, int start,const int length,
   || ((op == o) && (pLtCmpOrdSgnDiffM(set[length].p,p->p))))
     return length+1;
   int i;
-  int an = start;
+  int an = 0;
   int en= length;
   loop
   {
@@ -5647,17 +5647,6 @@ int posInLF5CRing (const LSet set, int start,const int length,
     else
       an=i;
   }
-}
-
-/*2
-* LQueue version of posInLF5CRing
-*/
-int posInLF5CRing (const LQueue& queue, int start, const int length,
-              LObject* p, const kStrategy)
-{
-  // For LQueue, we simply return the size to append at the end
-  // since LQueue maintains its own sorted order
-  return queue.size();
 }
 
 int posInL11Ringls (const LSet set, const int length,
