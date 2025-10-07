@@ -592,6 +592,8 @@ int posInL10Ring (const LSet set, const int length,
              LObject* L,const kStrategy strat);
 int posInL110 (const LSet set, const int length,
              LObject* L,const kStrategy strat);
+int posInLSpecial (const LSet set, const int length,
+             LObject *L,const kStrategy strat);
 KINLINE poly redtailBba (poly p,int end_pos,kStrategy strat,BOOLEAN normalize=FALSE);
 KINLINE poly redtailBbaBound (poly p,int end_pos,kStrategy strat,int bound,BOOLEAN normalize=FALSE);
 KINLINE poly redtailBba_Ring (poly p,int end_pos,kStrategy strat);
@@ -640,23 +642,6 @@ void messageSets (kStrategy strat);
 #else
 #define messageSets(s)  do {} while (0)
 #endif
-
-inline void LQueue::push(const LObject& lobject)
-{
-    if (compObject.parent != NULL) {
-      auto at = compObject.parent->posInL(data(),size()-1,const_cast<LObject *>(&lobject),compObject.parent);
-      insert(std::vector<LObject>::begin() + at, lobject);
-    } else {
-      auto at = compObject.posInL(data(),size()-1,const_cast<LObject *>(&lobject),NULL);
-      insert(std::vector<LObject>::begin() + at, lobject);
-    }
-}
-
-inline void LQueue::pushSba(const LObject& lobject)
-{
-    auto at = compObject.parent->posInLSba(data(),size()-1,const_cast<LObject *>(&lobject),compObject.parent);
-    insert(std::vector<LObject>::begin() + at, lobject);
-}
 
 void initEcartNormal (TObject* h);
 void initEcartBBA (TObject* h);

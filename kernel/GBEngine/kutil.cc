@@ -5731,6 +5731,36 @@ int posInL11Ringls (const LSet set, const int length,
   }
 }
 
+void LQueue::push(const LObject& lobject)
+{
+    if (compObject.parent != NULL) {
+      if ((compObject.parent->posInL == posInL11Ring) || (compObject.parent->posInL == posInLSpecial)) {
+	// these two comparators put equal Lobjects at the start of the array (most put them at the end)
+	insert(std::vector<LObject>::begin(), lobject);
+	std::stable_sort(std::vector<LObject>::begin(), std::vector<LObject>::end(), compObject);
+      } else {
+	push_back(lobject);
+	std::stable_sort(std::vector<LObject>::begin(), std::vector<LObject>::end(), compObject);
+      }
+    } else {
+      // f5c() special case
+      auto at = compObject.posInL(data(),size()-1,const_cast<LObject *>(&lobject),NULL);
+      insert(std::vector<LObject>::begin() + at, lobject);
+    }
+}
+
+void LQueue::pushSba(const LObject& lobject)
+{
+    if (compSbaObject.parent->posInLSba == posInLSig) {
+      // this comparator puts equal Lobjects at the start of the array (most put them at the end)
+      insert(std::vector<LObject>::begin(), lobject);
+      std::stable_sort(std::vector<LObject>::begin(), std::vector<LObject>::end(), compSbaObject);
+    } else {
+      push_back(lobject);
+      std::stable_sort(std::vector<LObject>::begin(), std::vector<LObject>::end(), compSbaObject);
+    }
+}
+
 /*2 Position for rings L: Here I am
 * looks up the position of polynomial p in set
 * e is the ecart of p
