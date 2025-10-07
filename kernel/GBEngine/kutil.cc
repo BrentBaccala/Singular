@@ -5305,7 +5305,7 @@ int posInT19 (const TSet set,const int length,LObject &p)
 /*2
 *looks up the position of polynomial p in set
 *set[length] is the smallest element in set with respect
-*to the ordering-procedure pComp
+*to the ordering-procedure pFDeg, p1 == NULL, pComp
 */
 int posInLSpecial (const LSet set, const int length,
                    LObject *p,const kStrategy)
