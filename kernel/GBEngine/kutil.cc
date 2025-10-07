@@ -5318,7 +5318,7 @@ int posInLSpecial (const LSet set, const int length,
 
   if ((op > d)
   || ((op == d) && (p->p1!=NULL)&&(set[length].p1==NULL))
-  || (pLmCmp(set[length].p,p->p)== cmp_int))
+  || ((op == d) && ((p->p1==NULL) == (set[length].p1==NULL)) && (pLmCmp(set[length].p,p->p) == cmp_int)))
      return length+1;
 
   int i;
@@ -5331,7 +5331,7 @@ int posInLSpecial (const LSet set, const int length,
       op=set[an].GetpFDeg();
       if ((op > d)
       || ((op == d) && (p->p1!=NULL) && (set[an].p1==NULL))
-      || (pLmCmp(set[an].p,p->p)== cmp_int))
+      || ((op == d) && ((p->p1==NULL) == (set[an].p1==NULL)) && (pLmCmp(set[an].p,p->p) == cmp_int)))
          return en;
       return an;
     }
@@ -5339,7 +5339,7 @@ int posInLSpecial (const LSet set, const int length,
     op=set[i].GetpFDeg();
     if ((op>d)
     || ((op==d) && (p->p1!=NULL) && (set[i].p1==NULL))
-    || (pLmCmp(set[i].p,p->p) == cmp_int))
+    || ((op==d) && ((p->p1==NULL) == (set[i].p1==NULL)) && (pLmCmp(set[i].p,p->p) == cmp_int)))
       an=i;
     else
       en=i;
