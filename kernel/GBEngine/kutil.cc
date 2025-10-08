@@ -1280,10 +1280,7 @@ void enterLQueue(LQueue& queue, LObject p, kStrategy strat)
 {
   assume(p.FDeg == p.pFDeg());
 
-  if (strat->sbaOrder == 1)
-    queue.pushSba(p);
-  else
-    queue.push(p);
+  queue.push(p);
 }
 
 /*2
@@ -1965,7 +1962,7 @@ static BOOLEAN enterOneStrongPolySig (int i,poly p,poly sig,int /*ecart*/, int /
     h.i_r1 = -1;
     h.i_r2 = -1;
   }
-  strat->Lqueue.pushSba(h);
+  strat->Lqueue.push(h);
   return TRUE;
 }
 
@@ -2715,7 +2712,7 @@ static void enterOnePairSig (int i, poly p, poly pSig, int, int ecart, int isFro
         nDelete(&(Lp.p->coef));
     }
 
-    l = strat->posInLSba(strat->B,strat->Bl,&Lp,strat);
+    l = strat->posInL(strat->B,strat->Bl,&Lp,strat);
     enterL(&strat->B,&strat->Bl,&strat->Bmax,Lp,l);
   }
 }
@@ -3116,7 +3113,7 @@ static void enterOnePairSigRing (int i, poly p, poly pSig, int, int ecart, int i
         return;
       }
     }
-    strat->Lqueue.pushSba(Lp);
+    strat->Lqueue.push(Lp);
   }
 }
 
@@ -3196,19 +3193,6 @@ void kMergeBintoL(kStrategy strat)
   for (i=strat->Bl; i>=0; i--)
   {
     strat->Lqueue.push(strat->B[i]);
-  }
-  strat->Bl = -1;
-}
-
-/*2
-* merge set B into L
-*/
-void kMergeBintoLSba(kStrategy strat)
-{
-  int i;
-  for (i=strat->Bl; i>=0; i--)
-  {
-    strat->Lqueue.pushSba(strat->B[i]);
   }
   strat->Bl = -1;
 }
@@ -3500,7 +3484,7 @@ void chainCritOpt_1 (poly,int,kStrategy strat)
 */
 void chainCritSig (poly p,int /*ecart*/,kStrategy strat)
 {
-  kMergeBintoLSba(strat);
+  kMergeBintoL(strat);
   deleteIfAble(p, strat, false);
 }
 #ifdef HAVE_RATGRING
@@ -4165,7 +4149,7 @@ void enterExtendedSpolySig(poly h,poly hSig,kStrategy strat)
         }
 #endif
   //pWrite(h);pWrite(hSig);pWrite(Lp.p);pWrite(Lp.sig);printf("\n------------------\n");getchar();
-        strat->Lqueue.pushSba(Lp);
+        strat->Lqueue.push(Lp);
       }
     }
   }
@@ -5533,6 +5517,13 @@ int posInLF5C (const LSet /*set*/, const int length,
   return length+1;
 }
 
+int posInLerror (const LSet /*set*/, const int length,
+               LObject* /*p*/,const kStrategy strat)
+{
+  fprintf(stderr, "posInLerror\n");
+  return length+1;
+}
+
 /*2
 * looks up the position of polynomial p in set
 * e is the ecart of p
@@ -5734,8 +5725,8 @@ int posInL11Ringls (const LSet set, const int length,
 void LQueue::push(const LObject& lobject)
 {
     if (compObject.parent != NULL) {
-      if ((compObject.parent->posInL == posInL11Ring) || (compObject.parent->posInL == posInLSpecial)) {
-	// these two comparators put equal Lobjects at the start of the array (most put them at the end)
+      if ((compObject.parent->posInL == posInL11Ring) || (compObject.parent->posInL == posInLSpecial) || (compObject.parent->posInL == posInLSig)) {
+	// these three comparators put equal Lobjects at the start of the array (most put them at the end)
 	insert(std::vector<LObject>::begin(), lobject);
 	std::stable_sort(std::vector<LObject>::begin(), std::vector<LObject>::end(), compObject);
       } else {
@@ -5746,18 +5737,6 @@ void LQueue::push(const LObject& lobject)
       // f5c() special case
       auto at = compObject.posInL(data(),size()-1,const_cast<LObject *>(&lobject),NULL);
       insert(std::vector<LObject>::begin() + at, lobject);
-    }
-}
-
-void LQueue::pushSba(const LObject& lobject)
-{
-    if (compSbaObject.parent->posInLSba == posInLSig) {
-      // this comparator puts equal Lobjects at the start of the array (most put them at the end)
-      insert(std::vector<LObject>::begin(), lobject);
-      std::stable_sort(std::vector<LObject>::begin(), std::vector<LObject>::end(), compSbaObject);
-    } else {
-      push_back(lobject);
-      std::stable_sort(std::vector<LObject>::begin(), std::vector<LObject>::end(), compSbaObject);
     }
 }
 
@@ -7653,7 +7632,7 @@ void initSLSba (ideal F, ideal Q,kStrategy strat)
           }
           strat->initEcart(&h);
           h.sev = pGetShortExpVector(h.p);
-          strat->Lqueue.pushSba(h);
+          strat->Lqueue.push(h);
         }
       }
       /*
@@ -9710,9 +9689,7 @@ void initSbaPos (kStrategy strat)
     strat->posInT = posInT11;
   }
   strat->posInLDependsOnLength = FALSE;
-  strat->posInLSba  = posInLSig;
-  //strat->posInL     = posInLSig;
-  strat->posInL     = posInLF5C;
+  strat->posInL     = posInLSig;
   /*
   if (rField_is_Ring(currRing))
   {
@@ -11074,7 +11051,6 @@ skStrategy::skStrategy()
 {
   memset(this, 0, sizeof(skStrategy));
   Lqueue.compObject.parent = this;
-  Lqueue.compSbaObject.parent = this;
   strat_nr++;
   nr=strat_nr;
   tailRing = currRing;

@@ -301,18 +301,10 @@ public:
   bool operator()(const LObject &lhs, const LObject &rhs);
 };
 
-class CompareLSbaObject {
-public:
-  skStrategy * parent;
-  bool operator()(const LObject &lhs, const LObject &rhs);
-};
-
 class LQueue : std::vector<LObject> {
 public:
   CompareLObject compObject;
-  CompareLSbaObject compSbaObject;
   void push(const LObject& lobject);
-  void pushSba(const LObject& lobject);
   void reorder(void) {
     /* required after changes made to objects that can change their sort order */
     std::stable_sort(std::vector<LObject>::begin(), std::vector<LObject>::end(), compObject);
@@ -364,8 +356,6 @@ public:
   int (*red2)(LObject * L,kStrategy strat);
   void (*initEcart)(TObject * L);
   int (*posInT)(const TSet T,const int tl,LObject &h);
-  int (*posInLSba)(const LSet set, const int length,
-                LObject* L,const kStrategy strat);
   int (*posInL)(const LSet set, const int length,
                 LObject* L,const kStrategy strat);
   void (*enterS)(LObject &h, int pos,kStrategy strat, int atR/* =-1*/ );
@@ -509,13 +499,6 @@ inline bool CompareLObject::operator()(const LObject &lhs, const LObject &rhs)
   LObject * lhsp = const_cast<LObject *>(&lhs);
   LObject * rhsp = const_cast<LObject *>(&rhs);
   return ((parent->posInL(lhsp,0,rhsp,parent) == 1) && (parent->posInL(rhsp,0,lhsp,parent) == 0));
-};
-
-inline bool CompareLSbaObject::operator()(const LObject &lhs, const LObject &rhs)
-{
-  LObject * lhsp = const_cast<LObject *>(&lhs);
-  LObject * rhsp = const_cast<LObject *>(&rhs);
-  return ((parent->posInLSba(lhsp,0,rhsp,parent) == 1) && (parent->posInLSba(rhsp,0,lhsp,parent) == 0));
 };
 
 void deleteHC(poly *p, int *e, int *l, kStrategy strat);
