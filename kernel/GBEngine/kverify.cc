@@ -43,8 +43,9 @@ BOOLEAN kVerify1(ideal F, ideal Q)
     // strat->L = initL(strat->Lmax); // L removed, using LQueue
     /*- set B -*/
     strat->Bmax = setmaxL;
-    strat->Bl = -1;
-    strat->B = initL();
+    // Bl removed - Bqueue manages its own size
+    // strat->Bl = -1;
+    // strat->B = initL(); // B removed, using Bqueue
     /*- set T -*/
     strat->tl = -1;
     strat->tmax = setmaxT;
@@ -162,8 +163,9 @@ BOOLEAN kVerify2(ideal F, ideal Q)
     // strat->L = initL(strat->Lmax); // L removed, using LQueue
     /*- set B -*/
     strat->Bmax = setmaxL;
-    strat->Bl = -1;
-    strat->B = initL();
+    // Bl removed - Bqueue manages its own size
+    // strat->Bl = -1;
+    // strat->B = initL(); // B removed, using Bqueue
     /*- set T -*/
     strat->tl = -1;
     strat->tmax = setmaxT;

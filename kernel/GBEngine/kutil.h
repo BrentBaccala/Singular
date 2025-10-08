@@ -400,8 +400,8 @@ public:
   unsigned long* sevT;
   TSet T;
   LQueue  Lqueue;
+  LQueue  Bqueue;
 
-  LSet    B;
   poly    kNoether;
   poly    t_kNoether; // same polys in tailring
   KINLINE poly    kNoetherTail();
@@ -425,7 +425,7 @@ public:
   int syzl,syzmax,syzidxmax;
   int tl,tmax;
   int Lmax;
-  int Bl,Bmax;
+  int Bmax;
   int ak,LazyDegree,LazyPass;
   int syzComp;
   int lastAxis;

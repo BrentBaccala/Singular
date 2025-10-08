@@ -1428,10 +1428,10 @@ static void enterOnePairRing (int i,poly p,int /*ecart*/, int isFromQ,kStrategy 
   *if the leading term of r divides lcm(s,p) then (s,p) will not enter B
   */
 
-  for(j = strat->Bl;j>=0;j--)
+  for(auto jt = strat->Bqueue.begin(); jt != strat->Bqueue.end(); )
   {
-    compare=pDivCompRing(strat->B[j].lcm,h.lcm);
-    compareCoeff = n_DivComp(pGetCoeff(strat->B[j].lcm), pGetCoeff(h.lcm), currRing->cf);
+    compare=pDivCompRing(jt->lcm,h.lcm);
+    compareCoeff = n_DivComp(pGetCoeff(jt->lcm), pGetCoeff(h.lcm), currRing->cf);
     if(compare == pDivComp_EQUAL)
     {
       //They have the same LM
@@ -1447,7 +1447,7 @@ static void enterOnePairRing (int i,poly p,int /*ecart*/, int isFromQ,kStrategy 
       }
       if(compareCoeff == pDivComp_GREATER)
       {
-        deleteInL(strat->B,&strat->Bl,j,strat);
+        jt = strat->Bqueue.erase(jt);
         strat->c3++;
       }
       if(compareCoeff == pDivComp_EQUAL)
@@ -1475,10 +1475,11 @@ static void enterOnePairRing (int i,poly p,int /*ecart*/, int isFromQ,kStrategy 
       }
       if(compare == pDivComp_GREATER)
       {
-        deleteInL(strat->B,&strat->Bl,j,strat);
+        jt = strat->Bqueue.erase(jt);
         strat->c3++;
       }
     }
+    if (compare != pDivComp_GREATER || compareCoeff != pDivComp_GREATER) ++jt;
   }
   number s, t;
   poly m1, m2, gcd = NULL;
@@ -1562,16 +1563,12 @@ static void enterOnePairRing (int i,poly p,int /*ecart*/, int isFromQ,kStrategy 
     h.i_r2 = strat->S_2_R[i];
   }
   #endif
-  if (strat->Bl==-1)
-    posx =0;
-  else
-    posx = strat->posInL(strat->B,strat->Bl,&h,strat);
   h.sev = pGetShortExpVector(h.p);
   if (currRing!=strat->tailRing)
     h.t_p = k_LmInit_currRing_2_tailRing(h.p, strat->tailRing);
   if (strat->P.p!=NULL) strat->P.sev = pGetShortExpVector(strat->P.p);
   else strat->P.sev=0L;
-  enterL(&strat->B,&strat->Bl,&strat->Bmax,h,posx);
+  strat->Bqueue.push(h);
   kTest_TS(strat);
 }
 
@@ -2032,13 +2029,11 @@ void enterOnePairNormal (int i,poly p,int ecart, int isFromQ,kStrategy strat, in
     *if the leading term of r divides lcm(s,p) then (s,p) will not enter B
     */
     {
-      j = strat->Bl;
-      loop
+      for (auto jt = strat->Bqueue.begin(); jt != strat->Bqueue.end(); )
       {
-        if (j < 0)  break;
-        compare=pDivComp(strat->B[j].lcm,Lp.lcm);
+        compare=pDivComp(jt->lcm,Lp.lcm);
         if ((compare==1)
-        &&(sugarDivisibleBy(strat->B[j].ecart,Lp.ecart)))
+        &&(sugarDivisibleBy(jt->ecart,Lp.ecart)))
         {
           strat->c3++;
           if ((strat->fromQ==NULL) || (isFromQ==0) || (strat->fromQ[i]==0))
@@ -2050,12 +2045,13 @@ void enterOnePairNormal (int i,poly p,int ecart, int isFromQ,kStrategy strat, in
         }
         else
         if ((compare ==-1)
-        && sugarDivisibleBy(Lp.ecart,strat->B[j].ecart))
+        && sugarDivisibleBy(Lp.ecart,jt->ecart))
         {
-          deleteInL(strat->B,&strat->Bl,j,strat);
+          jt = strat->Bqueue.erase(jt);
           strat->c3++;
         }
-        j--;
+        else
+          ++jt;
       }
     }
   }
@@ -2096,9 +2092,9 @@ void enterOnePairNormal (int i,poly p,int ecart, int isFromQ,kStrategy strat, in
       *if the leading term of s divides lcm(r,p) then (r,p) will be canceled
       *if the leading term of r divides lcm(s,p) then (s,p) will not enter B
       */
-      for(j = strat->Bl;j>=0;j--)
+      for(auto jt = strat->Bqueue.begin(); jt != strat->Bqueue.end(); )
       {
-        compare=pDivComp(strat->B[j].lcm,Lp.lcm);
+        compare=pDivComp(jt->lcm,Lp.lcm);
         if (compare==1)
         {
           strat->c3++;
@@ -2112,9 +2108,11 @@ void enterOnePairNormal (int i,poly p,int ecart, int isFromQ,kStrategy strat, in
         else
         if (compare ==-1)
         {
-          deleteInL(strat->B,&strat->Bl,j,strat);
+          jt = strat->Bqueue.erase(jt);
           strat->c3++;
         }
+        else
+          ++jt;
       }
     }
   }
@@ -2227,8 +2225,7 @@ void enterOnePairNormal (int i,poly p,int ecart, int isFromQ,kStrategy strat, in
         nDelete(&(Lp.p->coef));
     }
 
-    l = strat->posInL(strat->B,strat->Bl,&Lp,strat);
-    enterL(&strat->B,&strat->Bl,&strat->Bmax,Lp,l);
+    strat->Bqueue.push(Lp);
   }
 }
 
@@ -2310,13 +2307,11 @@ static void enterOnePairLift (int i,poly p,int ecart, int isFromQ,kStrategy stra
     *if the leading term of r divides lcm(s,p) then (s,p) will not enter B
     */
     {
-      j = strat->Bl;
-      loop
+      for (auto jt = strat->Bqueue.begin(); jt != strat->Bqueue.end(); )
       {
-        if (j < 0)  break;
-        compare=pDivComp(strat->B[j].lcm,Lp.lcm);
+        compare=pDivComp(jt->lcm,Lp.lcm);
         if ((compare==1)
-        &&(sugarDivisibleBy(strat->B[j].ecart,Lp.ecart)))
+        &&(sugarDivisibleBy(jt->ecart,Lp.ecart)))
         {
           strat->c3++;
           if ((strat->fromQ==NULL) || (isFromQ==0) || (strat->fromQ[i]==0))
@@ -2328,12 +2323,13 @@ static void enterOnePairLift (int i,poly p,int ecart, int isFromQ,kStrategy stra
         }
         else
         if ((compare ==-1)
-        && sugarDivisibleBy(Lp.ecart,strat->B[j].ecart))
+        && sugarDivisibleBy(Lp.ecart,jt->ecart))
         {
-          deleteInL(strat->B,&strat->Bl,j,strat);
+          jt = strat->Bqueue.erase(jt);
           strat->c3++;
         }
-        j--;
+        else
+          ++jt;
       }
     }
   }
@@ -2370,9 +2366,9 @@ static void enterOnePairLift (int i,poly p,int ecart, int isFromQ,kStrategy stra
     *if the leading term of s divides lcm(r,p) then (r,p) will be canceled
     *if the leading term of r divides lcm(s,p) then (s,p) will not enter B
     */
-    for(j = strat->Bl;j>=0;j--)
+    for(auto jt = strat->Bqueue.begin(); jt != strat->Bqueue.end(); )
     {
-      compare=pDivComp(strat->B[j].lcm,Lp.lcm);
+      compare=pDivComp(jt->lcm,Lp.lcm);
       if (compare==1)
       {
         strat->c3++;
@@ -2386,9 +2382,11 @@ static void enterOnePairLift (int i,poly p,int ecart, int isFromQ,kStrategy stra
       else
       if (compare ==-1)
       {
-        deleteInL(strat->B,&strat->Bl,j,strat);
+        jt = strat->Bqueue.erase(jt);
         strat->c3++;
       }
+      else
+        ++jt;
     }
   }
   /*
@@ -2451,8 +2449,7 @@ static void enterOnePairLift (int i,poly p,int ecart, int isFromQ,kStrategy stra
         nDelete(&(Lp.p->coef));
     }
 
-    l = strat->posInL(strat->B,strat->Bl,&Lp,strat);
-    enterL(&strat->B,&strat->Bl,&strat->Bmax,Lp,l);
+    strat->Bqueue.push(Lp);
   }
 }
 
@@ -2712,8 +2709,7 @@ static void enterOnePairSig (int i, poly p, poly pSig, int, int ecart, int isFro
         nDelete(&(Lp.p->coef));
     }
 
-    l = strat->posInL(strat->B,strat->Bl,&Lp,strat);
-    enterL(&strat->B,&strat->Bl,&strat->Bmax,Lp,l);
+    strat->Bqueue.push(Lp);
   }
 }
 
@@ -3189,12 +3185,11 @@ void enterOnePairSpecial (int i,poly p,int ecart,kStrategy strat, int atR = -1)
 */
 void kMergeBintoL(kStrategy strat)
 {
-  int i;
-  for (i=strat->Bl; i>=0; i--)
+  for (auto it = strat->Bqueue.begin(); it != strat->Bqueue.end(); ++it)
   {
-    strat->Lqueue.push(strat->B[i]);
+    strat->Lqueue.push(*it);
   }
-  strat->Bl = -1;
+  while (!strat->Bqueue.empty()) strat->Bqueue.pop();
 }
 
 /**
@@ -3342,13 +3337,15 @@ void chainCritNormal (poly p,int ecart,kStrategy strat)
       {
         if (strat->pairtest[j])
         {
-          for (i=strat->Bl; i>=0; i--)
+          for (auto it = strat->Bqueue.begin(); it != strat->Bqueue.end(); )
           {
-            if (pLPDivisibleBy(strat->S[j],strat->B[i].lcm))
+            if (pLPDivisibleBy(strat->S[j],it->lcm))
             {
-              deleteInL(strat->B,&strat->Bl,i,strat);
+              it = strat->Bqueue.erase(it);
               strat->c3++;
             }
+            else
+              ++it;
           }
         }
       }
@@ -3361,13 +3358,15 @@ void chainCritNormal (poly p,int ecart,kStrategy strat)
       {
         if (strat->pairtest[j])
         {
-          for (i=strat->Bl; i>=0; i--)
+          for (auto it = strat->Bqueue.begin(); it != strat->Bqueue.end(); )
           {
-            if (pDivisibleBy(strat->S[j],strat->B[i].lcm))
+            if (pDivisibleBy(strat->S[j],it->lcm))
             {
-              deleteInL(strat->B,&strat->Bl,i,strat);
+              it = strat->Bqueue.erase(it);
               strat->c3++;
             }
+            else
+              ++it;
           }
         }
       }
@@ -3390,31 +3389,29 @@ void chainCritNormal (poly p,int ecart,kStrategy strat)
       *in B all elements with the same lcm except the "best"
       *(i.e. the last one in B with this property) will be canceled
       */
-      j = strat->Bl;
-      loop /*cannot be changed into a for !!! */
+      for (auto jt = strat->Bqueue.begin(); jt != strat->Bqueue.end(); )
       {
-        if (j <= 0) break;
-        i = j-1;
-        loop
+        bool j_deleted = false;
+        for (auto it = jt + 1; it != strat->Bqueue.end(); )
         {
-          if (i <  0) break;
-          if (pLmEqual(strat->B[j].lcm,strat->B[i].lcm))
+          if (pLmEqual(jt->lcm,it->lcm))
           {
             strat->c3++;
-            if (sugarDivisibleBy(strat->B[j].ecart,strat->B[i].ecart))
+            if (sugarDivisibleBy(jt->ecart,it->ecart))
             {
-              deleteInL(strat->B,&strat->Bl,i,strat);
-              j--;
+              it = strat->Bqueue.erase(it);
             }
             else
             {
-              deleteInL(strat->B,&strat->Bl,j,strat);
+              jt = strat->Bqueue.erase(jt);
+              j_deleted = true;
               break;
             }
           }
-          i--;
+          else
+            ++it;
         }
-        j--;
+        if (!j_deleted) ++jt;
       }
     }
     else /*sugarCrit*/
@@ -3430,20 +3427,18 @@ void chainCritNormal (poly p,int ecart,kStrategy strat)
       *in B all elements with the same lcm except the "best"
       *(i.e. the last one in B with this property) will be canceled
       */
-      j = strat->Bl;
-      loop   /*cannot be changed into a for !!! */
+      for (auto jt = strat->Bqueue.begin(); jt != strat->Bqueue.end(); ++jt)
       {
-        if (j <= 0) break;
-        for(i=j-1; i>=0; i--)
+        for (auto it = jt + 1; it != strat->Bqueue.end(); )
         {
-          if (pLmEqual(strat->B[j].lcm,strat->B[i].lcm))
+          if (pLmEqual(jt->lcm,it->lcm))
           {
             strat->c3++;
-            deleteInL(strat->B,&strat->Bl,i,strat);
-            j--;
+            it = strat->Bqueue.erase(it);
           }
+          else
+            ++it;
         }
-        j--;
       }
     }
     /*
@@ -3504,23 +3499,25 @@ void chainCritPart (poly p,int ecart,kStrategy strat)
     {
       if (strat->pairtest[j])
       {
-        for (i=strat->Bl; i>=0; i--)
+        for (auto it = strat->Bqueue.begin(); it != strat->Bqueue.end(); )
         {
           if (_p_LmDivisibleByPart(strat->S[j],currRing,
-             strat->B[i].lcm,currRing,
+             it->lcm,currRing,
              currRing->real_var_start,currRing->real_var_end))
           {
             if(TEST_OPT_DEBUG)
             {
                Print("chain-crit-part: S[%d]=",j);
                p_wrp(strat->S[j],currRing);
-               Print(" divide B[%d].lcm=",i);
-               p_wrp(strat->B[i].lcm,currRing);
+               Print(" divide B[i].lcm=");
+               p_wrp(it->lcm,currRing);
                PrintLn();
             }
-            deleteInL(strat->B,&strat->Bl,i,strat);
+            it = strat->Bqueue.erase(it);
             strat->c3++;
           }
+          else
+            ++it;
         }
       }
     }
@@ -3542,47 +3539,45 @@ void chainCritPart (poly p,int ecart,kStrategy strat)
       *in B all elements with the same lcm except the "best"
       *(i.e. the last one in B with this property) will be canceled
       */
-      j = strat->Bl;
-      loop /*cannot be changed into a for !!! */
+      for (auto jt = strat->Bqueue.begin(); jt != strat->Bqueue.end(); )
       {
-        if (j <= 0) break;
-        i = j-1;
-        loop
+        bool j_deleted = false;
+        for (auto it = jt + 1; it != strat->Bqueue.end(); )
         {
-          if (i <  0) break;
-          if (pLmEqual(strat->B[j].lcm,strat->B[i].lcm))
+          if (pLmEqual(jt->lcm,it->lcm))
           {
             strat->c3++;
-            if (sugarDivisibleBy(strat->B[j].ecart,strat->B[i].ecart))
+            if (sugarDivisibleBy(jt->ecart,it->ecart))
             {
               if(TEST_OPT_DEBUG)
               {
-                Print("chain-crit-part: sugar B[%d].lcm=",j);
-                p_wrp(strat->B[j].lcm,currRing);
-                Print(" delete B[%d]",i);
-                p_wrp(strat->B[i].lcm,currRing);
+                Print("chain-crit-part: sugar B[j].lcm=");
+                p_wrp(jt->lcm,currRing);
+                Print(" delete B[i]");
+                p_wrp(it->lcm,currRing);
                 PrintLn();
               }
-              deleteInL(strat->B,&strat->Bl,i,strat);
-              j--;
+              it = strat->Bqueue.erase(it);
             }
             else
             {
               if(TEST_OPT_DEBUG)
               {
-                Print("chain-crit-part: sugar B[%d].lcm=",i);
-                p_wrp(strat->B[i].lcm,currRing);
-                Print(" delete B[%d]",j);
-                p_wrp(strat->B[j].lcm,currRing);
+                Print("chain-crit-part: sugar B[i].lcm=");
+                p_wrp(it->lcm,currRing);
+                Print(" delete B[j]");
+                p_wrp(jt->lcm,currRing);
                 PrintLn();
               }
-              deleteInL(strat->B,&strat->Bl,j,strat);
+              jt = strat->Bqueue.erase(jt);
+              j_deleted = true;
               break;
             }
           }
-          i--;
+          else
+            ++it;
         }
-        j--;
+        if (!j_deleted) ++jt;
       }
     }
     else /*sugarCrit*/
@@ -3598,26 +3593,24 @@ void chainCritPart (poly p,int ecart,kStrategy strat)
       *in B all elements with the same lcm except the "best"
       *(i.e. the last one in B with this property) will be canceled
       */
-      j = strat->Bl;
-      loop   /*cannot be changed into a for !!! */
+      for (auto jt = strat->Bqueue.begin(); jt != strat->Bqueue.end(); ++jt)
       {
-        if (j <= 0) break;
-        for(i=j-1; i>=0; i--)
+        for (auto it = jt + 1; it != strat->Bqueue.end(); )
         {
-          if (pLmEqual(strat->B[j].lcm,strat->B[i].lcm))
+          if (pLmEqual(jt->lcm,it->lcm))
           {
             if(TEST_OPT_DEBUG)
             {
-              Print("chain-crit-part: equal lcm B[%d].lcm=",j);
-              p_wrp(strat->B[j].lcm,currRing);
-              Print(" delete B[%d]\n",i);
+              Print("chain-crit-part: equal lcm B[j].lcm=");
+              p_wrp(jt->lcm,currRing);
+              Print(" delete B[i]\n");
             }
             strat->c3++;
-            deleteInL(strat->B,&strat->Bl,i,strat);
-            j--;
+            it = strat->Bqueue.erase(it);
           }
+          else
+            ++it;
         }
-        j--;
       }
     }
     /*
@@ -3844,9 +3837,9 @@ void chainCritRing (poly p,int, kStrategy strat)
       {
         if (strat->pairtest[j])
         {
-          for (i=strat->Bl; i>=0; i--)
+          for (auto it = strat->Bqueue.begin(); it != strat->Bqueue.end(); )
           {
-            if (pDivisibleBy(strat->S[j],strat->B[i].lcm) && n_DivBy(pGetCoeff(strat->B[i].lcm), pGetCoeff(strat->S[j]),currRing->cf))
+            if (pDivisibleBy(strat->S[j],it->lcm) && n_DivBy(pGetCoeff(it->lcm), pGetCoeff(strat->S[j]),currRing->cf))
             {
 #ifdef KDEBUG
               if (TEST_OPT_DEBUG)
@@ -3855,17 +3848,19 @@ void chainCritRing (poly p,int, kStrategy strat)
                 PrintS("strat->S[j]:");
                 wrp(strat->S[j]);
                 PrintS("  strat->B[i].lcm:");
-                wrp(strat->B[i].lcm);PrintLn();
-                pWrite(strat->B[i].p);
-                pWrite(strat->B[i].p1);
-                pWrite(strat->B[i].p2);
-                wrp(strat->B[i].lcm);
+                wrp(it->lcm);PrintLn();
+                pWrite(it->p);
+                pWrite(it->p1);
+                pWrite(it->p2);
+                wrp(it->lcm);
                 PrintLn();
               }
 #endif
-              deleteInL(strat->B,&strat->Bl,i,strat);
+              it = strat->Bqueue.erase(it);
               strat->c3++;
             }
+            else
+              ++it;
           }
         }
       }
@@ -6397,20 +6392,20 @@ BOOLEAN arriRewCriterionPre(poly sig, unsigned long not_sevSig, poly lm, kStrate
   //Over Rings, there are still some changes to do: considering coeffs
   if(rField_is_Ring(currRing))
     return FALSE;
-  int found = -1;
-  for (int i=strat->Bl; i>-1; i--)
+  auto found = strat->Bqueue.end();
+  for (auto it = strat->Bqueue.begin(); it != strat->Bqueue.end(); ++it)
   {
-    if (pLmEqual(strat->B[i].sig,sig))
+    if (pLmEqual(it->sig,sig))
     {
-      found = i;
+      found = it;
       break;
     }
   }
-  if (found != -1)
+  if (found != strat->Bqueue.end())
   {
-    if (pLmCmp(lm,strat->B[found].GetLmCurrRing()) == -1)
+    if (pLmCmp(lm,found->GetLmCurrRing()) == -1)
     {
-      deleteInL(strat->B,&strat->Bl,found,strat);
+      strat->Bqueue.erase(found);
     }
     else
     {
@@ -9503,8 +9498,6 @@ void initBuchMora (ideal F,ideal Q,kStrategy strat)
   // strat->L = initL(strat->Lmax); // L removed, using LQueue
   /*- set B -*/
   strat->Bmax = setmaxL;
-  strat->Bl = -1;
-  strat->B = initL();
   /*- set T -*/
   strat->tl = -1;
   strat->tmax = setmaxT;
@@ -9586,7 +9579,7 @@ void exitBuchMora (kStrategy strat)
   /*- set L: should be empty -*/
   // omFreeSize(strat->L,(strat->Lmax)*sizeof(LObject)); // L removed, using LQueue
   /*- set B: should be empty -*/
-  omFreeSize(strat->B,(strat->Bmax)*sizeof(LObject));
+  // omFreeSize(strat->B,(strat->Bmax)*sizeof(LObject)); // B removed, using Bqueue
   pLmFree(&strat->tail);
   strat->syzComp=0;
 
@@ -9717,8 +9710,6 @@ void initSbaBuchMora (ideal F,ideal Q,kStrategy strat)
   // strat->L = initL(strat->Lmax); // L removed, using LQueue
   /*- set B -*/
   strat->Bmax = setmaxL;
-  strat->Bl = -1;
-  strat->B = initL();
   /*- set T -*/
   strat->tl = -1;
   strat->tmax = setmaxT;
@@ -9800,7 +9791,7 @@ void exitSba (kStrategy strat)
   /*- set L: should be empty -*/
   // omFreeSize(strat->L,(strat->Lmax)*sizeof(LObject)); // L removed, using LQueue
   /*- set B: should be empty -*/
-  omFreeSize(strat->B,(strat->Bmax)*sizeof(LObject));
+  // omFreeSize(strat->B,(strat->Bmax)*sizeof(LObject)); // B removed, using Bqueue
   /*- set sig: no need for the signatures anymore -*/
   omFreeSize(strat->sig,IDELEMS(strat->Shdl)*sizeof(poly));
   pLmDelete(&strat->tail);
@@ -11609,10 +11600,10 @@ static void enterOnePairRingShift (poly q, poly p, int /*ecart*/, int isFromQ, k
   *if the leading term of r divides lcm(s,p) then (s,p) will not enter B
   */
 
-  for(j = strat->Bl;j>=0;j--)
+  for(auto jt = strat->Bqueue.begin(); jt != strat->Bqueue.end(); )
   {
-    compare=pDivCompRing(strat->B[j].lcm,h.lcm);
-    compareCoeff = n_DivComp(pGetCoeff(strat->B[j].lcm), pGetCoeff(h.lcm), currRing->cf);
+    compare=pDivCompRing(jt->lcm,h.lcm);
+    compareCoeff = n_DivComp(pGetCoeff(jt->lcm), pGetCoeff(h.lcm), currRing->cf);
     if(compare == pDivComp_EQUAL)
     {
       //They have the same LM
@@ -11628,7 +11619,7 @@ static void enterOnePairRingShift (poly q, poly p, int /*ecart*/, int isFromQ, k
       }
       if(compareCoeff == pDivComp_GREATER)
       {
-        deleteInL(strat->B,&strat->Bl,j,strat);
+        jt = strat->Bqueue.erase(jt);
         strat->c3++;
       }
       if(compareCoeff == pDivComp_EQUAL)
@@ -11656,10 +11647,11 @@ static void enterOnePairRingShift (poly q, poly p, int /*ecart*/, int isFromQ, k
       }
       if(compare == pDivComp_GREATER)
       {
-        deleteInL(strat->B,&strat->Bl,j,strat);
+        jt = strat->Bqueue.erase(jt);
         strat->c3++;
       }
     }
+    if (compare != pDivComp_GREATER || compareCoeff != pDivComp_GREATER) ++jt;
   }
   number s, t;
   poly m1, m2, gcd = NULL;
@@ -11771,10 +11763,6 @@ static void enterOnePairRingShift (poly q, poly p, int /*ecart*/, int isFromQ, k
     h.i_r2 = -1;
   }
   #endif
-  if (strat->Bl==-1)
-    posx =0;
-  else
-    posx = strat->posInL(strat->B,strat->Bl,&h,strat);
   h.sev = pGetShortExpVector(h.p);
   if (currRing!=strat->tailRing)
     h.t_p = k_LmInit_currRing_2_tailRing(h.p, strat->tailRing);
@@ -11784,7 +11772,7 @@ static void enterOnePairRingShift (poly q, poly p, int /*ecart*/, int isFromQ, k
   assume(h.lcm != NULL);
   assume(pIsInV(h.lcm));
 
-  enterL(&strat->B,&strat->Bl,&strat->Bmax,h,posx);
+  strat->Bqueue.push(h);
   kTest_TS(strat);
 }
 #endif
@@ -11997,13 +11985,11 @@ BOOLEAN enterOnePairShift (poly q, poly p, int ecart, int isFromQ, kStrategy str
     *if the leading term of r divides lcm(s,p) then (s,p) will not enter B
     */
     {
-      j = strat->Bl;
-      loop
+      for (auto jt = strat->Bqueue.begin(); jt != strat->Bqueue.end(); )
       {
-        if (j < 0)  break;
-        compare=pLPDivComp(strat->B[j].lcm,Lp.lcm);
+        compare=pLPDivComp(jt->lcm,Lp.lcm);
         if ((compare==1)
-        &&(sugarDivisibleBy(strat->B[j].ecart,Lp.ecart)))
+        &&(sugarDivisibleBy(jt->ecart,Lp.ecart)))
         {
           strat->c3++;
           if ((strat->fromQ==NULL) || (isFromQ==0) || (qfromQ==0))
@@ -12012,7 +11998,7 @@ BOOLEAN enterOnePairShift (poly q, poly p, int ecart, int isFromQ, kStrategy str
 #ifdef CRITERION_DEBUG
             if (TEST_OPT_DEBUG)
             {
-              Print("--- chain crit using B[%d].lcm=%s\n", j, pString(strat->B[j].lcm));
+              Print("--- chain crit using B[j].lcm=%s\n", pString(jt->lcm));
             }
 #endif
             return TRUE;
@@ -12021,18 +12007,19 @@ BOOLEAN enterOnePairShift (poly q, poly p, int ecart, int isFromQ, kStrategy str
         }
         else
         if ((compare ==-1)
-        && sugarDivisibleBy(Lp.ecart,strat->B[j].ecart))
+        && sugarDivisibleBy(Lp.ecart,jt->ecart))
         {
 #ifdef CRITERION_DEBUG
           if (TEST_OPT_DEBUG)
           {
-            Print("--- chain crit using pair to remove B[%d].lcm=%s\n", j, pString(strat->B[j].lcm));
+            Print("--- chain crit using pair to remove B[j].lcm=%s\n", pString(jt->lcm));
           }
 #endif
-          deleteInL(strat->B,&strat->Bl,j,strat);
+          jt = strat->Bqueue.erase(jt);
           strat->c3++;
         }
-        j--;
+        else
+          ++jt;
       }
     }
   }
@@ -12079,9 +12066,9 @@ BOOLEAN enterOnePairShift (poly q, poly p, int ecart, int isFromQ, kStrategy str
       *if the leading term of s divides lcm(r,p) then (r,p) will be canceled
       *if the leading term of r divides lcm(s,p) then (s,p) will not enter B
       */
-      for(j = strat->Bl;j>=0;j--)
+      for(auto jt = strat->Bqueue.begin(); jt != strat->Bqueue.end(); )
       {
-        compare=pLPDivComp(strat->B[j].lcm,Lp.lcm);
+        compare=pLPDivComp(jt->lcm,Lp.lcm);
         if (compare==1)
         {
           strat->c3++;
@@ -12091,7 +12078,7 @@ BOOLEAN enterOnePairShift (poly q, poly p, int ecart, int isFromQ, kStrategy str
 #ifdef CRITERION_DEBUG
             if (TEST_OPT_DEBUG)
             {
-              Print("--- chain crit using B[%d].lcm=%s\n", j, pString(strat->B[j].lcm));
+              Print("--- chain crit using B[j].lcm=%s\n", pString(jt->lcm));
             }
 #endif
             return TRUE;
@@ -12104,12 +12091,14 @@ BOOLEAN enterOnePairShift (poly q, poly p, int ecart, int isFromQ, kStrategy str
 #ifdef CRITERION_DEBUG
           if (TEST_OPT_DEBUG)
           {
-            Print("--- chain crit using pair to remove B[%d].lcm=%s\n", j, pString(strat->B[j].lcm));
+            Print("--- chain crit using pair to remove B[j].lcm=%s\n", pString(jt->lcm));
           }
 #endif
-          deleteInL(strat->B,&strat->Bl,j,strat);
+          jt = strat->Bqueue.erase(jt);
           strat->c3++;
         }
+        else
+          ++jt;
       }
     }
   }
@@ -12226,8 +12215,7 @@ BOOLEAN enterOnePairShift (poly q, poly p, int ecart, int isFromQ, kStrategy str
         nDelete(&(Lp.p->coef));
     }
 
-    l = strat->posInL(strat->B,strat->Bl,&Lp,strat);
-    enterL(&strat->B,&strat->Bl,&strat->Bmax,Lp,l);
+    strat->Bqueue.push(Lp);
 #ifdef CRITERION_DEBUG
     if (TEST_OPT_DEBUG) PrintS("+++ Entered pair\n");
 #endif

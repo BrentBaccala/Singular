@@ -169,7 +169,7 @@ kStrategy kStratCopy(kStrategy o)
   copyT(o,s);//s->T=...
   s->tail = pInit();
   copyL(o,s);//s->L=...
-  s->B=initL();
+  // s->B=initL(); // B removed, using Bqueue
   s->kNoether=pCopy(o->kNoether);
   if (o->NotUsedAxis!=NULL)
   {
@@ -192,7 +192,8 @@ kStrategy kStratCopy(kStrategy o)
   s->tmax=o->tmax;
   // Ll removed - LQueue manages its own size
   s->Lmax=o->Lmax;
-  s->Bl=-1;
+  // Bl removed - Bqueue manages its own size
+  // s->Bl=-1;
   s->Bmax=setmaxL;
   s->ak=o->ak;
   s->syzComp=o->syzComp;
