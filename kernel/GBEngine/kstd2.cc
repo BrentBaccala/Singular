@@ -3998,7 +3998,6 @@ poly kNF2 (ideal F,ideal Q,poly q,kStrategy strat, int lazyReduce)
     }
   }
   /*- release temp data------------------------------- -*/
-  assume(strat->B==NULL); /* strat->B unused */
   omFree(strat->sevS);
   omFree(strat->ecartS);
   assume(strat->T==NULL);//omfree(strat->T);
@@ -4072,7 +4071,6 @@ poly kNF2Bound (ideal F,ideal Q,poly q,int bound,kStrategy strat, int lazyReduce
     }
   }
   /*- release temp data------------------------------- -*/
-  assume(strat->B==NULL); /* strat->B unused */
   omFree(strat->sevS);
   omFree(strat->ecartS);
   assume(strat->T==NULL);//omfree(strat->T);
@@ -4157,7 +4155,6 @@ ideal kNF2 (ideal F,ideal Q,ideal q,kStrategy strat, int lazyReduce)
     //  res->m[i]=NULL;
   }
   /*- release temp data------------------------------- -*/
-  assume(strat->B==NULL); /* strat->B unused */
   omFree(strat->sevS);
   omFree(strat->ecartS);
   assume(strat->T==NULL);//omfree(strat->T);
@@ -4237,7 +4234,6 @@ ideal kNF2Bound (ideal F,ideal Q,ideal q,int bound,kStrategy strat, int lazyRedu
     //  res->m[i]=NULL;
   }
   /*- release temp data------------------------------- -*/
-  assume(strat->B==NULL); /* strat->B unused */
   omFree(strat->sevS);
   omFree(strat->ecartS);
   assume(strat->T==NULL);//omfree(strat->T);

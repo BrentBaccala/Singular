@@ -1430,6 +1430,7 @@ static void enterOnePairRing (int i,poly p,int /*ecart*/, int isFromQ,kStrategy 
 
   for(auto jt = strat->Bqueue.begin(); jt != strat->Bqueue.end(); )
   {
+    bool j_deleted = false;
     compare=pDivCompRing(jt->lcm,h.lcm);
     compareCoeff = n_DivComp(pGetCoeff(jt->lcm), pGetCoeff(h.lcm), currRing->cf);
     if(compare == pDivComp_EQUAL)
@@ -1448,6 +1449,7 @@ static void enterOnePairRing (int i,poly p,int /*ecart*/, int isFromQ,kStrategy 
       if(compareCoeff == pDivComp_GREATER)
       {
         jt = strat->Bqueue.erase(jt);
+        j_deleted = true;
         strat->c3++;
       }
       if(compareCoeff == pDivComp_EQUAL)
@@ -1476,10 +1478,11 @@ static void enterOnePairRing (int i,poly p,int /*ecart*/, int isFromQ,kStrategy 
       if(compare == pDivComp_GREATER)
       {
         jt = strat->Bqueue.erase(jt);
+        j_deleted = true;
         strat->c3++;
       }
     }
-    if (compare != pDivComp_GREATER || compareCoeff != pDivComp_GREATER) ++jt;
+    if (! j_deleted) ++jt;
   }
   number s, t;
   poly m1, m2, gcd = NULL;
@@ -3185,11 +3188,11 @@ void enterOnePairSpecial (int i,poly p,int ecart,kStrategy strat, int atR = -1)
 */
 void kMergeBintoL(kStrategy strat)
 {
-  for (auto it = strat->Bqueue.begin(); it != strat->Bqueue.end(); ++it)
-  {
-    strat->Lqueue.push(*it);
+  while (!strat->Bqueue.empty()) {
+    auto Lobj = strat->Bqueue.top();
+    strat->Bqueue.pop();
+    strat->Lqueue.push(Lobj);
   }
-  while (!strat->Bqueue.empty()) strat->Bqueue.pop();
 }
 
 /**
@@ -3400,6 +3403,7 @@ void chainCritNormal (poly p,int ecart,kStrategy strat)
             if (sugarDivisibleBy(jt->ecart,it->ecart))
             {
               it = strat->Bqueue.erase(it);
+              ++jt;
             }
             else
             {
@@ -3435,6 +3439,7 @@ void chainCritNormal (poly p,int ecart,kStrategy strat)
           {
             strat->c3++;
             it = strat->Bqueue.erase(it);
+            ++jt;
           }
           else
             ++it;
@@ -3558,6 +3563,7 @@ void chainCritPart (poly p,int ecart,kStrategy strat)
                 PrintLn();
               }
               it = strat->Bqueue.erase(it);
+              ++jt;
             }
             else
             {
@@ -3607,6 +3613,7 @@ void chainCritPart (poly p,int ecart,kStrategy strat)
             }
             strat->c3++;
             it = strat->Bqueue.erase(it);
+            ++jt;
           }
           else
             ++it;
@@ -11042,6 +11049,7 @@ skStrategy::skStrategy()
 {
   memset(this, 0, sizeof(skStrategy));
   Lqueue.compObject.parent = this;
+  Bqueue.compObject.parent = this;
   strat_nr++;
   nr=strat_nr;
   tailRing = currRing;
@@ -11602,6 +11610,7 @@ static void enterOnePairRingShift (poly q, poly p, int /*ecart*/, int isFromQ, k
 
   for(auto jt = strat->Bqueue.begin(); jt != strat->Bqueue.end(); )
   {
+    bool j_deleted = false;
     compare=pDivCompRing(jt->lcm,h.lcm);
     compareCoeff = n_DivComp(pGetCoeff(jt->lcm), pGetCoeff(h.lcm), currRing->cf);
     if(compare == pDivComp_EQUAL)
@@ -11620,6 +11629,7 @@ static void enterOnePairRingShift (poly q, poly p, int /*ecart*/, int isFromQ, k
       if(compareCoeff == pDivComp_GREATER)
       {
         jt = strat->Bqueue.erase(jt);
+        j_deleted = true;
         strat->c3++;
       }
       if(compareCoeff == pDivComp_EQUAL)
@@ -11648,10 +11658,11 @@ static void enterOnePairRingShift (poly q, poly p, int /*ecart*/, int isFromQ, k
       if(compare == pDivComp_GREATER)
       {
         jt = strat->Bqueue.erase(jt);
+        j_deleted = true;
         strat->c3++;
       }
     }
-    if (compare != pDivComp_GREATER || compareCoeff != pDivComp_GREATER) ++jt;
+    if (! j_deleted) ++jt;
   }
   number s, t;
   poly m1, m2, gcd = NULL;

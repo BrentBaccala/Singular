@@ -341,8 +341,6 @@ public:
     // Convert back to reverse iterator
     return iterator(result);
   }
-
-  using std::vector<LObject>::erase;
 };
 
 class skStrategy
