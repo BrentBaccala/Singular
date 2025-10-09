@@ -190,11 +190,6 @@ kStrategy kStratCopy(kStrategy o)
   s->mu=o->mu;
   s->tl=o->tl;
   s->tmax=o->tmax;
-  // Ll removed - LQueue manages its own size
-  s->Lmax=o->Lmax;
-  // Bl removed - Bqueue manages its own size
-  // s->Bl=-1;
-  s->Bmax=setmaxL;
   s->ak=o->ak;
   s->syzComp=o->syzComp;
   s->LazyPass=o->LazyPass;

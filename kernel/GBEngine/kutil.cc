@@ -7256,7 +7256,7 @@ void messageStat (int hilbcount,kStrategy strat)
 {
   //PrintS("\nUsage/Allocation of temporary storage:\n");
   //Print("%d/%d polynomials in standard base\n",srmax,IDELEMS(Shdl));
-  //Print("%d/%d polynomials in set L (for lazy alg.)",lrmax+1,strat->Lmax);
+  //Print("%d/%d polynomials in set L (for lazy alg.)",strat->Lqueue.size(),strat->Lqueue.capacity());
   Print("product criterion:%d chain criterion:%d\n",strat->cp,strat->c3);
   if (hilbcount!=0) Print("hilbert series criterion:%d\n",hilbcount);
   #ifdef HAVE_SHIFTBBA
@@ -7269,7 +7269,7 @@ void messageStatSBA (int hilbcount,kStrategy strat)
 {
   //PrintS("\nUsage/Allocation of temporary storage:\n");
   //Print("%d/%d polynomials in standard base\n",srmax,IDELEMS(Shdl));
-  //Print("%d/%d polynomials in set L (for lazy alg.)",lrmax+1,strat->Lmax);
+  //Print("%d/%d polynomials in set L (for lazy alg.)",strat->Lqueue.size(),strat->Lqueue.capacity());
   Print("syz criterion:%d rew criterion:%d\n",strat->nrsyzcrit,strat->nrrewcrit);
   //Print("product criterion:%d chain criterion:%d\n",strat->cp,strat->c3);
   if (hilbcount!=0) Print("hilbert series criterion:%d\n",hilbcount);
@@ -9499,12 +9499,6 @@ void initBuchMora (ideal F,ideal Q,kStrategy strat)
   strat->tail = pInit();
   /*- set s -*/
   strat->sl = -1;
-  /*- set L -*/
-  strat->Lmax = ((IDELEMS(F)+setmaxLinc-1)/setmaxLinc)*setmaxLinc;
-  // Ll removed - LQueue manages its own size
-  // strat->L = initL(strat->Lmax); // L removed, using LQueue
-  /*- set B -*/
-  strat->Bmax = setmaxL;
   /*- set T -*/
   strat->tl = -1;
   strat->tmax = setmaxT;
@@ -9583,10 +9577,6 @@ void exitBuchMora (kStrategy strat)
   omFreeSize(strat->ecartS,IDELEMS(strat->Shdl)*sizeof(int));
   omFreeSize((ADDRESS)strat->sevS,IDELEMS(strat->Shdl)*sizeof(unsigned long));
   omFreeSize(strat->S_2_R,IDELEMS(strat->Shdl)*sizeof(int));
-  /*- set L: should be empty -*/
-  // omFreeSize(strat->L,(strat->Lmax)*sizeof(LObject)); // L removed, using LQueue
-  /*- set B: should be empty -*/
-  // omFreeSize(strat->B,(strat->Bmax)*sizeof(LObject)); // B removed, using Bqueue
   pLmFree(&strat->tail);
   strat->syzComp=0;
 
@@ -9711,12 +9701,6 @@ void initSbaBuchMora (ideal F,ideal Q,kStrategy strat)
   strat->sl = -1;
   /*- set ps -*/
   strat->syzl = -1;
-  /*- set L -*/
-  strat->Lmax = ((IDELEMS(F)+setmaxLinc-1)/setmaxLinc)*setmaxLinc;
-  // Ll removed - LQueue manages its own size
-  // strat->L = initL(strat->Lmax); // L removed, using LQueue
-  /*- set B -*/
-  strat->Bmax = setmaxL;
   /*- set T -*/
   strat->tl = -1;
   strat->tmax = setmaxT;
@@ -9795,10 +9779,6 @@ void exitSba (kStrategy strat)
     }
   }
   omFreeSize(strat->S_2_R,IDELEMS(strat->Shdl)*sizeof(int));
-  /*- set L: should be empty -*/
-  // omFreeSize(strat->L,(strat->Lmax)*sizeof(LObject)); // L removed, using LQueue
-  /*- set B: should be empty -*/
-  // omFreeSize(strat->B,(strat->Bmax)*sizeof(LObject)); // B removed, using Bqueue
   /*- set sig: no need for the signatures anymore -*/
   omFreeSize(strat->sig,IDELEMS(strat->Shdl)*sizeof(poly));
   pLmDelete(&strat->tail);

@@ -422,8 +422,6 @@ public:
   int sl,mu;
   int syzl,syzmax,syzidxmax;
   int tl,tmax;
-  int Lmax;
-  int Bmax;
   int ak,LazyDegree,LazyPass;
   int syzComp;
   int lastAxis;
