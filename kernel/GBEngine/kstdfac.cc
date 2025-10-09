@@ -169,7 +169,6 @@ kStrategy kStratCopy(kStrategy o)
   copyT(o,s);//s->T=...
   s->tail = pInit();
   copyL(o,s);//s->L=...
-  // s->B=initL(); // B removed, using Bqueue
   s->kNoether=pCopy(o->kNoether);
   if (o->NotUsedAxis!=NULL)
   {
