@@ -5379,13 +5379,6 @@ int posInLF5C (const LSet /*set*/, const int length,
   return length+1;
 }
 
-int posInLerror (const LSet /*set*/, const int length,
-               LObject* /*p*/,const kStrategy strat)
-{
-  fprintf(stderr, "posInLerror\n");
-  return length+1;
-}
-
 /*2
 * looks up the position of polynomial p in set
 * e is the ecart of p
