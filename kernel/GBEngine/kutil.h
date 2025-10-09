@@ -503,8 +503,6 @@ void deleteInS (int i,kStrategy strat);
 void cleanT (kStrategy strat);
 static inline LSet initL (int nr=setmaxL)
 { return (LSet)omAlloc(nr*sizeof(LObject)); }
-void enterL (LSet *set,int *length, int *LSetmax, LObject p,int at);
-void enterLQueue(LQueue& queue, LObject p, kStrategy strat);
 void enterSBba (LObject &p,int atS,kStrategy strat, int atR = -1);
 void enterSBbaShift (LObject &p,int atS,kStrategy strat, int atR = -1);
 void enterSSba (LObject &p,int atS,kStrategy strat, int atR = -1);

@@ -41,7 +41,7 @@
 //#define DEBUGF5 1
 #endif
 
-// define if enterL, enterT should use memmove instead of doing it manually
+// define if enterT should use memmove instead of doing it manually
 // on topgun, this is slightly faster (see monodromy_l.tst, homog_gonnet.sing)
 #ifndef SunOS_4
 #define ENTER_USE_MEMMOVE
@@ -1189,38 +1189,6 @@ static BOOLEAN is_shifted_p1(const kStrategy strat)
   return FALSE;
 }
 #endif
-/*2
-*enters p at position at in L
-*/
-void enterL (LSet *set,int *length, int *LSetmax, LObject p,int at)
-{
-  // this should be corrected
-  assume(p.FDeg == p.pFDeg());
-
-  if ((*length)>=0)
-  {
-    if ((*length) == (*LSetmax)-1) enlargeL(set,LSetmax,*LSetmax);
-    if (at <= (*length))
-#ifdef ENTER_USE_MEMMOVE
-      memmove(&((*set)[at+1]), &((*set)[at]), ((*length)-at+1)*sizeof(LObject));
-#else
-    for (i=(*length)+1; i>=at+1; i--) (*set)[i] = (*set)[i-1];
-#endif
-  }
-  else at = 0;
-  (*set)[at] = p;
-  (*length)++;
-}
-
-/*2
-*enters p into LQueue using proper insertion method
-*/
-void enterLQueue(LQueue& queue, LObject p, kStrategy strat)
-{
-  assume(p.FDeg == p.pFDeg());
-
-  queue.push(p);
-}
 
 /*2
 * computes the normal ecart;
