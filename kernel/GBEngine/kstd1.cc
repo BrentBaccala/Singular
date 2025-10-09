@@ -1902,8 +1902,6 @@ ideal mora (ideal F, ideal Q,intvec *w,bigintmat *hilb,kStrategy strat)
   {
     kDebugPrint(strat);
   }
-//deleteInL(strat->Lqueue,&strat->Ll,1,strat);
-//deleteInL(strat->Lqueue,&strat->Ll,0,strat);
 
   /*- compute-------------------------------------------*/
   while (! strat->Lqueue.empty())

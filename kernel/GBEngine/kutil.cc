@@ -1190,67 +1190,6 @@ static BOOLEAN is_shifted_p1(const kStrategy strat)
 }
 #endif
 /*2
-*cancels the j-th polynomial in the set
-*/
-void deleteInL (LSet set, int *length, int j,kStrategy strat)
-{
-  if (set[j].lcm!=NULL)
-  {
-    kDeleteLcm(&set[j]);
-  }
-  if (set[j].sig!=NULL)
-  {
-    if (pGetCoeff(set[j].sig) != NULL)
-      pLmDelete(set[j].sig);
-    else
-      pLmFree(set[j].sig);
-  }
-  if (set[j].p!=NULL)
-  {
-    if (pNext(set[j].p) == strat->tail)
-    {
-      if (pGetCoeff(set[j].p) != NULL)
-        pLmDelete(set[j].p);
-      else
-        pLmFree(set[j].p);
-      /*- tail belongs to several int spolys -*/
-    }
-    else
-    {
-      // search p in T, if it is there, do not delete it
-      if (rHasGlobalOrdering(currRing) || (kFindInT(set[j].p, strat) < 0))
-      {
-        // assure that for global orderings kFindInT fails
-        //assume((rHasLocalOrMixedOrdering(currRing)) && (kFindInT(set[j].p, strat) >= 0));
-        set[j].Delete();
-      }
-    }
-  }
-  #ifdef HAVE_SHIFTBBA
-  if (is_shifted_p1(/*strat->P.p1,*/strat))
-  {
-    // clean up strat->P.p1: may be shifted
-    pLmDelete(strat->P.p1);
-    strat->P.p1=NULL;
-  }
-  #endif
-  if (*length > 0 && j < *length)
-  {
-#ifdef ENTER_USE_MEMMOVE
-    memmove(&(set[j]), &(set[j+1]), (*length - j)*sizeof(LObject));
-#else
-    int i;
-    for (i=j; i < (*length); i++)
-      set[i] = set[i+1];
-#endif
-  }
-#ifdef KDEBUG
-  set[*length].Init();
-#endif
-  (*length)--;
-}
-
-/*2
 *enters p at position at in L
 */
 void enterL (LSet *set,int *length, int *LSetmax, LObject p,int at)
@@ -1281,53 +1220,6 @@ void enterLQueue(LQueue& queue, LObject p, kStrategy strat)
   assume(p.FDeg == p.pFDeg());
 
   queue.push(p);
-}
-
-/*2
-*deletes element at iterator position from LQueue
-*/
-void deleteInLQueue(LQueue& queue, LQueue::iterator it, kStrategy strat)
-{
-  if (it->lcm != NULL)
-  {
-    kDeleteLcm(&(*it));
-  }
-  if (it->sig != NULL)
-  {
-    if (pGetCoeff(it->sig) != NULL)
-      pLmDelete(it->sig);
-    else
-      pLmFree(it->sig);
-  }
-  if (it->p != NULL)
-  {
-    if (pNext(it->p) == strat->tail)
-    {
-      if (pGetCoeff(it->p) != NULL)
-        pLmDelete(it->p);
-      else
-        pLmFree(it->p);
-    }
-    else
-    {
-      // search p in T, if it is there, do not delete it
-      if (rHasGlobalOrdering(currRing) || (kFindInT(it->p, strat) < 0))
-      {
-        it->Delete();
-      }
-    }
-  }
-  #ifdef HAVE_SHIFTBBA
-  if (is_shifted_p1(/*strat->P.p1,*/strat))
-  {
-    // clean up strat->P.p1: may be shifted
-    pLmDelete(strat->P.p1);
-    strat->P.p1=NULL;
-  }
-  #endif
-
-  // Remove the element from the queue
-  queue.erase(it);
 }
 
 /*2
