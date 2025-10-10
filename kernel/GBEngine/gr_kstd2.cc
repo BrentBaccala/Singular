@@ -1063,6 +1063,7 @@ ideal k_gnc_gr_bba(const ideal F, const ideal Q, const intvec *, const bigintmat
   if (rIsRatGRing(currRing))
   {
     strat->posInL=posInL0; // by pCmp of lcm
+    strat->compareInL=compareL0;
   }
   /*set enterS, spSpolyShort, reduce, red, initEcart, initEcartPair*/
   /*Shdl=*/initBuchMora(F, Q,strat);

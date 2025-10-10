@@ -4272,10 +4272,13 @@ void f5c (kStrategy strat, int& olddeg, int& minimcnt, int& hilbeledeg,
   //cleanT(strat);
   //strat->tl = -1;
   Lqueue.compObject.parent = NULL;
-  if(rField_is_Ring(currRing))
+  if(rField_is_Ring(currRing)) {
     Lqueue.compObject.posInL = posInLF5CRing;
-  else
+    Lqueue.compObject.compareInL = compareLF5CRing;
+  } else {
     Lqueue.compObject.posInL = posInLF5C;
+    Lqueue.compObject.compareInL = compareLF5C;
+  }
   while (strat->tl >= 0)
   {
     if(!strat->T[strat->tl].is_redundant)

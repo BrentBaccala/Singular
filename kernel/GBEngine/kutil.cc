@@ -5148,6 +5148,20 @@ int posInT19 (const TSet set,const int length,LObject &p)
   }
 }
 
+int compareLSpecial (const LObject &lhs, const LObject &rhs)
+{
+  auto dl = lhs.GetpFDeg();
+  auto dr = rhs.GetpFDeg();
+  if (dl < dr) return -1;
+  if (dl > dr) return 1;
+
+  // p1 != NULL comes after p1 == NULL
+  if ((lhs.p1 == NULL) && (rhs.p1 != NULL)) return 1;
+  if ((lhs.p1 != NULL) && (rhs.p1 == NULL)) return -1;
+
+  return (pLmCmp(lhs.p,rhs.p) * currRing->OrdSgn);
+}
+
 /*2
 *looks up the position of polynomial p in set
 *set[length] is the smallest element in set with respect
@@ -5192,6 +5206,14 @@ int posInLSpecial (const LSet set, const int length,
   }
 }
 
+/* Ordering procedure: leading monomial
+ */
+
+int compareL0 (const LObject &lhs, const LObject &rhs)
+{
+  return (pLmCmp(lhs.p,rhs.p) * currRing->OrdSgn);
+}
+
 /*2
 *looks up the position of polynomial p in set
 *set[length] is the smallest element in set with respect
@@ -5224,6 +5246,12 @@ int posInL0 (const LSet set, const int length,
   }
 }
 
+int compareL0Ring (const LObject &lhs, const LObject &rhs)
+{
+  return (pLtCmp(lhs.p,rhs.p) * currRing->OrdSgn);
+}
+
+
 int posInL0Ring (const LSet set, const int length,
              LObject* p,const kStrategy)
 {
@@ -5247,6 +5275,13 @@ int posInL0Ring (const LSet set, const int length,
     else                                 en=i;
     /*aend. fuer lazy == in !=- machen */
   }
+}
+
+/* Ordering procedure: signature */
+
+int compareLSig (const LObject &lhs, const LObject &rhs)
+{
+  return (pLtCmp(lhs.sig,rhs.sig) * currRing->OrdSgn);
 }
 
 /*2
@@ -5279,6 +5314,20 @@ int posInLSig (const LSet set, const int length,
     /*aend. fuer lazy == in !=- machen */
   }
 }
+
+/* UNUSED Ordering procedure: pLtCmp on signature, FDeg, pLtCmp on poly */
+
+int compareLSigRing (const LObject &lhs, const LObject &rhs)
+{
+  assume(currRing->OrdSgn == 1 && rField_is_Ring(currRing));
+  auto cmp = pLtCmp(lhs.sig,rhs.sig);
+  if (cmp != 1) return cmp;
+  if (lhs.FDeg > rhs.FDeg) return -1;
+  if (lhs.FDeg < rhs.FDeg) return 1;
+  return pLtCmp(lhs.p, rhs.p);
+}
+
+
 //sorts the pair list in this order: pLtCmp on the sigs, FDeg, pLtCmp on the polys
 int posInLSigRing (const LSet set, const int length,
                LObject* p,const kStrategy /*strat*/)
@@ -5373,11 +5422,28 @@ int posInSyz (const kStrategy strat, poly sig)
 * critical pairs to strat->L only behind all other critical pairs which are
 * still in strat->L!
 */
+int compareLF5C (const LObject &lhs, const LObject &rhs)
+{
+  return 0;
+}
+
 int posInLF5C (const LSet /*set*/, const int length,
                LObject* /*p*/,const kStrategy strat)
 {
   return length+1;
 }
+
+/* Ordering procedure: totaldegree, pComp on poly */
+
+int compareL11 (const LObject &lhs, const LObject &rhs)
+{
+  auto dl = lhs.GetpFDeg();
+  auto dr = rhs.GetpFDeg();
+  if (dl < dr) return -1;
+  if (dl > dr) return 1;
+  return (pLmCmp(lhs.p,rhs.p) * currRing->OrdSgn);
+}
+
 
 /*2
 * looks up the position of polynomial p in set
@@ -5418,6 +5484,15 @@ int posInL11 (const LSet set, const int length,
     else
       en=i;
   }
+}
+
+int compareL11Ring (const LObject &lhs, const LObject &rhs)
+{
+  auto dl = lhs.GetpFDeg();
+  auto dr = rhs.GetpFDeg();
+  if (dl < dr) return -1;
+  if (dl > dr) return 1;
+  return (pLtCmp(lhs.p,rhs.p) * currRing->OrdSgn);
 }
 
 /*2
@@ -5461,6 +5536,15 @@ int posInL11Ring (const LSet set, const int length,
   }
 }
 
+int compareLF5CRing (const LObject &lhs, const LObject &rhs)
+{
+  auto dl = lhs.GetpFDeg();
+  auto dr = rhs.GetpFDeg();
+  if (dl < dr) return -1;
+  if (dl > dr) return 1;
+  return (pLtCmp(lhs.p,rhs.p) * currRing->OrdSgn);
+}
+
 int posInLF5CRing (const LSet set, const int length,
               LObject* p,const kStrategy)
 {
@@ -5493,6 +5577,25 @@ int posInLF5CRing (const LSet set, const int length,
     else
       an=i;
   }
+}
+
+int compareL11Ringls (const LObject &lhs, const LObject &rhs)
+{
+  if (lhs.FDeg < rhs.FDeg) return -1;
+  if (lhs.FDeg > rhs.FDeg) return 1;
+
+  number lcl = pGetCoeff(lhs.p);
+  number lcr = pGetCoeff(rhs.p);
+
+  // Ensure positive coefficients
+  if (!nGreaterZero(lcl))
+    lcl = nInpNeg(nCopy(lcl));
+  if (!nGreaterZero(lcr))
+    lcr = nInpNeg(nCopy(lcr));
+
+  if (nGreater(lcl, lcr)) return 1;
+  if (nGreater(lcr, lcl)) return -1;
+  return 0;
 }
 
 int posInL11Ringls (const LSet set, const int length,
@@ -5580,13 +5683,21 @@ int posInL11Ringls (const LSet set, const int length,
 void LQueue::push(const LObject& lobject)
 {
     if (compObject.parent != NULL) {
-      if ((compObject.parent->posInL == posInL11Ring) || (compObject.parent->posInL == posInLSpecial) || (compObject.parent->posInL == posInLSig)) {
+      auto at = compObject.parent->posInL(data(),size()-1,const_cast<LObject *>(&lobject),NULL);
+      if ((compObject.parent->compareInL == compareL11Ringls) || (compObject.parent->compareInL == compareL110Ring) || (compObject.parent->compareInL == compareL0) || (compObject.parent->compareInL == compareL11Ring) || (compObject.parent->compareInL == compareLSpecial) || (compObject.parent->compareInL == compareLSig)) {
 	// these three comparators put equal Lobjects at the start of the array (most put them at the end)
 	insert(std::vector<LObject>::begin(), lobject);
 	std::stable_sort(std::vector<LObject>::begin(), std::vector<LObject>::end(), compObject);
       } else {
 	push_back(lobject);
 	std::stable_sort(std::vector<LObject>::begin(), std::vector<LObject>::end(), compObject);
+      }
+      int at2;
+      for (at2 = 0; at2 < size(); at2++) {
+	if (memcmp(data() + at2, &lobject, sizeof(LObject)) == 0) break;
+      }
+      if (at != at2) {
+	fprintf(stderr, "discrepency\n");
       }
     } else {
       // f5c() special case
@@ -5654,6 +5765,17 @@ inline int getIndexRng(long coeff)
   }
 } */
 
+int compareL110 (const LObject &lhs, const LObject &rhs)
+{
+  auto dl = lhs.GetpFDeg();
+  auto dr = rhs.GetpFDeg();
+  if (dl < dr) return -1;
+  if (dl > dr) return 1;
+  if (lhs.length < rhs.length) return -1;
+  if (lhs.length > rhs.length) return 1;
+  return (pLmCmp(lhs.p,rhs.p) * currRing->OrdSgn);
+}
+
 /*2
 * looks up the position of polynomial p in set
 * set[length] is the smallest element in set with respect
@@ -5700,6 +5822,17 @@ int posInL110 (const LSet set, const int length,
   }
 }
 
+int compareL110Ring (const LObject &lhs, const LObject &rhs)
+{
+  auto dl = lhs.GetpFDeg();
+  auto dr = rhs.GetpFDeg();
+  if (dl < dr) return -1;
+  if (dl > dr) return 1;
+  if (lhs.length < rhs.length) return -1;
+  if (lhs.length > rhs.length) return 1;
+  return (pLtCmp(lhs.p,rhs.p) * currRing->OrdSgn);
+}
+
 int posInL110Ring (const LSet set, const int length,
                LObject* p,const kStrategy)
 {
@@ -5740,6 +5873,15 @@ int posInL110Ring (const LSet set, const int length,
   }
 }
 
+int compareL13 (const LObject &lhs, const LObject &rhs)
+{
+  auto dl = lhs.GetpFDeg();
+  auto dr = rhs.GetpFDeg();
+  if (dl < dr) return -1;
+  if (dl > dr) return 1;
+  return 0;
+}
+
 /*2
 * looks up the position of polynomial p in set
 * e is the ecart of p
@@ -5773,6 +5915,15 @@ int posInL13 (const LSet set, const int length,
     else
       en=i;
   }
+}
+
+int compareL15 (const LObject &lhs, const LObject &rhs)
+{
+  auto dl = lhs.GetpFDeg() + lhs.ecart;
+  auto dr = rhs.GetpFDeg() + rhs.ecart;
+  if (dl < dr) return -1;
+  if (dl > dr) return 1;
+  return (pLmCmp(lhs.p,rhs.p) * currRing->OrdSgn);
 }
 
 /*2
@@ -5816,6 +5967,15 @@ int posInL15 (const LSet set, const int length,
   }
 }
 
+int compareL15Ring (const LObject &lhs, const LObject &rhs)
+{
+  auto dl = lhs.GetpFDeg() + lhs.ecart;
+  auto dr = rhs.GetpFDeg() + rhs.ecart;
+  if (dl < dr) return -1;
+  if (dl > dr) return 1;
+  return (pLtCmp(lhs.p,rhs.p) * currRing->OrdSgn);
+}
+
 int posInL15Ring (const LSet set, const int length,
               LObject* p,const kStrategy)
 {
@@ -5848,6 +6008,17 @@ int posInL15Ring (const LSet set, const int length,
     else
       en=i;
   }
+}
+
+int compareL17 (const LObject &lhs, const LObject &rhs)
+{
+  auto dl = lhs.GetpFDeg() + lhs.ecart;
+  auto dr = rhs.GetpFDeg() + rhs.ecart;
+  if (dl < dr) return -1;
+  if (dl > dr) return 1;
+  if (lhs.ecart < rhs.ecart) return -1;
+  if (lhs.ecart > rhs.ecart) return 1;
+  return (pLmCmp(lhs.p,rhs.p) * currRing->OrdSgn);
 }
 
 /*2
@@ -5900,6 +6071,17 @@ int posInL17 (const LSet set, const int length,
   }
 }
 
+int compareL17Ring (const LObject &lhs, const LObject &rhs)
+{
+  auto dl = lhs.GetpFDeg() + lhs.ecart;
+  auto dr = rhs.GetpFDeg() + rhs.ecart;
+  if (dl < dr) return -1;
+  if (dl > dr) return 1;
+  if (lhs.ecart < rhs.ecart) return -1;
+  if (lhs.ecart > rhs.ecart) return 1;
+  return (pLtCmp(lhs.p,rhs.p) * currRing->OrdSgn);
+}
+
 int posInL17Ring (const LSet set, const int length,
               LObject* p,const kStrategy)
 {
@@ -5941,6 +6123,23 @@ int posInL17Ring (const LSet set, const int length,
     else
       en=i;
   }
+}
+
+int compareL17_c (const LObject &lhs, const LObject &rhs)
+{
+  int cc = (-1+2*currRing->order[0]==ringorder_c);
+  long cl = pGetComp(lhs.p)*cc;
+  long cr = pGetComp(rhs.p)*cc;
+  if (cl < cr) return -1;
+  if (cl > cr) return 1;
+
+  auto dl = lhs.GetpFDeg() + lhs.ecart;
+  auto dr = rhs.GetpFDeg() + rhs.ecart;
+  if (dl < dr) return -1;
+  if (dl > dr) return 1;
+  if (lhs.ecart < rhs.ecart) return -1;
+  if (lhs.ecart > rhs.ecart) return 1;
+  return (pLmCmp(lhs.p,rhs.p) * currRing->OrdSgn);
 }
 
 /*2
@@ -6011,6 +6210,23 @@ int posInL17_c (const LSet set, const int length,
     else
       en=i;
   }
+}
+
+int compareL17_cRing (const LObject &lhs, const LObject &rhs)
+{
+  int cc = (-1+2*currRing->order[0]==ringorder_c);
+  long cl = pGetComp(lhs.p)*cc;
+  long cr = pGetComp(rhs.p)*cc;
+  if (cl < cr) return -1;
+  if (cl > cr) return 1;
+
+  auto dl = lhs.GetpFDeg() + lhs.ecart;
+  auto dr = rhs.GetpFDeg() + rhs.ecart;
+  if (dl < dr) return -1;
+  if (dl > dr) return 1;
+  if (lhs.ecart < rhs.ecart) return -1;
+  if (lhs.ecart > rhs.ecart) return 1;
+  return (pLtCmp(lhs.p,rhs.p) * currRing->OrdSgn);
 }
 
 int posInL17_cRing (const LSet set, const int length,
@@ -9176,6 +9392,7 @@ void initBuchMoraPos (kStrategy strat)
     if (strat->honey)
     {
       strat->posInL = posInL15;
+      strat->compareInL = compareL15;
       // ok -- here is the deal: from my experiments for Singular-2-0
       // I conclude that that posInT_EcartpLength is the best of
       // posInT15, posInT_EcartFDegpLength, posInT_FDegLength, posInT_pLength
@@ -9188,22 +9405,26 @@ void initBuchMoraPos (kStrategy strat)
     else if (currRing->pLexOrder && !TEST_OPT_INTSTRATEGY)
     {
       strat->posInL = posInL11;
+      strat->compareInL = compareL11;
       strat->posInT = posInT11;
     }
     else if (TEST_OPT_INTSTRATEGY)
     {
       strat->posInL = posInL11;
+      strat->compareInL = compareL11;
       strat->posInT = posInT11;
     }
     else
     {
       strat->posInL = posInL0;
+      strat->compareInL = compareL0;
       strat->posInT = posInT0;
     }
     //if (strat->minim>0) strat->posInL =posInLSpecial;
     if (strat->homog)
     {
       strat->posInL = posInL110;
+      strat->compareInL = compareL110;
       strat->posInT = posInT110;
     }
   }
@@ -9212,6 +9433,7 @@ void initBuchMoraPos (kStrategy strat)
     if (strat->homog)
     {
       strat->posInL = posInL11;
+      strat->compareInL = compareL11;
       strat->posInT = posInT11;
     }
     else
@@ -9220,25 +9442,43 @@ void initBuchMoraPos (kStrategy strat)
       ||(currRing->order[0]==ringorder_C))
       {
         strat->posInL = posInL17_c;
+        strat->compareInL = compareL17_c;
         strat->posInT = posInT17_c;
       }
       else
       {
         strat->posInL = posInL17;
+        strat->compareInL = compareL17;
         strat->posInT = posInT17;
       }
     }
   }
-  if (strat->minim>0) strat->posInL =posInLSpecial;
+  if (strat->minim>0)
+  {
+    strat->posInL =posInLSpecial;
+    strat->compareInL = compareLSpecial;
+  }
   // for further tests only
   if ((BTEST1(11)) || (BTEST1(12)))
+  {
     strat->posInL = posInL11;
+    strat->compareInL = compareL11;
+  }
   else if ((BTEST1(13)) || (BTEST1(14)))
+  {
     strat->posInL = posInL13;
+    strat->compareInL = compareL13;
+  }
   else if ((BTEST1(15)) || (BTEST1(16)))
+  {
     strat->posInL = posInL15;
+    strat->compareInL = compareL15;
+  }
   else if ((BTEST1(17)) || (BTEST1(18)))
+  {
     strat->posInL = posInL17;
+    strat->compareInL = compareL17;
+  }
   if (BTEST1(11))
     strat->posInT = posInT11;
   else if (BTEST1(13))
@@ -9261,6 +9501,7 @@ void initBuchMoraPosRing (kStrategy strat)
     if (strat->honey)
     {
       strat->posInL = posInL15Ring;
+      strat->compareInL = compareL15Ring;
       // ok -- here is the deal: from my experiments for Singular-2-0
       // I conclude that that posInT_EcartpLength is the best of
       // posInT15, posInT_EcartFDegpLength, posInT_FDegLength, posInT_pLength
@@ -9273,22 +9514,26 @@ void initBuchMoraPosRing (kStrategy strat)
     else if (currRing->pLexOrder && !TEST_OPT_INTSTRATEGY)
     {
       strat->posInL = posInL11Ring;
+      strat->compareInL = compareL11Ring;
       strat->posInT = posInT11;
     }
     else if (TEST_OPT_INTSTRATEGY)
     {
       strat->posInL = posInL11Ring;
+      strat->compareInL = compareL11Ring;
       strat->posInT = posInT11;
     }
     else
     {
       strat->posInL = posInL0Ring;
+      strat->compareInL = compareL0Ring;
       strat->posInT = posInT0;
     }
     //if (strat->minim>0) strat->posInL =posInLSpecial;
     if (strat->homog)
     {
       strat->posInL = posInL110Ring;
+      strat->compareInL = compareL110Ring;
       strat->posInT = posInT110Ring;
     }
   }
@@ -9298,6 +9543,7 @@ void initBuchMoraPosRing (kStrategy strat)
     {
       //printf("\nHere 3\n");
       strat->posInL = posInL11Ring;
+      strat->compareInL = compareL11Ring;
       strat->posInT = posInT11Ring;
     }
     else
@@ -9306,25 +9552,43 @@ void initBuchMoraPosRing (kStrategy strat)
       ||(currRing->order[0]==ringorder_C))
       {
         strat->posInL = posInL17_cRing;
+        strat->compareInL = compareL17_cRing;
         strat->posInT = posInT17_cRing;
       }
       else
       {
         strat->posInL = posInL11Ringls;
+        strat->compareInL = compareL11Ringls;
         strat->posInT = posInT17Ring;
       }
     }
   }
-  if (strat->minim>0) strat->posInL =posInLSpecial;
+  if (strat->minim>0)
+  {
+    strat->posInL =posInLSpecial;
+    strat->compareInL = compareLSpecial;
+  }
   // for further tests only
   if ((BTEST1(11)) || (BTEST1(12)))
+  {
     strat->posInL = posInL11Ring;
+    strat->compareInL = compareL11Ring;
+  }
   else if ((BTEST1(13)) || (BTEST1(14)))
+  {
     strat->posInL = posInL13;
+    strat->compareInL = compareL13;
+  }
   else if ((BTEST1(15)) || (BTEST1(16)))
+  {
     strat->posInL = posInL15Ring;
+    strat->compareInL = compareL15Ring;
+  }
   else if ((BTEST1(17)) || (BTEST1(18)))
+  {
     strat->posInL = posInL17Ring;
+    strat->compareInL = compareL17Ring;
+  }
   if (BTEST1(11))
     strat->posInT = posInT11Ring;
   else if (BTEST1(13))
@@ -9512,11 +9776,13 @@ void initSbaPos (kStrategy strat)
   }
   strat->posInLDependsOnLength = FALSE;
   strat->posInL     = posInLSig;
+  strat->compareInL = compareLSig;
   /*
   if (rField_is_Ring(currRing))
   {
     strat->posInLSba  = posInLSigRing;
     strat->posInL     = posInL11Ring;
+    strat->compareInL = compareL11Ring;
   }*/
   //strat->posInT     = posInTSig;
 }
