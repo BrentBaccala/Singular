@@ -1318,11 +1318,12 @@ static BOOLEAN hasPurePower (const poly p,int last, int *length,kStrategy strat)
   return FALSE;
 }
 
-static BOOLEAN hasPurePower (LObject *L,int last, int *length,kStrategy strat)
+static BOOLEAN hasPurePower (const LObject *L,int last, int *length,kStrategy strat)
 {
   if (L->bucket != NULL)
   {
-    poly p = L->GetP();
+    /* We need const_cast because L->GetP() can modify L->p */
+    poly p = const_cast<LObject*>(L)->GetP();
     return hasPurePower(p, last, length, strat);
   }
   else
@@ -1330,6 +1331,50 @@ static BOOLEAN hasPurePower (LObject *L,int last, int *length,kStrategy strat)
     return hasPurePower(L->p, last, length, strat);
   }
 }
+
+/* Ordering procedure:
+ *    - objects with pure powers greater than objects without
+ *    - objects with pure powers:
+ *       - length between pure power and leading term (smaller length compares greater than longer length)
+ *       - total degree + ecart
+ *    - objects without pure powers:
+ *       - "old" comparator
+ */
+class PurePowerComparator {
+  //int (*compareInLold) (const LObject &lhs, const LObject &rhs);
+  public:
+  std::function<int (const LObject &lhs, const LObject &rhs)> compareInLold;
+  kStrategy strat;  /* need this for tail and tailRing */
+  int compareInL (const LObject &lhs, const LObject &rhs)
+  {
+    int lenl, lenr;
+    bool hasppl = hasPurePower(&lhs,strat->lastAxis,&lenl,strat);
+    bool hasppr = hasPurePower(&rhs,strat->lastAxis,&lenr,strat);
+    if (hasppl && hasppr) {
+      if (lenl < lenr) return 1;
+      if (lenl > lenr) return -1;
+      auto dl = lhs.GetpFDeg() + lhs.ecart;
+      auto dr = rhs.GetpFDeg() + rhs.ecart;
+      if (dl < dr) return -1;
+      if (dl > dr) return 1;
+      return 0;
+      //auto oldtarget = compareInLold.target<int (*)(const LObject &lhs, const LObject &rhs)>();
+      //return compareInLold(lhs, rhs);
+    } else if (hasppl) {
+      return -1;
+    } else if (hasppr) {
+      return 1;
+    } else {
+      return compareInLold(lhs, rhs);
+    }
+  }
+  PurePowerComparator(kStrategy strat) : strat(strat) {
+    compareInLold = strat->compareInL;
+  }
+  auto compareInLbound() {
+    return [this](const LObject &lhs, const LObject &rhs) { return compareInL(lhs, rhs); };
+  }
+};
 
 /*2
 * looks up the position of polynomial p in L
@@ -1565,6 +1610,8 @@ static void firstUpdate(kStrategy strat)
     if (TEST_OPT_FASTHC)
     {
       strat->posInL = strat->posInLOld;
+      strat->compareInL = strat->ppc->compareInLold;
+      delete strat->ppc;
       strat->lastAxis = 0;
     }
     if (TEST_OPT_FINDET)
@@ -1633,6 +1680,8 @@ void enterSMora (LObject &p,int atS,kStrategy strat, int atR)
         strat->posInLOld = strat->posInL;
         strat->posInLOldFlag = FALSE;
         strat->posInL = posInL10;
+	strat->ppc = new PurePowerComparator(strat);
+	strat->compareInL = strat->ppc->compareInLbound();
         strat->posInLDependsOnLength = TRUE;
         updateL(FALSE,strat);
         reorderL(strat);
@@ -1886,6 +1935,8 @@ ideal mora (ideal F, ideal Q,intvec *w,bigintmat *hilb,kStrategy strat)
     strat->posInLOld = strat->posInL;
     strat->posInLOldFlag = FALSE;
     strat->posInL = posInL10;
+    strat->ppc = new PurePowerComparator(strat);
+    strat->compareInL = strat->ppc->compareInLbound();
     updateL(FALSE,strat);
     reorderL(strat);
   }

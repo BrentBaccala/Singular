@@ -5683,8 +5683,16 @@ int posInL11Ringls (const LSet set, const int length,
 void LQueue::push(const LObject& lobject)
 {
     if (compObject.parent != NULL) {
-      auto at = compObject.parent->posInL(data(),size()-1,const_cast<LObject *>(&lobject),NULL);
-      if ((compObject.parent->compareInL == compareL11Ringls) || (compObject.parent->compareInL == compareL110Ring) || (compObject.parent->compareInL == compareL0) || (compObject.parent->compareInL == compareL11Ring) || (compObject.parent->compareInL == compareLSpecial) || (compObject.parent->compareInL == compareLSig)) {
+#if 1
+      auto at = compObject.parent->posInL(data(),size()-1,const_cast<LObject *>(&lobject),compObject.parent);
+#endif
+      auto target = compObject.parent->compareInL.target<int (*)(const LObject &lhs, const LObject &rhs)>();
+      if (target && ((*target == compareL11Ringls)
+		     || (*target == compareL110Ring)
+		     || (*target == compareL0)
+		     || (*target == compareL11Ring)
+		     || (*target == compareLSpecial)
+		     || (*target == compareLSig))) {
 	// these three comparators put equal Lobjects at the start of the array (most put them at the end)
 	insert(std::vector<LObject>::begin(), lobject);
 	std::stable_sort(std::vector<LObject>::begin(), std::vector<LObject>::end(), compObject);
@@ -5692,6 +5700,7 @@ void LQueue::push(const LObject& lobject)
 	push_back(lobject);
 	std::stable_sort(std::vector<LObject>::begin(), std::vector<LObject>::end(), compObject);
       }
+#if 1
       int at2;
       for (at2 = 0; at2 < size(); at2++) {
 	if (memcmp(data() + at2, &lobject, sizeof(LObject)) == 0) break;
@@ -5699,6 +5708,7 @@ void LQueue::push(const LObject& lobject)
       if (at != at2) {
 	fprintf(stderr, "discrepency\n");
       }
+#endif
     } else {
       // f5c() special case
       auto at = compObject.posInL(data(),size()-1,const_cast<LObject *>(&lobject),NULL);

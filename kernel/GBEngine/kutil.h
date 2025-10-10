@@ -12,6 +12,7 @@
 
 #include <queue>
 #include <algorithm>
+#include <functional>
 
 #include "omalloc/omalloc.h"
 #ifdef HAVE_OMALLOC
@@ -344,6 +345,8 @@ public:
   }
 };
 
+class PurePowerComparator;   /* defined and used in kstd1.cc */
+
 class skStrategy
 #ifdef HAVE_OMALLOC
                  : public omallocClass
@@ -357,9 +360,11 @@ public:
   int (*posInT)(const TSet T,const int tl,LObject &h);
   int (*posInL)(const LSet set, const int length,
                 LObject* L,const kStrategy strat);
-  int (*compareInL) (const LObject &lhs, const LObject &rhs);
+  //int (*compareInL) (const LObject &lhs, const LObject &rhs);
+  std::function<int (const LObject &lhs, const LObject &rhs)> compareInL;
   void (*enterS)(LObject &h, int pos,kStrategy strat, int atR/* =-1*/ );
   void (*initEcartPair)(LObject * h, poly f, poly g, int ecartF, int ecartG);
+  PurePowerComparator *ppc;
   int (*posInLOld)(const LSet Ls,const int Ll,
                    LObject* Lo,const kStrategy strat);
   void (*enterOnePair) (int i,poly p,int ecart, int isFromQ,kStrategy strat, int atR /*= -1*/);
