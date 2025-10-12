@@ -1336,7 +1336,7 @@ static BOOLEAN hasPurePower (const LObject *L,int last, int *length,kStrategy st
  *    - objects with pure powers greater than objects without
  *    - objects with pure powers:
  *       - length between pure power and leading term (smaller length compares greater than longer length)
- *       - total degree + ecart
+ *       - "old" comparator
  *    - objects without pure powers:
  *       - "old" comparator
  */
@@ -1351,15 +1351,15 @@ class PurePowerComparator {
     bool hasppl = hasPurePower(&lhs,strat->lastAxis,&lenl,strat);
     bool hasppr = hasPurePower(&rhs,strat->lastAxis,&lenr,strat);
     if (hasppl && hasppr) {
-      if (lenl < lenr) return 1;
-      if (lenl > lenr) return -1;
-      auto dl = lhs.GetpFDeg() + lhs.ecart;
-      auto dr = rhs.GetpFDeg() + rhs.ecart;
-      if (dl < dr) return -1;
-      if (dl > dr) return 1;
-      return 0;
+      if (lenl < lenr) return -1;
+      if (lenl > lenr) return 1;
+      //auto dl = lhs.GetpFDeg() + lhs.ecart;
+      //auto dr = rhs.GetpFDeg() + rhs.ecart;
+      //if (dl < dr) return -1;
+      //if (dl > dr) return 1;
+      //return 0;
       //auto oldtarget = compareInLold.target<int (*)(const LObject &lhs, const LObject &rhs)>();
-      //return compareInLold(lhs, rhs);
+      return compareInLold(lhs, rhs);
     } else if (hasppl) {
       return -1;
     } else if (hasppr) {

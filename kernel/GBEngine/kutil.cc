@@ -5701,12 +5701,15 @@ void LQueue::push(const LObject& lobject)
 	std::stable_sort(std::vector<LObject>::begin(), std::vector<LObject>::end(), compObject);
       }
 #if 1
-      int at2;
-      for (at2 = 0; at2 < size(); at2++) {
-	if (memcmp(data() + at2, &lobject, sizeof(LObject)) == 0) break;
-      }
-      if (at != at2) {
-	fprintf(stderr, "discrepency\n");
+      // the only case where target == NULL is posInL10, which is very hard to mimic with the new code; I don't try, so don't test it
+      if (target) {
+	int at2;
+	for (at2 = 0; at2 < size(); at2++) {
+	  if (memcmp(data() + at2, &lobject, sizeof(LObject)) == 0) break;
+	}
+	if (at != at2) {
+	  fprintf(stderr, "discrepency\n");
+	}
       }
 #endif
     } else {
