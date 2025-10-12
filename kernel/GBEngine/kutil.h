@@ -12,7 +12,6 @@
 
 #include <queue>
 #include <algorithm>
-#include <functional>
 
 #include "omalloc/omalloc.h"
 #ifdef HAVE_OMALLOC
@@ -297,9 +296,8 @@ EXTERN_VAR int HCord;
 class CompareLObject {
 public:
   skStrategy * parent;
-  int (*posInL)(LSet set, const int length,
-                LObject* L,const kStrategy strat);
-  int (*compareInL) (const LObject &lhs, const LObject &rhs);
+  int (*compareInL) (const LObject &lhs, const LObject &rhs, const kStrategy strat);
+  int (*posInL)(const LSet set, const int length, LObject* L,const kStrategy strat);
   bool operator()(const LObject &lhs, const LObject &rhs);
 };
 
@@ -345,8 +343,6 @@ public:
   }
 };
 
-class PurePowerComparator;   /* defined and used in kstd1.cc */
-
 class skStrategy
 #ifdef HAVE_OMALLOC
                  : public omallocClass
@@ -360,11 +356,10 @@ public:
   int (*posInT)(const TSet T,const int tl,LObject &h);
   int (*posInL)(const LSet set, const int length,
                 LObject* L,const kStrategy strat);
-  //int (*compareInL) (const LObject &lhs, const LObject &rhs);
-  std::function<int (const LObject &lhs, const LObject &rhs)> compareInL;
+  int (*compareInL) (const LObject &lhs, const LObject &rhs, const kStrategy strat);
+  int (*compareInLOld) (const LObject &lhs, const LObject &rhs, const kStrategy strat);
   void (*enterS)(LObject &h, int pos,kStrategy strat, int atR/* =-1*/ );
   void (*initEcartPair)(LObject * h, poly f, poly g, int ecartF, int ecartG);
-  PurePowerComparator *ppc;
   int (*posInLOld)(const LSet Ls,const int Ll,
                    LObject* Lo,const kStrategy strat);
   void (*enterOnePair) (int i,poly p,int ecart, int isFromQ,kStrategy strat, int atR /*= -1*/);
@@ -492,17 +487,16 @@ public:
 
 inline bool CompareLObject::operator()(const LObject &lhs, const LObject &rhs)
 {
-  /* We make lhs our "fake" Lset of size 1 (length 0), and compute
-   * rhs's position in this Lset, which will be either 0 (rhs<lhs) or
-   * 1 (lhs<rhs).  If we swap lhs and rhs and they both return 0 or
-   * they both return 1 (this can happen with, for example,
-   * posInL110), then we return false, as std::sort requires its
-   * Compare function to be strict.
+  /* A C++ comparator is a less than operator, which, for a -1/0/1 comparator,
+   * is equivalent to cmp(lhs,rhs) == 1
    */
-  //LObject * lhsp = const_cast<LObject *>(&lhs);
-  //LObject * rhsp = const_cast<LObject *>(&rhs);
-  //return ((parent->posInL(lhsp,0,rhsp,parent) == 1) && (parent->posInL(rhsp,0,lhsp,parent) == 0));
-  return (parent->compareInL(lhs, rhs) == 1);
+  if (parent != NULL) {
+    return (parent->compareInL(lhs, rhs, parent) == 1);
+  } else {
+    /* A special case used only in f5c() to construct a temporary LQueue without a parent */
+    /* compareInL10 (not used in f5c) is the only comparator that uses its third argument */
+    return (compareInL(lhs, rhs, parent) == 1);
+  }
 };
 
 void deleteHC(poly *p, int *e, int *l, kStrategy strat);
@@ -575,25 +569,25 @@ int posInL110 (const LSet set, const int length,
              LObject* L,const kStrategy strat);
 int posInLSpecial (const LSet set, const int length,
              LObject *L,const kStrategy strat);
-int compareL0 (const LObject &lhs, const LObject &rhs);
-int compareL0Ring (const LObject &lhs, const LObject &rhs);
-int compareLSig (const LObject &lhs, const LObject &rhs);
-int compareLSigRing (const LObject &lhs, const LObject &rhs);
-int compareL11 (const LObject &lhs, const LObject &rhs);
-int compareL11Ring (const LObject &lhs, const LObject &rhs);
-int compareLF5C (const LObject &lhs, const LObject &rhs);
-int compareLF5CRing (const LObject &lhs, const LObject &rhs);
-int compareL11Ringls (const LObject &lhs, const LObject &rhs);
-int compareL110 (const LObject &lhs, const LObject &rhs);
-int compareL110Ring (const LObject &lhs, const LObject &rhs);
-int compareL13 (const LObject &lhs, const LObject &rhs);
-int compareL15 (const LObject &lhs, const LObject &rhs);
-int compareL15Ring (const LObject &lhs, const LObject &rhs);
-int compareL17 (const LObject &lhs, const LObject &rhs);
-int compareL17Ring (const LObject &lhs, const LObject &rhs);
-int compareL17_c (const LObject &lhs, const LObject &rhs);
-int compareL17_cRing (const LObject &lhs, const LObject &rhs);
-int compareLSpecial (const LObject &lhs, const LObject &rhs);
+int compareL0 (const LObject &lhs, const LObject &rhs, const kStrategy strat);
+int compareL0Ring (const LObject &lhs, const LObject &rhs, const kStrategy strat);
+int compareLSig (const LObject &lhs, const LObject &rhs, const kStrategy strat);
+int compareLSigRing (const LObject &lhs, const LObject &rhs, const kStrategy strat);
+int compareL11 (const LObject &lhs, const LObject &rhs, const kStrategy strat);
+int compareL11Ring (const LObject &lhs, const LObject &rhs, const kStrategy strat);
+int compareLF5C (const LObject &lhs, const LObject &rhs, const kStrategy strat);
+int compareLF5CRing (const LObject &lhs, const LObject &rhs, const kStrategy strat);
+int compareL11Ringls (const LObject &lhs, const LObject &rhs, const kStrategy strat);
+int compareL110 (const LObject &lhs, const LObject &rhs, const kStrategy strat);
+int compareL110Ring (const LObject &lhs, const LObject &rhs, const kStrategy strat);
+int compareL13 (const LObject &lhs, const LObject &rhs, const kStrategy strat);
+int compareL15 (const LObject &lhs, const LObject &rhs, const kStrategy strat);
+int compareL15Ring (const LObject &lhs, const LObject &rhs, const kStrategy strat);
+int compareL17 (const LObject &lhs, const LObject &rhs, const kStrategy strat);
+int compareL17Ring (const LObject &lhs, const LObject &rhs, const kStrategy strat);
+int compareL17_c (const LObject &lhs, const LObject &rhs, const kStrategy strat);
+int compareL17_cRing (const LObject &lhs, const LObject &rhs, const kStrategy strat);
+int compareLSpecial (const LObject &lhs, const LObject &rhs, const kStrategy strat);
 KINLINE poly redtailBba (poly p,int end_pos,kStrategy strat,BOOLEAN normalize=FALSE);
 KINLINE poly redtailBbaBound (poly p,int end_pos,kStrategy strat,int bound,BOOLEAN normalize=FALSE);
 KINLINE poly redtailBba_Ring (poly p,int end_pos,kStrategy strat);

@@ -145,6 +145,7 @@ kStrategy kStratCopy(kStrategy o)
   s->enterS=o->enterS;
   s->initEcartPair=o->initEcartPair;
   s->posInLOld=o->posInLOld;
+  s->compareInLOld=o->compareInLOld;
   s->enterOnePair=o->enterOnePair;
   s->chainCrit=o->chainCrit;
   s->Shdl=idCopy(o->Shdl);

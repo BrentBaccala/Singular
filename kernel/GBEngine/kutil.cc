@@ -5148,7 +5148,7 @@ int posInT19 (const TSet set,const int length,LObject &p)
   }
 }
 
-int compareLSpecial (const LObject &lhs, const LObject &rhs)
+int compareLSpecial (const LObject &lhs, const LObject &rhs, const kStrategy strat)
 {
   auto dl = lhs.GetpFDeg();
   auto dr = rhs.GetpFDeg();
@@ -5209,7 +5209,7 @@ int posInLSpecial (const LSet set, const int length,
 /* Ordering procedure: leading monomial
  */
 
-int compareL0 (const LObject &lhs, const LObject &rhs)
+int compareL0 (const LObject &lhs, const LObject &rhs, const kStrategy strat)
 {
   return (pLmCmp(lhs.p,rhs.p) * currRing->OrdSgn);
 }
@@ -5246,7 +5246,7 @@ int posInL0 (const LSet set, const int length,
   }
 }
 
-int compareL0Ring (const LObject &lhs, const LObject &rhs)
+int compareL0Ring (const LObject &lhs, const LObject &rhs, const kStrategy strat)
 {
   return (pLtCmp(lhs.p,rhs.p) * currRing->OrdSgn);
 }
@@ -5279,7 +5279,7 @@ int posInL0Ring (const LSet set, const int length,
 
 /* Ordering procedure: signature */
 
-int compareLSig (const LObject &lhs, const LObject &rhs)
+int compareLSig (const LObject &lhs, const LObject &rhs, const kStrategy strat)
 {
   return (pLtCmp(lhs.sig,rhs.sig) * currRing->OrdSgn);
 }
@@ -5317,7 +5317,7 @@ int posInLSig (const LSet set, const int length,
 
 /* UNUSED Ordering procedure: pLtCmp on signature, FDeg, pLtCmp on poly */
 
-int compareLSigRing (const LObject &lhs, const LObject &rhs)
+int compareLSigRing (const LObject &lhs, const LObject &rhs, const kStrategy strat)
 {
   assume(currRing->OrdSgn == 1 && rField_is_Ring(currRing));
   auto cmp = pLtCmp(lhs.sig,rhs.sig);
@@ -5422,7 +5422,7 @@ int posInSyz (const kStrategy strat, poly sig)
 * critical pairs to strat->L only behind all other critical pairs which are
 * still in strat->L!
 */
-int compareLF5C (const LObject &lhs, const LObject &rhs)
+int compareLF5C (const LObject &lhs, const LObject &rhs, const kStrategy strat)
 {
   return 0;
 }
@@ -5435,7 +5435,7 @@ int posInLF5C (const LSet /*set*/, const int length,
 
 /* Ordering procedure: totaldegree, pComp on poly */
 
-int compareL11 (const LObject &lhs, const LObject &rhs)
+int compareL11 (const LObject &lhs, const LObject &rhs, const kStrategy strat)
 {
   auto dl = lhs.GetpFDeg();
   auto dr = rhs.GetpFDeg();
@@ -5486,7 +5486,7 @@ int posInL11 (const LSet set, const int length,
   }
 }
 
-int compareL11Ring (const LObject &lhs, const LObject &rhs)
+int compareL11Ring (const LObject &lhs, const LObject &rhs, const kStrategy strat)
 {
   auto dl = lhs.GetpFDeg();
   auto dr = rhs.GetpFDeg();
@@ -5536,7 +5536,7 @@ int posInL11Ring (const LSet set, const int length,
   }
 }
 
-int compareLF5CRing (const LObject &lhs, const LObject &rhs)
+int compareLF5CRing (const LObject &lhs, const LObject &rhs, const kStrategy strat)
 {
   auto dl = lhs.GetpFDeg();
   auto dr = rhs.GetpFDeg();
@@ -5579,7 +5579,7 @@ int posInLF5CRing (const LSet set, const int length,
   }
 }
 
-int compareL11Ringls (const LObject &lhs, const LObject &rhs)
+int compareL11Ringls (const LObject &lhs, const LObject &rhs, const kStrategy strat)
 {
   if (lhs.FDeg < rhs.FDeg) return -1;
   if (lhs.FDeg > rhs.FDeg) return 1;
@@ -5686,13 +5686,13 @@ void LQueue::push(const LObject& lobject)
 #if 1
       auto at = compObject.parent->posInL(data(),size()-1,const_cast<LObject *>(&lobject),compObject.parent);
 #endif
-      auto target = compObject.parent->compareInL.target<int (*)(const LObject &lhs, const LObject &rhs)>();
-      if (target && ((*target == compareL11Ringls)
-		     || (*target == compareL110Ring)
-		     || (*target == compareL0)
-		     || (*target == compareL11Ring)
-		     || (*target == compareLSpecial)
-		     || (*target == compareLSig))) {
+      auto target = compObject.parent->compareInL;
+      if ((target == compareL11Ringls)
+	  || (target == compareL110Ring)
+	  || (target == compareL0)
+	  || (target == compareL11Ring)
+	  || (target == compareLSpecial)
+	  || (target == compareLSig)) {
 	// these three comparators put equal Lobjects at the start of the array (most put them at the end)
 	insert(std::vector<LObject>::begin(), lobject);
 	std::stable_sort(std::vector<LObject>::begin(), std::vector<LObject>::end(), compObject);
@@ -5778,7 +5778,7 @@ inline int getIndexRng(long coeff)
   }
 } */
 
-int compareL110 (const LObject &lhs, const LObject &rhs)
+int compareL110 (const LObject &lhs, const LObject &rhs, const kStrategy strat)
 {
   auto dl = lhs.GetpFDeg();
   auto dr = rhs.GetpFDeg();
@@ -5835,7 +5835,7 @@ int posInL110 (const LSet set, const int length,
   }
 }
 
-int compareL110Ring (const LObject &lhs, const LObject &rhs)
+int compareL110Ring (const LObject &lhs, const LObject &rhs, const kStrategy strat)
 {
   auto dl = lhs.GetpFDeg();
   auto dr = rhs.GetpFDeg();
@@ -5886,7 +5886,7 @@ int posInL110Ring (const LSet set, const int length,
   }
 }
 
-int compareL13 (const LObject &lhs, const LObject &rhs)
+int compareL13 (const LObject &lhs, const LObject &rhs, const kStrategy strat)
 {
   auto dl = lhs.GetpFDeg();
   auto dr = rhs.GetpFDeg();
@@ -5930,7 +5930,7 @@ int posInL13 (const LSet set, const int length,
   }
 }
 
-int compareL15 (const LObject &lhs, const LObject &rhs)
+int compareL15 (const LObject &lhs, const LObject &rhs, const kStrategy strat)
 {
   auto dl = lhs.GetpFDeg() + lhs.ecart;
   auto dr = rhs.GetpFDeg() + rhs.ecart;
@@ -5980,7 +5980,7 @@ int posInL15 (const LSet set, const int length,
   }
 }
 
-int compareL15Ring (const LObject &lhs, const LObject &rhs)
+int compareL15Ring (const LObject &lhs, const LObject &rhs, const kStrategy strat)
 {
   auto dl = lhs.GetpFDeg() + lhs.ecart;
   auto dr = rhs.GetpFDeg() + rhs.ecart;
@@ -6023,7 +6023,7 @@ int posInL15Ring (const LSet set, const int length,
   }
 }
 
-int compareL17 (const LObject &lhs, const LObject &rhs)
+int compareL17 (const LObject &lhs, const LObject &rhs, const kStrategy strat)
 {
   auto dl = lhs.GetpFDeg() + lhs.ecart;
   auto dr = rhs.GetpFDeg() + rhs.ecart;
@@ -6084,7 +6084,7 @@ int posInL17 (const LSet set, const int length,
   }
 }
 
-int compareL17Ring (const LObject &lhs, const LObject &rhs)
+int compareL17Ring (const LObject &lhs, const LObject &rhs, const kStrategy strat)
 {
   auto dl = lhs.GetpFDeg() + lhs.ecart;
   auto dr = rhs.GetpFDeg() + rhs.ecart;
@@ -6138,7 +6138,7 @@ int posInL17Ring (const LSet set, const int length,
   }
 }
 
-int compareL17_c (const LObject &lhs, const LObject &rhs)
+int compareL17_c (const LObject &lhs, const LObject &rhs, const kStrategy strat)
 {
   int cc = (-1+2*currRing->order[0]==ringorder_c);
   long cl = pGetComp(lhs.p)*cc;
@@ -6225,7 +6225,7 @@ int posInL17_c (const LSet set, const int length,
   }
 }
 
-int compareL17_cRing (const LObject &lhs, const LObject &rhs)
+int compareL17_cRing (const LObject &lhs, const LObject &rhs, const kStrategy strat)
 {
   int cc = (-1+2*currRing->order[0]==ringorder_c);
   long cl = pGetComp(lhs.p)*cc;
