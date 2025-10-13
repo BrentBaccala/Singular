@@ -681,7 +681,11 @@ void initPairtest(kStrategy strat)
 }
 
 
-BOOLEAN isPairsetInL(LQueue::iterator &it,poly p1,poly p2,kStrategy strat)
+/*2
+*test whether (p1,p2) or (p2,p1) is in L at or after an iterator
+*it returns TRUE if yes and modifies the iterator to point to the match
+*/
+BOOLEAN isInPairsetL(LQueue::iterator &it,poly p1,poly p2,kStrategy strat)
 {
   for (; it != strat->Lqueue.end(); it++) {
     if (((p1 == it->p1) && (p2 == it->p2))
@@ -3055,128 +3059,6 @@ void kMergeBintoL(kStrategy strat)
   }
 }
 
-/**
- * @param[in] is_ring If true, we can't remove unless the coefficient of the lcm is divisible by the coefficient of p
- * @param[in] use_ecart If true, we check the ecart parameter using sugarDivisibleBy
- * @param[in] check_pNext If true, if remove if either pNext(Lp.p) is flagged strat->tail or currRing has a global ordering
- *                        Otherwise, we remove if Lp.p itself is flagged strat->tail
- */
-void deleteIfCompareChain(poly p, int ecart, kStrategy strat, BOOLEAN (*pfCompareChain)(poly p, poly p1, poly p2, poly lcm, ring R), bool is_ring, bool use_ecart, bool check_pNext)
-{
-    strat->Lqueue.remove_if
-      ([&](LObject Lp) {
-         if ((Lp.p1!=NULL) && pfCompareChain(p,Lp.p1,Lp.p2,Lp.lcm,currRing)
-             && (!is_ring || ((Lp.lcm != NULL) && n_DivBy(pGetCoeff(Lp.lcm), pGetCoeff(p), currRing->cf)))
-             && (!use_ecart || sugarDivisibleBy(ecart, Lp.ecart)))
-               {
-		 if (! check_pNext) {
-		   if (Lp.p == strat->tail) {
-		     strat->c3++;
-		     return true;
-		   }
-		 } else {
-		   if ((pNext(Lp.p) == strat->tail)||(rHasGlobalOrdering(currRing))) {
-		     strat->c3++;
-		     return true;
-		   }
-		 }
-#if 0
-                 if(TEST_OPT_DEBUG)
-                   {
-                     PrintS("chain-crit-part: sugar:pCompareChain p=");
-                     p_wrp(p,currRing);
-                     Print(" delete L");
-                     p_wrp(Lp.lcm,currRing);
-                     PrintLn();
-                   }
-#endif
-               }
-         return false;
-       });
-}
-    /*
-    *this is our MODIFICATION of GEBAUER-MOELLER:
-    *First the elements of B enter L,
-    *then we fix a lcm and the "best" element in L
-    *(i.e the last in L with this lcm and of type (s,p))
-    *and cancel all the other elements of type (r,p) with this lcm
-    *except the case the element (s,r) has also the same lcm
-    *and is on the worst position with respect to (s,p) and (r,p)
-    */
-
-void deleteIfAble(poly p, kStrategy strat, bool is_ring)
-{
-    poly deleteFlag = pInit();
-    /* Search top to bottom for L[j] with L[j].p2 == p */
-    for (auto it=strat->Lqueue.begin(); it != strat->Lqueue.end(); it++) {
-      if (it->p2 == p)  // Was the element added from B?
-      {
-        for (auto it2=(it+1); it2 != strat->Lqueue.end(); it2++) {
-          // Element is from B and has the same lcm as "it"
-          if ((it2->p2 == p) && pLmEqual(it->lcm,it2->lcm)
-              && (!is_ring || (n_DivBy(pGetCoeff(it->lcm), pGetCoeff(it2->lcm), currRing->cf))))
-          {
-            /*L[i] could be canceled but we search for a better one to cancel*/
-            /* Search backwards (top to bottom) from L[i-1] to find L[l] */
-            strat->c3++;
-            auto it3=it2+1;
-            if (isPairsetInL(it3,it->p1,it2->p1,strat)
-            && (pNext(it3->p) == strat->tail)
-            && (!pLmEqual(it2->p,it3->p))
-            && pDivisibleBy(p,it3->lcm))
-            {
-              /*
-              *"NOT equal(...)" because in case of "equal" the element L[l]
-              *is "older" and has to be from theoretical point of view behind
-              *L[i], but we do not want to reorder L
-              */
-              it2->p2 = strat->tail;
-              /*
-              *L[l] will be canceled, we cannot cancel L[i] later on,
-              *so we mark it with "tail"
-              */
-#if 0
-              if(TEST_OPT_DEBUG)
-              {
-                PrintS("chain-crit-part: divisible_by p=");
-                p_wrp(p,currRing);
-                Print(" delete L");
-                p_wrp(it3->lcm,currRing);
-                PrintLn();
-              }
-#endif
-              it3->p2 = deleteFlag;
-            }
-            else
-            {
-#if 0
-              if(TEST_OPT_DEBUG)
-              {
-                PrintS("chain-crit-part: divisible_by(2) p=");
-                p_wrp(p,currRing);
-                Print(" delete L");
-                p_wrp(it2->lcm,currRing);
-                PrintLn();
-              }
-#endif
-              it2->p2 = deleteFlag;
-            }
-          }
-        }
-      }
-      else if (it->p2 == strat->tail)
-      {
-        /*now L[j] cannot be canceled any more and the tail can be removed*/
-        it->p2 = p;
-      }
-    }
-    strat->Lqueue.remove_if
-      ([&](LObject Lp) {
-         return (Lp.p2 == deleteFlag);
-       });
-    pLmFree(deleteFlag);
-}
-
 /*2
 *the pairset B of pairs of type (s[i],p) is complete now. It will be updated
 *using the chain-criterion in B and L and enters B to L
@@ -3246,7 +3128,23 @@ void chainCritNormal (poly p,int ecart,kStrategy strat)
     *and lcm(s,r)#lcm(s,p) and lcm(s,r)#lcm(r,p)
     *and in case the sugar is o.k. then L[j] can be canceled
     */
-      deleteIfCompareChain(p, ecart, strat, pCompareChain, false, true, false);
+      for (auto it = strat->Lqueue.begin(); it != strat->Lqueue.end(); )
+      {
+        if (sugarDivisibleBy(ecart,it->ecart)
+        && ((it->p == strat->tail) || (rHasGlobalOrdering(currRing)))
+        && pCompareChain(p,it->p1,it->p2,it->lcm))
+        {
+          if (it->p == strat->tail)
+          {
+            it = strat->Lqueue.erase(it);
+            strat->c3++;
+          }
+          else
+            ++it;
+        }
+        else
+          ++it;
+      }
       /*
       *this is GEBAUER-MOELLER:
       *in B all elements with the same lcm except the "best"
@@ -3285,12 +3183,27 @@ void chainCritNormal (poly p,int ecart,kStrategy strat)
       *and lcm(s,r)#lcm(s,p) and lcm(s,r)#lcm(r,p)
       *and in case the sugar is o.k. then L[j] can be canceled
       */
-      deleteIfCompareChain(p, 0, strat, pCompareChain, false, false, true);
+      for (auto it = strat->Lqueue.begin(); it != strat->Lqueue.end(); )
+      {
+        if (pCompareChain(p,it->p1,it->p2,it->lcm))
+        {
+          if ((pNext(it->p) == strat->tail)||(rHasGlobalOrdering(currRing)))
+          {
+            it = strat->Lqueue.erase(it);
+            strat->c3++;
+          }
+          else
+            ++it;
+        }
+        else
+          ++it;
+      }
       /*
       *this is GEBAUER-MOELLER:
       *in B all elements with the same lcm except the "best"
       *(i.e. the last one in B with this property) will be canceled
       */
+      /* XXX I don't think this will work with std::array because deleting it will invalidate jt */
       for (auto jt = strat->Bqueue.begin(); jt != strat->Bqueue.end(); ++jt)
       {
         for (auto it = jt + 1; it != strat->Bqueue.end(); )
@@ -3299,7 +3212,6 @@ void chainCritNormal (poly p,int ecart,kStrategy strat)
           {
             strat->c3++;
             it = strat->Bqueue.erase(it);
-            ++jt;
           }
           else
             ++it;
@@ -3313,13 +3225,92 @@ void chainCritNormal (poly p,int ecart,kStrategy strat)
   }
   else
   {
-    deleteIfCompareChain(p, 0, strat, pCompareChain, false, false, true);
+    for (auto jt = strat->Lqueue.begin(); jt != strat->Lqueue.end(); )
+    {
+      #ifdef HAVE_SHIFTBBA
+      if ((jt->p1!=NULL) &&
+      pCompareChain(p,jt->p1,jt->p2,jt->lcm))
+      #else
+      if (pCompareChain(p,jt->p1,jt->p2,jt->lcm))
+      #endif
+      {
+        if ((pNext(jt->p) == strat->tail)||(rHasGlobalOrdering(currRing)))
+        {
+          jt = strat->Lqueue.erase(jt);
+          strat->c3++;
+        }
+        else
+          ++jt;
+      }
+      else
+        ++jt;
+    }
+    /*
+    *this is our MODIFICATION of GEBAUER-MOELLER:
+    *First the elements of B enter L,
+    *then we fix a lcm and the "best" element in L
+    *(i.e the last in L with this lcm and of type (s,p))
+    *and cancel all the other elements of type (r,p) with this lcm
+    *except the case the element (s,r) has also the same lcm
+    *and is on the worst position with respect to (s,p) and (r,p)
+    */
     /*
     *B enters to L/their order with respect to B is permutated for elements
     *B[i].p with the same leading term
     */
     kMergeBintoL(strat);
-    deleteIfAble(p, strat, false);
+    for (auto jt = strat->Lqueue.begin(); jt != strat->Lqueue.end(); )
+    {
+      if (std::next(jt) == strat->Lqueue.end())
+      {
+        /*now L[0] cannot be canceled any more and the tail can be removed*/
+        if (jt->p2 == strat->tail) jt->p2 = p;
+        break;
+      }
+      if (jt->p2 == p)
+      {
+        for (auto it = jt + 1; it != strat->Lqueue.end(); )
+        {
+          bool i_deleted = false;
+          if ((it->p2 == p) && pLmEqual(jt->lcm,it->lcm))
+          {
+            /*L[i] could be canceled but we search for a better one to cancel*/
+            strat->c3++;
+            LQueue::iterator lt = std::next(it);
+            if (isInPairsetL(lt,jt->p1,it->p1,strat)
+            && (pNext(lt->p) == strat->tail)
+            && (!pLmEqual(it->p,lt->p))
+            && pDivisibleBy(p,lt->lcm))
+            {
+              /*
+              *"NOT equal(...)" because in case of "equal" the element L[l]
+              *is "older" and has to be from theoretical point of view behind
+              *L[i], but we do not want to reorder L
+              */
+              it->p2 = strat->tail;
+              /*
+              *L[l] will be canceled, we cannot cancel L[i] later on,
+              *so we mark it with "tail"
+              */
+              strat->Lqueue.erase(lt);
+            }
+            else
+            {
+              i_deleted = true;
+              it = strat->Lqueue.erase(it);
+            }
+          }
+          if (!i_deleted)
+            ++it;
+        }
+      }
+      else if (jt->p2 == strat->tail)
+      {
+        /*now L[j] cannot be canceled any more and the tail can be removed*/
+        jt->p2 = p;
+      }
+      ++jt;
+    }
   }
 }
 /*2
@@ -3345,7 +3336,78 @@ void chainCritOpt_1 (poly,int,kStrategy strat)
 void chainCritSig (poly p,int /*ecart*/,kStrategy strat)
 {
   kMergeBintoL(strat);
-  deleteIfAble(p, strat, false);
+  for (auto jt = strat->Lqueue.begin(); jt != strat->Lqueue.end(); )
+  {
+    if (std::next(jt) == strat->Lqueue.end())
+    {
+      /*now L[0] cannot be canceled any more and the tail can be removed*/
+      if (jt->p2 == strat->tail) jt->p2 = p;
+      break;
+    }
+    bool j_deleted = false;
+    if (jt->p2 == p)
+    {
+      for (auto it = jt + 1; it != strat->Lqueue.rend(); )
+      {
+        bool i_deleted = false;
+        if ((it->p2 == p) && pLmEqual(jt->lcm,it->lcm))
+        {
+          /*L[i] could be canceled but we search for a better one to cancel*/
+          strat->c3++;
+          // Search from beginning up to it for a pair
+          // Convert to forward iterator for searching
+          auto it_fwd = it.base();
+          --it_fwd;  // Now points to same element as it
+          auto search_it = strat->Lqueue.begin();
+          bool found = false;
+          for (; search_it != it_fwd; ++search_it)
+          {
+            if (((jt->p1 == search_it->p1) && (it->p1 == search_it->p2))
+            ||  ((jt->p1 == search_it->p2) && (it->p1 == search_it->p1)))
+            {
+              if ((pNext(search_it->p) == strat->tail)
+              && (!pLmEqual(it->p,search_it->p))
+              && pDivisibleBy(p,search_it->lcm))
+              {
+                /*
+                 *"NOT equal(...)" because in case of "equal" the element L[l]
+                 *is "older" and has to be from theoretical point of view behind
+                 *L[i], but we do not want to reorder L
+                 */
+                it->p2 = strat->tail;
+                /*
+                 *L[l] will be canceled, we cannot cancel L[i] later on,
+                 *so we mark it with "tail"
+                 */
+                strat->Lqueue.erase(search_it);
+                found = true;
+                break;
+              }
+            }
+          }
+          if (!found)
+          {
+            auto fwd_it = it.base();
+            --fwd_it;
+            strat->Lqueue.erase(fwd_it);
+            i_deleted = true;
+          }
+          // After deleting, iterator structure changes - need to restart j loop
+          j_deleted = true;
+          break;
+        }
+        if (!i_deleted)
+          ++it;
+      }
+    }
+    else if (jt->p2 == strat->tail)
+    {
+      /*now L[j] cannot be canceled any more and the tail can be removed*/
+      jt->p2 = p;
+    }
+    if (!j_deleted)
+      ++jt;
+  }
 }
 #ifdef HAVE_RATGRING
 void chainCritPart (poly p,int ecart,kStrategy strat)
@@ -3398,7 +3460,33 @@ void chainCritPart (poly p,int ecart,kStrategy strat)
     *and lcm(s,r)#lcm(s,p) and lcm(s,r)#lcm(r,p)
     *and in case the sugar is o.k. then L[j] can be canceled
     */
-      deleteIfCompareChain(p, ecart, strat, pCompareChainPart, false, true, false);
+      for (auto it = strat->Lqueue.begin(); it != strat->Lqueue.end(); )
+      {
+        if (sugarDivisibleBy(ecart,it->ecart)
+        && ((it->p == strat->tail) || (rHasGlobalOrdering(currRing)))
+        && pCompareChainPart(p,it->p1,it->p2,it->lcm))
+        {
+          if (it->p == strat->tail)
+          {
+#if 0
+            if(TEST_OPT_DEBUG)
+              {
+                PrintS("chain-crit-part: sugar:pCompareChain p=");
+                p_wrp(p,currRing);
+                Print(" delete L");
+                p_wrp(it->lcm,currRing);
+                PrintLn();
+              }
+#endif
+            it = strat->Lqueue.erase(it);
+            strat->c3++;
+          }
+          else
+            ++it;
+        }
+        else
+          ++it;
+      }
       /*
       *this is GEBAUER-MOELLER:
       *in B all elements with the same lcm except the "best"
@@ -3453,7 +3541,21 @@ void chainCritPart (poly p,int ecart,kStrategy strat)
       *and lcm(s,r)#lcm(s,p) and lcm(s,r)#lcm(r,p)
       *and in case the sugar is o.k. then L[j] can be canceled
       */
-      deleteIfCompareChain(p, 0, strat, pCompareChainPart, false, false, true);
+      for (auto it = strat->Lqueue.begin(); it != strat->Lqueue.end(); )
+      {
+        if (pCompareChainPart(p,it->p1,it->p2,it->lcm))
+        {
+          if ((pNext(it->p) == strat->tail)||(rHasGlobalOrdering(currRing)))
+          {
+            it = strat->Lqueue.erase(it);
+            strat->c3++;
+          }
+          else
+            ++it;
+        }
+        else
+          ++it;
+      }
       /*
       *this is GEBAUER-MOELLER:
       *in B all elements with the same lcm except the "best"
@@ -3487,13 +3589,98 @@ void chainCritPart (poly p,int ecart,kStrategy strat)
   }
   else
   {
-    deleteIfCompareChain(p, 0, strat, pCompareChainPart, false, false, true);
+    for (auto it = strat->Lqueue.begin(); it != strat->Lqueue.end(); )
+    {
+      if (pCompareChainPart(p,it->p1,it->p2,it->lcm))
+      {
+        if ((pNext(it->p) == strat->tail)||(rHasGlobalOrdering(currRing)))
+        {
+          it = strat->Lqueue.erase(it);
+          strat->c3++;
+        }
+        else
+          ++it;
+      }
+      else
+        ++it;
+    }
     /*
     *B enters to L/their order with respect to B is permutated for elements
     *B[i].p with the same leading term
     */
     kMergeBintoL(strat);
-    deleteIfAble(p, strat, false);
+    for (auto jt = strat->Lqueue.rbegin(); jt != strat->Lqueue.rend(); )
+    {
+      if (jt == strat->Lqueue.rbegin())
+      {
+        /*now L[0] cannot be canceled any more and the tail can be removed*/
+        if (jt->p2 == strat->tail) jt->p2 = p;
+        break;
+      }
+      bool j_deleted = false;
+      if (jt->p2 == p)
+      {
+        for (auto it = jt + 1; it != strat->Lqueue.rend(); )
+        {
+          bool i_deleted = false;
+          if ((it->p2 == p) && pLmEqual(jt->lcm,it->lcm))
+          {
+            /*L[i] could be canceled but we search for a better one to cancel*/
+            strat->c3++;
+            // Search from beginning up to it for a pair
+            // Convert to forward iterator for searching
+            auto it_fwd = it.base();
+            --it_fwd;  // Now points to same element as it
+            auto search_it = strat->Lqueue.begin();
+            bool found = false;
+            for (; search_it != it_fwd; ++search_it)
+            {
+              if (((jt->p1 == search_it->p1) && (it->p1 == search_it->p2))
+              ||  ((jt->p1 == search_it->p2) && (it->p1 == search_it->p1)))
+              {
+                if ((pNext(search_it->p) == strat->tail)
+                && (!pLmEqual(it->p,search_it->p))
+                && pDivisibleBy(p,search_it->lcm))
+                {
+                  /*
+                  *"NOT equal(...)" because in case of "equal" the element L[l]
+                  *is "older" and has to be from theoretical point of view behind
+                  *L[i], but we do not want to reorder L
+                  */
+                  it->p2 = strat->tail;
+                  /*
+                  *L[l] will be canceled, we cannot cancel L[i] later on,
+                  *so we mark it with "tail"
+                  */
+                  strat->Lqueue.erase(search_it);
+                  found = true;
+                  break;
+                }
+              }
+            }
+            if (!found)
+            {
+              auto fwd_it = it.base();
+              --fwd_it;
+              strat->Lqueue.erase(fwd_it);
+              i_deleted = true;
+            }
+            // After deleting, iterator structure changes - need to restart j loop
+            j_deleted = true;
+            break;
+          }
+          if (!i_deleted)
+            ++it;
+        }
+      }
+      else if (jt->p2 == strat->tail)
+      {
+        /*now L[j] cannot be canceled any more and the tail can be removed*/
+        jt->p2 = p;
+      }
+      if (!j_deleted)
+        ++jt;
+    }
   }
 }
 #endif
@@ -3736,13 +3923,100 @@ void chainCritRing (poly p,int, kStrategy strat)
     strat->pairtest=NULL;
   }
   assume(!(strat->Gebauer || strat->fromT));
-  deleteIfCompareChain(p, 0, strat, pCompareChain, true, false, true);
+  for (auto it = strat->Lqueue.begin(); it != strat->Lqueue.end(); )
+  {
+    if ((it->p1!=NULL) && pCompareChain(p,it->p1,it->p2,it->lcm)
+        && ((it->lcm != NULL) && n_DivBy(pGetCoeff(it->lcm), pGetCoeff(p), currRing->cf)))
+    {
+      if ((pNext(it->p) == strat->tail)||(rHasGlobalOrdering(currRing)))
+      {
+        it = strat->Lqueue.erase(it);
+        strat->c3++;
+      }
+      else
+        ++it;
+    }
+    else
+      ++it;
+  }
   /*
   *B enters to L/their order with respect to B is permutated for elements
   *B[i].p with the same leading term
   */
   kMergeBintoL(strat);
-  deleteIfAble(p, strat, true);
+  for (auto jt = strat->Lqueue.rbegin(); jt != strat->Lqueue.rend(); )
+  {
+    if (jt == strat->Lqueue.rbegin())
+    {
+      /*now L[0] cannot be canceled any more and the tail can be removed*/
+      if (jt->p2 == strat->tail) jt->p2 = p;
+      break;
+    }
+    bool j_deleted = false;
+    if (jt->p2 == p)
+    {
+      for (auto it = jt + 1; it != strat->Lqueue.rend(); )
+      {
+        bool i_deleted = false;
+        if ((it->p2 == p) && pLmEqual(jt->lcm,it->lcm)
+            && n_DivBy(pGetCoeff(jt->lcm), pGetCoeff(it->lcm), currRing->cf))
+        {
+          /*L[i] could be canceled but we search for a better one to cancel*/
+          strat->c3++;
+          // Search from beginning up to it for a pair
+          // Convert to forward iterator for searching
+          auto it_fwd = it.base();
+          --it_fwd;  // Now points to same element as it
+          auto search_it = strat->Lqueue.begin();
+          bool found = false;
+          for (; search_it != it_fwd; ++search_it)
+          {
+            if (((jt->p1 == search_it->p1) && (it->p1 == search_it->p2))
+            ||  ((jt->p1 == search_it->p2) && (it->p1 == search_it->p1)))
+            {
+              if ((pNext(search_it->p) == strat->tail)
+              && (!pLmEqual(it->p,search_it->p))
+              && pDivisibleBy(p,search_it->lcm))
+              {
+                /*
+                 *"NOT equal(...)" because in case of "equal" the element L[l]
+                 *is "older" and has to be from theoretical point of view behind
+                 *L[i], but we do not want to reorder L
+                 */
+                it->p2 = strat->tail;
+                /*
+                 *L[l] will be canceled, we cannot cancel L[i] later on,
+                 *so we mark it with "tail"
+                 */
+                strat->Lqueue.erase(search_it);
+                found = true;
+                break;
+              }
+            }
+          }
+          if (!found)
+          {
+            auto fwd_it = it.base();
+            --fwd_it;
+            strat->Lqueue.erase(fwd_it);
+            i_deleted = true;
+          }
+          // After deleting, iterator structure changes - need to restart j loop
+          j_deleted = true;
+          break;
+        }
+        if (!i_deleted)
+          ++it;
+      }
+    }
+    else if (jt->p2 == strat->tail)
+    {
+      /*now L[j] cannot be canceled any more and the tail can be removed*/
+      jt->p2 = p;
+    }
+    if (!j_deleted)
+      ++jt;
+  }
 }
 
 /*2
@@ -5688,28 +5962,28 @@ void LQueue::push(const LObject& lobject)
 #endif
       auto target = compObject.parent->compareInL;
       if ((target == compareL11Ringls)
-	  || (target == compareL110Ring)
-	  || (target == compareL0)
-	  || (target == compareL11Ring)
-	  || (target == compareLSpecial)
-	  || (target == compareLSig)) {
-	// these three comparators put equal Lobjects at the start of the array (most put them at the end)
-	insert(std::vector<LObject>::begin(), lobject);
-	std::stable_sort(std::vector<LObject>::begin(), std::vector<LObject>::end(), compObject);
+          || (target == compareL110Ring)
+          || (target == compareL0)
+          || (target == compareL11Ring)
+          || (target == compareLSpecial)
+          || (target == compareLSig)) {
+        // these three comparators put equal Lobjects at the start of the array (most put them at the end)
+        insert(std::vector<LObject>::begin(), lobject);
+        std::stable_sort(std::vector<LObject>::begin(), std::vector<LObject>::end(), compObject);
       } else {
-	push_back(lobject);
-	std::stable_sort(std::vector<LObject>::begin(), std::vector<LObject>::end(), compObject);
+        push_back(lobject);
+        std::stable_sort(std::vector<LObject>::begin(), std::vector<LObject>::end(), compObject);
       }
 #if 1
       // the only case where target == NULL is posInL10, which is very hard to mimic with the new code; I don't try, so don't test it
       if (target) {
-	int at2;
-	for (at2 = 0; at2 < size(); at2++) {
-	  if (memcmp(data() + at2, &lobject, sizeof(LObject)) == 0) break;
-	}
-	if (at != at2) {
-	  fprintf(stderr, "discrepency\n");
-	}
+        int at2;
+        for (at2 = 0; at2 < size(); at2++) {
+          if (memcmp(data() + at2, &lobject, sizeof(LObject)) == 0) break;
+        }
+        if (at != at2) {
+          fprintf(stderr, "discrepency\n");
+        }
       }
 #endif
     } else {
