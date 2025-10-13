@@ -1342,8 +1342,8 @@ static BOOLEAN hasPurePower (LObject *L,int last, int *length,kStrategy strat)
 int compareInL10 (const LObject &lhs, const LObject &rhs, const kStrategy strat)
 {
   int lenl, lenr;
-  bool hasppl = hasPurePower(&lhs,strat->lastAxis,&lenl,strat);
-  bool hasppr = hasPurePower(&rhs,strat->lastAxis,&lenr,strat);
+  bool hasppl = hasPurePower(const_cast<LObject *>(&lhs),strat->lastAxis,&lenl,strat);
+  bool hasppr = hasPurePower(const_cast<LObject *>(&rhs),strat->lastAxis,&lenr,strat);
   if (hasppl && hasppr) {
     if (lenl < lenr) return -1;
     if (lenl > lenr) return 1;
