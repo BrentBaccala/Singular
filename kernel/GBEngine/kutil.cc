@@ -3929,7 +3929,7 @@ void chainCritRing (poly p,int, kStrategy strat)
     {
       if (pCompareChain(p,jt->p1,jt->p2,jt->lcm))
       {
-        if ((pNext(jt->p) == strat->tail) || (rHasGlobalOrdering(currRing)))
+        if ((pNext(jt->p) == strat->tail)||(rHasGlobalOrdering(currRing)))
         {
           jt = strat->Lqueue.erase(jt);
           strat->c3++;
@@ -3966,66 +3966,59 @@ void chainCritRing (poly p,int, kStrategy strat)
   *B[i].p with the same leading term
   */
   kMergeBintoL(strat);
-  for (auto jt = strat->Lqueue.rbegin(); jt != strat->Lqueue.rend(); )
+  for (auto jt = strat->Lqueue.begin(); jt != strat->Lqueue.end(); )
   {
-    if (jt == strat->Lqueue.rbegin())
+    if (std::next(jt) == strat->Lqueue.end())
     {
       /*now L[0] cannot be canceled any more and the tail can be removed*/
       if (jt->p2 == strat->tail) jt->p2 = p;
       break;
     }
-    bool j_deleted = false;
     if (jt->p2 == p)
     {
-      for (auto it = jt + 1; it != strat->Lqueue.rend(); )
+      for (auto it = jt + 1; it != strat->Lqueue.end(); )
       {
         bool i_deleted = false;
-        if ((it->p2 == p) && pLmEqual(jt->lcm,it->lcm)
-            && n_DivBy(pGetCoeff(jt->lcm), pGetCoeff(it->lcm), currRing->cf))
+        // Element is from B and has the same lcm as L[j]
+        if ((it->p2 == p) && n_DivBy(pGetCoeff(jt->lcm), pGetCoeff(it->lcm), currRing->cf)
+             && pLmEqual(jt->lcm,it->lcm))
         {
           /*L[i] could be canceled but we search for a better one to cancel*/
           strat->c3++;
-          // Search from beginning up to it for a pair
-          // Convert to forward iterator for searching
-          auto it_fwd = it.base();
-          --it_fwd;  // Now points to same element as it
-          auto search_it = strat->Lqueue.begin();
-          bool found = false;
-          for (; search_it != it_fwd; ++search_it)
+#ifdef KDEBUG
+          if (TEST_OPT_DEBUG)
           {
-            if (((jt->p1 == search_it->p1) && (it->p1 == search_it->p2))
-            ||  ((jt->p1 == search_it->p2) && (it->p1 == search_it->p1)))
-            {
-              if ((pNext(search_it->p) == strat->tail)
-              && (!pLmEqual(it->p,search_it->p))
-              && pDivisibleBy(p,search_it->lcm))
-              {
-                /*
-                 *"NOT equal(...)" because in case of "equal" the element L[l]
-                 *is "older" and has to be from theoretical point of view behind
-                 *L[i], but we do not want to reorder L
-                 */
-                it->p2 = strat->tail;
-                /*
-                 *L[l] will be canceled, we cannot cancel L[i] later on,
-                 *so we mark it with "tail"
-                 */
-                strat->Lqueue.erase(search_it);
-                found = true;
-                break;
-              }
-            }
+            PrintS("--- chain criterion func chainCritRing type 3\n");
+            PrintS("strat->L[j].lcm:");
+            wrp(jt->lcm);
+            PrintS("  strat->L[i].lcm:");
+            wrp(it->lcm);
+            PrintLn();
           }
-          if (!found)
+#endif
+          LQueue::iterator lt = std::next(it);
+          if (isInPairsetL(lt,jt->p1,it->p1,strat)
+          && (pNext(lt->p) == strat->tail)
+          && (!pLmEqual(it->p,lt->p))
+          && pDivisibleBy(p,lt->lcm))
           {
-            auto fwd_it = it.base();
-            --fwd_it;
-            strat->Lqueue.erase(fwd_it);
+            /*
+            *"NOT equal(...)" because in case of "equal" the element L[l]
+            *is "older" and has to be from theoretical point of view behind
+            *L[i], but we do not want to reorder L
+            */
+            it->p2 = strat->tail;
+            /*
+            *L[l] will be canceled, we cannot cancel L[i] later on,
+            *so we mark it with "tail"
+            */
+            strat->Lqueue.erase(lt);
+          }
+          else
+          {
             i_deleted = true;
+            it = strat->Lqueue.erase(it);
           }
-          // After deleting, iterator structure changes - need to restart j loop
-          j_deleted = true;
-          break;
         }
         if (!i_deleted)
           ++it;
@@ -4036,8 +4029,7 @@ void chainCritRing (poly p,int, kStrategy strat)
       /*now L[j] cannot be canceled any more and the tail can be removed*/
       jt->p2 = p;
     }
-    if (!j_deleted)
-      ++jt;
+    ++jt;
   }
 }
 
