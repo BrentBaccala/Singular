@@ -4271,13 +4271,13 @@ void f5c (kStrategy strat, int& olddeg, int& minimcnt, int& hilbeledeg,
   // we cannot use strat->T anymore
   //cleanT(strat);
   //strat->tl = -1;
-  Lqueue.compObject.parent = NULL;
+  Lqueue.key_comp().parent = NULL;
   if(rField_is_Ring(currRing)) {
-    Lqueue.compObject.posInL = posInLF5CRing;
-    Lqueue.compObject.compareInL = compareLF5CRing;
+    Lqueue.key_comp().posInL = posInLF5CRing;
+    Lqueue.key_comp().compareInL = compareLF5CRing;
   } else {
-    Lqueue.compObject.posInL = posInLF5C;
-    Lqueue.compObject.compareInL = compareLF5C;
+    Lqueue.key_comp().posInL = posInLF5C;
+    Lqueue.key_comp().compareInL = compareLF5C;
   }
   while (strat->tl >= 0)
   {

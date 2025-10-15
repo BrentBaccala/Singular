@@ -5970,11 +5970,8 @@ int posInL11Ringls (const LSet set, const int length,
 
 void LQueue::push(const LObject& lobject)
 {
-    if (compObject.parent != NULL) {
-#if 1
-      auto at = compObject.parent->posInL(data(),size()-1,const_cast<LObject *>(&lobject),compObject.parent);
-#endif
-      auto target = compObject.parent->compareInL;
+    if (key_comp().parent != NULL) {
+      auto target = key_comp().parent->compareInL;
       if ((target == compareL11Ringls)
           || (target == compareL110Ring)
           || (target == compareL0)
@@ -5982,28 +5979,13 @@ void LQueue::push(const LObject& lobject)
           || (target == compareLSpecial)
           || (target == compareLSig)) {
         // these three comparators put equal Lobjects at the start of the array (most put them at the end)
-        insert(std::vector<LObject>::begin(), lobject);
-        std::stable_sort(std::vector<LObject>::begin(), std::vector<LObject>::end(), compObject);
+        insert(lobject);
       } else {
-        push_back(lobject);
-        std::stable_sort(std::vector<LObject>::begin(), std::vector<LObject>::end(), compObject);
+        insert(lobject);
       }
-#if 1
-      // the only case where target == NULL is posInL10, which is very hard to mimic with the new code; I don't try, so don't test it
-      if (target) {
-        int at2;
-        for (at2 = 0; at2 < size(); at2++) {
-          if (memcmp(data() + at2, &lobject, sizeof(LObject)) == 0) break;
-        }
-        if (at != at2) {
-          fprintf(stderr, "discrepency\n");
-        }
-      }
-#endif
     } else {
       // f5c() special case
-      auto at = compObject.posInL(data(),size()-1,const_cast<LObject *>(&lobject),NULL);
-      insert(std::vector<LObject>::begin() + at, lobject);
+      insert(lobject);
     }
 }
 
@@ -11427,8 +11409,8 @@ ring sbaRing (kStrategy strat, const ring r, BOOLEAN /*complete*/, int /*sgn*/)
 skStrategy::skStrategy()
 {
   memset(this, 0, sizeof(skStrategy));
-  Lqueue.compObject.parent = this;
-  Bqueue.compObject.parent = this;
+  Lqueue.key_comp().parent = this;
+  Bqueue.key_comp().parent = this;
   strat_nr++;
   nr=strat_nr;
   tailRing = currRing;

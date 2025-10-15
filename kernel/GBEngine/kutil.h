@@ -10,7 +10,7 @@
 
 #include <string.h>
 
-#include <queue>
+#include "writable_set.h"
 #include <algorithm>
 
 #include "omalloc/omalloc.h"
@@ -298,48 +298,44 @@ public:
   skStrategy * parent;
   int (*compareInL) (const LObject &lhs, const LObject &rhs, const kStrategy strat);
   int (*posInL)(const LSet set, const int length, LObject* L,const kStrategy strat);
-  bool operator()(const LObject &lhs, const LObject &rhs);
+  bool operator() (const LObject &lhs, const LObject &rhs) const;
 };
 
-class LQueue : std::vector<LObject> {
+class LQueue : public writable_set<LObject, CompareLObject> {
 public:
-  CompareLObject compObject;
-  void push(const LObject& lobject);
-  void reorder(void) {
-    /* required after changes made to objects that can change their sort order */
-    std::stable_sort(std::vector<LObject>::begin(), std::vector<LObject>::end(), compObject);
-  }
-  bool would_be_top(LObject& lobject) {
-    return (empty() || !compObject(lobject, back()));
-  }
-  void pop(void) {
-    pop_back();
-  }
-  const LObject& top(void) {
-    return back();
-  }
-  /* The class always iterates from top to bottom, which is back to front of the std::vector  */
-  typedef std::vector<sLObject>::reverse_iterator iterator;
+  /* The class always iterates from top to bottom, which is back to front of the writable_set  */
+  typedef writable_set<LObject, CompareLObject>::reverse_iterator iterator;
   iterator begin(void) {
-    return std::vector<LObject>::rbegin();
+    return writable_set<LObject, CompareLObject>::rbegin();
   }
   iterator end(void) {
-    return std::vector<LObject>::rend();
+    return writable_set<LObject, CompareLObject>::rend();
   }
-  using std::vector<LObject>::empty;
-  using std::vector<LObject>::size;
-  using std::vector<LObject>::size_type;
+  iterator erase(iterator rit) {
+    auto next = std::next(rit);
+    auto it = rit.base();
+    it --;
+    writable_set<LObject, CompareLObject>::erase(it);
+    return next;
+  }
+  void push(const LObject& lobject);
+  bool would_be_top(LObject& lobject) {
+    return (empty() || !key_comp()(lobject, top()));
+  }
+  void pop(void) {
+    erase(begin());
+  }
+  const LObject& top(void) {
+    return *begin();
+  }
+  using writable_set<LObject, CompareLObject>::key_comp;
+  using writable_set<LObject, CompareLObject>::empty;
+  using writable_set<LObject, CompareLObject>::size;
+  using writable_set<LObject, CompareLObject>::size_type;
+  using writable_set<LObject, CompareLObject>::erase;
   template <typename F>
   void remove_if(F&& predicate) {
-    std::vector<LObject>::erase(std::remove_if(std::vector<LObject>::begin(), std::vector<LObject>::end(), predicate), std::vector<LObject>::end());
-  }
-
-  iterator erase(iterator it) {
-    // Convert reverse iterator to forward iterator for erase
-    auto forward_it = std::next(it).base();
-    auto result = std::vector<LObject>::erase(forward_it);
-    // Convert back to reverse iterator
-    return iterator(result);
+    writable_set<LObject, CompareLObject>::erase(std::remove_if(writable_set<LObject, CompareLObject>::begin(), writable_set<LObject, CompareLObject>::end(), predicate), writable_set<LObject, CompareLObject>::end());
   }
 };
 
@@ -485,7 +481,7 @@ public:
   KINLINE TObject* s_2_t(int i);
 };
 
-inline bool CompareLObject::operator()(const LObject &lhs, const LObject &rhs)
+inline bool CompareLObject::operator()(const LObject &lhs, const LObject &rhs) const
 {
   /* A C++ comparator is a less than operator, which, for a -1/0/1 comparator,
    * is equivalent to cmp(lhs,rhs) == 1

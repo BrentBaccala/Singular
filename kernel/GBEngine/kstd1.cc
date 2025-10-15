@@ -13,6 +13,8 @@
 
 #define PRE_INTEGER_CHECK 0
 
+#include <vector>
+
 #include "kernel/mod2.h"
 
 #include "misc/options.h"
@@ -1205,15 +1207,6 @@ static poly redMoraNFRing (poly h,kStrategy strat, int flag)
 }
 
 /*2
-*reorders  L with respect to posInL
-*/
-static void reorderL(kStrategy strat)
-{
-  // LQueue maintains its own sorted order, so just call reorder
-  strat->Lqueue.reorder();
-}
-
-/*2
 *reorders  T with respect to length
 */
 static void reorderT(kStrategy strat)
@@ -1559,8 +1552,9 @@ static void updateT(kStrategy strat)
 /*2
 * arranges red, pos and T if strat->kAllAxis (first time)
 */
-static void firstUpdate(kStrategy strat)
+static bool firstUpdate(kStrategy strat)
 {
+  bool reorderL = false;
   if (strat->update)
   {
     kTest_TS(strat);
@@ -1590,12 +1584,10 @@ static void firstUpdate(kStrategy strat)
     }
     if (TEST_OPT_FASTHC)
     {
-      strat->posInL = strat->posInLOld;
-      strat->compareInL = strat->compareInLOld;
-      strat->lastAxis = 0;
+      reorderL = true;
     }
     if (TEST_OPT_FINDET)
-      return;
+      return reorderL;
 
     strat->use_buckets = kMoraUseBucket(strat);
     updateT(strat);
@@ -1607,6 +1599,7 @@ static void firstUpdate(kStrategy strat)
     }
   }
   kTest_TS(strat);
+  return reorderL;
 }
 
 /*2
@@ -1639,14 +1632,21 @@ void enterSMora (LObject &p,int atS,kStrategy strat, int atR)
   {
     if (newHEdge(strat))
     {
-      firstUpdate(strat);
+      bool reorderL = firstUpdate(strat);
       if (TEST_OPT_FINDET)
         return;
 
-      /*- cuts elements in L above noether and reorders L -*/
+      /*- cuts elements in L above noether -*/
       updateLHC(strat);
-      /*- reorders L with respect to posInL -*/
-      reorderL(strat);
+      /*- reorders L -*/
+      if (reorderL) {
+        std::vector<LObject> oldL(strat->Lqueue.begin(), strat->Lqueue.end());
+        strat->Lqueue.clear();
+        strat->posInL = strat->posInLOld;
+        strat->compareInL = strat->compareInLOld;
+        strat->lastAxis = 0;
+        for (auto& Lp: oldL) strat->Lqueue.push(Lp);
+      }
     }
   }
   else if ((strat->kNoether==NULL)
@@ -1657,14 +1657,17 @@ void enterSMora (LObject &p,int atS,kStrategy strat, int atR)
       missingAxis(&strat->lastAxis,strat);
       if (strat->lastAxis)
       {
+        updateL(FALSE,strat);
+        // Change sort ordering and reorder L
+        std::vector<LObject> oldL(strat->Lqueue.begin(), strat->Lqueue.end());
+        strat->Lqueue.clear();
         strat->posInLOld = strat->posInL;
         strat->posInLOldFlag = FALSE;
         strat->posInL = posInL10;
         strat->compareInLOld = strat->compareInL;
         strat->compareInL = compareInL10;
         strat->posInLDependsOnLength = TRUE;
-        updateL(FALSE,strat);
-        reorderL(strat);
+        for (auto& Lp: oldL) strat->Lqueue.push(Lp);
       }
     }
     else if (strat->lastAxis)
@@ -1912,13 +1915,15 @@ ideal mora (ideal F, ideal Q,intvec *w,bigintmat *hilb,kStrategy strat)
   * and could have put strat->kHEdgdeFound FALSE*/
   if (TEST_OPT_FASTHC && (strat->lastAxis) && strat->posInLOldFlag)
   {
+    updateL(FALSE,strat);
+    // Change sort ordering and reorder L
+    std::vector<LObject> oldL(strat->Lqueue.begin(), strat->Lqueue.end());
     strat->posInLOld = strat->posInL;
     strat->posInLOldFlag = FALSE;
     strat->posInL = posInL10;
     strat->compareInLOld = strat->compareInL;
     strat->compareInL = compareInL10;
-    updateL(FALSE,strat);
-    reorderL(strat);
+    for (auto& Lp: oldL) strat->Lqueue.push(Lp);
   }
   kTest_TS(strat);
   strat->use_buckets = kMoraUseBucket(strat);
