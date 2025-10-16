@@ -311,13 +311,6 @@ public:
   iterator end(void) {
     return writable_set<LObject, CompareLObject>::rend();
   }
-  iterator erase(iterator rit) {
-    auto next = std::next(rit);
-    auto it = rit.base();
-    it --;
-    writable_set<LObject, CompareLObject>::erase(it);
-    return next;
-  }
   void push(const LObject& lobject);
   bool would_be_top(LObject& lobject) {
     return (empty() || !key_comp()(lobject, top()));

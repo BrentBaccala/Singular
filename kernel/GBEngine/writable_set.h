@@ -46,8 +46,12 @@
  * forward/reverse/const variants, range-based for loops, arithmetic (it+n, it-n),
  * and equality operators. Allocate objects with new on insert/emplace, delete on
  * erase/clear/destruction. Implement multiset interface: insert/emplace (return
- * iterator), erase (by iterator/range/value), find, count, contains, clear, size,
- * empty. Support all iterator types: begin/end/cbegin/cend/rbegin/rend/crbegin/crend.
+ * iterator), erase (by iterator/range/value for forward iterators), find, count,
+ * contains, clear, size, empty. Support all iterator types: begin/end/cbegin/cend/
+ * rbegin/rend/crbegin/crend. Add erase(const_reverse_iterator pos) that erases a
+ * single element and returns a reverse_iterator to the next element in reverse order
+ * (when converting the forward erase result to reverse_iterator, wrap it with
+ * iterator() first, then pass to reverse_iterator constructor to ensure proper type).
  * Provide copy and move constructors/assignments. Add key_comp() and value_comp()
  * with both const and non-const overloads to allow comparator inspection and
  * modification. Include full documentation explaining the design rationale, memory
@@ -260,6 +264,18 @@ public:
             delete *it.it_;
         }
         return iterator(data_.erase(first.it_, last.it_));
+    }
+
+    reverse_iterator erase(const_reverse_iterator pos) {
+        // Convert reverse iterator to forward iterator
+        // For reverse_iterator, base() gives the forward iterator one position ahead
+        auto forward_it = pos.base();
+        --forward_it;
+        delete *forward_it.it_;
+        // After erasing, data_.erase returns an iterator to the element following the erased element
+        auto result_forward = data_.erase(forward_it.it_);
+        // Wrap the result and convert to reverse iterator
+        return reverse_iterator(iterator(result_forward));
     }
 
     size_type erase(const T& value) {
