@@ -11408,7 +11408,6 @@ ring sbaRing (kStrategy strat, const ring r, BOOLEAN /*complete*/, int /*sgn*/)
 
 skStrategy::skStrategy()
 {
-  memset(this, 0, sizeof(skStrategy));
   Lqueue.key_comp().parent = this;
   Bqueue.key_comp().parent = this;
   strat_nr++;
