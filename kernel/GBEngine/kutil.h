@@ -300,7 +300,7 @@ public:
   skStrategy * parent;
   int (*compareInL) (const LObject &lhs, const LObject &rhs, const kStrategy strat);
   int (*posInL)(const LSet set, const int length, LObject* L,const kStrategy strat);
-  bool operator() (const LObject &lhs, const LObject &rhs, bool resolve_equality = true) const;
+  bool operator() (const LObject &lhs, const LObject &rhs) const;
 };
 
 class LQueue : public writable_set<LObject, CompareLObject> {
@@ -312,7 +312,15 @@ public:
   using writable_set<LObject, CompareLObject>::end;
   void push(LObject& lobject);
   bool would_be_top(LObject& lobject) {
-    return (empty() || !key_comp()(top(), lobject, false));
+    /* Would lobject be the top object in the queue if it were pushed?
+     * Yes if either the queue is empty or lobject is less than the first object.
+     *
+     * Strictly speaking, maybe we should make a copy of lobject before setting its seq value
+     * to what it would be if it were pushed, but in fact, it doesn't get used anywhere
+     * except in the key_comp comparison function, so we can set it without making a copy.
+     */
+    lobject.seq = seq;
+    return (empty() || key_comp()(lobject, top()));
   }
   void pop(void) {
     erase(begin());
@@ -493,7 +501,7 @@ int compareL17_c (const LObject &lhs, const LObject &rhs, const kStrategy strat)
 int compareL17_cRing (const LObject &lhs, const LObject &rhs, const kStrategy strat);
 int compareLSpecial (const LObject &lhs, const LObject &rhs, const kStrategy strat);
 
-inline bool CompareLObject::operator()(const LObject &lhs, const LObject &rhs, bool resolve_equality) const
+inline bool CompareLObject::operator()(const LObject &lhs, const LObject &rhs) const
 {
   /* A C++ comparator is a less than operator, which, for a -1/0/1 comparator,
    * is equivalent to cmp(lhs,rhs) == 1.  However, we want the tree ordered in
@@ -511,7 +519,6 @@ inline bool CompareLObject::operator()(const LObject &lhs, const LObject &rhs, b
   auto comparison = comparator(lhs, rhs, parent);
   if (comparison == -1) return true;
   if (comparison == 1) return false;
-  if (! resolve_equality) return false;
   if ((comparator == compareL11Ringls)
       || (comparator == compareL110Ring)
       || (comparator == compareL0)
