@@ -300,24 +300,19 @@ public:
   skStrategy * parent;
   int (*compareInL) (const LObject &lhs, const LObject &rhs, const kStrategy strat);
   int (*posInL)(const LSet set, const int length, LObject* L,const kStrategy strat);
-  bool operator() (const LObject &lhs, const LObject &rhs) const;
+  bool operator() (const LObject &lhs, const LObject &rhs, bool resolve_equality = true) const;
 };
 
 class LQueue : public writable_set<LObject, CompareLObject> {
 private:
   unsigned seq = 0;   // increments by one on every insertion; used to determine ordering
 public:
-  /* The class always iterates from top to bottom, which is back to front of the writable_set  */
-  typedef writable_set<LObject, CompareLObject>::reverse_iterator iterator;
-  iterator begin(void) {
-    return writable_set<LObject, CompareLObject>::rbegin();
-  }
-  iterator end(void) {
-    return writable_set<LObject, CompareLObject>::rend();
-  }
+  using writable_set<LObject, CompareLObject>::iterator;
+  using writable_set<LObject, CompareLObject>::begin;
+  using writable_set<LObject, CompareLObject>::end;
   void push(LObject& lobject);
   bool would_be_top(LObject& lobject) {
-    return (empty() || !key_comp()(lobject, top()));
+    return (empty() || !key_comp()(top(), lobject, false));
   }
   void pop(void) {
     erase(begin());
@@ -498,10 +493,11 @@ int compareL17_c (const LObject &lhs, const LObject &rhs, const kStrategy strat)
 int compareL17_cRing (const LObject &lhs, const LObject &rhs, const kStrategy strat);
 int compareLSpecial (const LObject &lhs, const LObject &rhs, const kStrategy strat);
 
-inline bool CompareLObject::operator()(const LObject &lhs, const LObject &rhs) const
+inline bool CompareLObject::operator()(const LObject &lhs, const LObject &rhs, bool resolve_equality) const
 {
   /* A C++ comparator is a less than operator, which, for a -1/0/1 comparator,
-   * is equivalent to cmp(lhs,rhs) == 1
+   * is equivalent to cmp(lhs,rhs) == 1.  However, we want the tree ordered in
+   * reverse order, so that the object that compares largest is at the start.
    */
   int (*comparator) (const LObject &lhs, const LObject &rhs, const kStrategy strat);
 
@@ -513,18 +509,19 @@ inline bool CompareLObject::operator()(const LObject &lhs, const LObject &rhs) c
     comparator = compareInL;
   }
   auto comparison = comparator(lhs, rhs, parent);
-  if (comparison == 1) return true;
-  if (comparison == -1) return false;
+  if (comparison == -1) return true;
+  if (comparison == 1) return false;
+  if (! resolve_equality) return false;
   if ((comparator == compareL11Ringls)
       || (comparator == compareL110Ring)
       || (comparator == compareL0)
       || (comparator == compareL11Ring)
       || (comparator == compareLSpecial)
       || (comparator == compareLSig)) {
-    // these comparators put equal Lobjects at the start of the array (most put them at the end), so seq ordering is 3,2,1
-    return (lhs.seq > rhs.seq);
+    // these comparators order equal Lobjects FIFO (most are LIFO), so seq ordering is 1,2,3
+    return (lhs.seq < rhs.seq);
   } else {
-    return (rhs.seq > lhs.seq);
+    return (lhs.seq > rhs.seq);
   }
 };
 
