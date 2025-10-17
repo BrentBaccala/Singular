@@ -3161,7 +3161,6 @@ void chainCritNormal (poly p,int ecart,kStrategy strat)
             if (sugarDivisibleBy(jt->ecart,it->ecart))
             {
               it = strat->Bqueue.erase(it);
-              ++jt;
             }
             else
             {
