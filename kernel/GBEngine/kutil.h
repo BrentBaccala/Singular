@@ -195,6 +195,8 @@ public:
   poly  lcm;   /*- the lcm of p1,p2 -*/
   kBucket_pt bucket;
   int   i_r1, i_r2;
+  unsigned seq;       // the sequence number of the LQueue when this LObject was inserted
+                      // used when the LObject comparison function returns equality to determine L set ordering
   unsigned checked; // this is the index of S up to which
                       // the corresponding LObject was already checked in
                       // critical pair creation => when entering the
@@ -302,6 +304,8 @@ public:
 };
 
 class LQueue : public writable_set<LObject, CompareLObject> {
+private:
+  unsigned seq = 0;   // increments by one on every insertion; used to determine ordering
 public:
   /* The class always iterates from top to bottom, which is back to front of the writable_set  */
   typedef writable_set<LObject, CompareLObject>::reverse_iterator iterator;
@@ -311,7 +315,7 @@ public:
   iterator end(void) {
     return writable_set<LObject, CompareLObject>::rend();
   }
-  void push(const LObject& lobject);
+  void push(LObject& lobject);
   bool would_be_top(LObject& lobject) {
     return (empty() || !key_comp()(lobject, top()));
   }
@@ -474,17 +478,53 @@ public:
   KINLINE TObject* s_2_t(int i);
 };
 
+int compareL0 (const LObject &lhs, const LObject &rhs, const kStrategy strat);
+int compareL0Ring (const LObject &lhs, const LObject &rhs, const kStrategy strat);
+int compareLSig (const LObject &lhs, const LObject &rhs, const kStrategy strat);
+int compareLSigRing (const LObject &lhs, const LObject &rhs, const kStrategy strat);
+int compareL11 (const LObject &lhs, const LObject &rhs, const kStrategy strat);
+int compareL11Ring (const LObject &lhs, const LObject &rhs, const kStrategy strat);
+int compareLF5C (const LObject &lhs, const LObject &rhs, const kStrategy strat);
+int compareLF5CRing (const LObject &lhs, const LObject &rhs, const kStrategy strat);
+int compareL11Ringls (const LObject &lhs, const LObject &rhs, const kStrategy strat);
+int compareL110 (const LObject &lhs, const LObject &rhs, const kStrategy strat);
+int compareL110Ring (const LObject &lhs, const LObject &rhs, const kStrategy strat);
+int compareL13 (const LObject &lhs, const LObject &rhs, const kStrategy strat);
+int compareL15 (const LObject &lhs, const LObject &rhs, const kStrategy strat);
+int compareL15Ring (const LObject &lhs, const LObject &rhs, const kStrategy strat);
+int compareL17 (const LObject &lhs, const LObject &rhs, const kStrategy strat);
+int compareL17Ring (const LObject &lhs, const LObject &rhs, const kStrategy strat);
+int compareL17_c (const LObject &lhs, const LObject &rhs, const kStrategy strat);
+int compareL17_cRing (const LObject &lhs, const LObject &rhs, const kStrategy strat);
+int compareLSpecial (const LObject &lhs, const LObject &rhs, const kStrategy strat);
+
 inline bool CompareLObject::operator()(const LObject &lhs, const LObject &rhs) const
 {
   /* A C++ comparator is a less than operator, which, for a -1/0/1 comparator,
    * is equivalent to cmp(lhs,rhs) == 1
    */
+  int (*comparator) (const LObject &lhs, const LObject &rhs, const kStrategy strat);
+
   if (parent != NULL) {
-    return (parent->compareInL(lhs, rhs, parent) == 1);
+    comparator = parent->compareInL;
   } else {
     /* A special case used only in f5c() to construct a temporary LQueue without a parent */
     /* compareInL10 (not used in f5c) is the only comparator that uses its third argument */
-    return (compareInL(lhs, rhs, parent) == 1);
+    comparator = compareInL;
+  }
+  auto comparison = comparator(lhs, rhs, parent);
+  if (comparison == 1) return true;
+  if (comparison == -1) return false;
+  if ((comparator == compareL11Ringls)
+      || (comparator == compareL110Ring)
+      || (comparator == compareL0)
+      || (comparator == compareL11Ring)
+      || (comparator == compareLSpecial)
+      || (comparator == compareLSig)) {
+    // these comparators put equal Lobjects at the start of the array (most put them at the end), so seq ordering is 3,2,1
+    return (lhs.seq > rhs.seq);
+  } else {
+    return (rhs.seq > lhs.seq);
   }
 };
 
@@ -558,25 +598,6 @@ int posInL110 (const LSet set, const int length,
              LObject* L,const kStrategy strat);
 int posInLSpecial (const LSet set, const int length,
              LObject *L,const kStrategy strat);
-int compareL0 (const LObject &lhs, const LObject &rhs, const kStrategy strat);
-int compareL0Ring (const LObject &lhs, const LObject &rhs, const kStrategy strat);
-int compareLSig (const LObject &lhs, const LObject &rhs, const kStrategy strat);
-int compareLSigRing (const LObject &lhs, const LObject &rhs, const kStrategy strat);
-int compareL11 (const LObject &lhs, const LObject &rhs, const kStrategy strat);
-int compareL11Ring (const LObject &lhs, const LObject &rhs, const kStrategy strat);
-int compareLF5C (const LObject &lhs, const LObject &rhs, const kStrategy strat);
-int compareLF5CRing (const LObject &lhs, const LObject &rhs, const kStrategy strat);
-int compareL11Ringls (const LObject &lhs, const LObject &rhs, const kStrategy strat);
-int compareL110 (const LObject &lhs, const LObject &rhs, const kStrategy strat);
-int compareL110Ring (const LObject &lhs, const LObject &rhs, const kStrategy strat);
-int compareL13 (const LObject &lhs, const LObject &rhs, const kStrategy strat);
-int compareL15 (const LObject &lhs, const LObject &rhs, const kStrategy strat);
-int compareL15Ring (const LObject &lhs, const LObject &rhs, const kStrategy strat);
-int compareL17 (const LObject &lhs, const LObject &rhs, const kStrategy strat);
-int compareL17Ring (const LObject &lhs, const LObject &rhs, const kStrategy strat);
-int compareL17_c (const LObject &lhs, const LObject &rhs, const kStrategy strat);
-int compareL17_cRing (const LObject &lhs, const LObject &rhs, const kStrategy strat);
-int compareLSpecial (const LObject &lhs, const LObject &rhs, const kStrategy strat);
 KINLINE poly redtailBba (poly p,int end_pos,kStrategy strat,BOOLEAN normalize=FALSE);
 KINLINE poly redtailBbaBound (poly p,int end_pos,kStrategy strat,int bound,BOOLEAN normalize=FALSE);
 KINLINE poly redtailBba_Ring (poly p,int end_pos,kStrategy strat);

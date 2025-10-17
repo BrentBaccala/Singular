@@ -5968,25 +5968,11 @@ int posInL11Ringls (const LSet set, const int length,
   }
 }
 
-void LQueue::push(const LObject& lobject)
+void LQueue::push(LObject& lobject)
 {
-    if (key_comp().parent != NULL) {
-      auto target = key_comp().parent->compareInL;
-      if ((target == compareL11Ringls)
-          || (target == compareL110Ring)
-          || (target == compareL0)
-          || (target == compareL11Ring)
-          || (target == compareLSpecial)
-          || (target == compareLSig)) {
-        // these three comparators put equal Lobjects at the start of the array (most put them at the end)
-        insert(lobject);
-      } else {
-        insert(lobject);
-      }
-    } else {
-      // f5c() special case
-      insert(lobject);
-    }
+    lobject.seq = seq;
+    seq ++;
+    insert(lobject);
 }
 
 /*2 Position for rings L: Here I am
