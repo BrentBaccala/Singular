@@ -310,6 +310,8 @@ public:
   using writable_set<LObject, CompareLObject>::iterator;
   using writable_set<LObject, CompareLObject>::begin;
   using writable_set<LObject, CompareLObject>::end;
+  using writable_set<LObject, CompareLObject>::rbegin;
+  using writable_set<LObject, CompareLObject>::rend;
   void push(LObject& lobject);
   bool would_be_top(LObject& lobject) {
     /* Would lobject be the top object in the queue if it were pushed?

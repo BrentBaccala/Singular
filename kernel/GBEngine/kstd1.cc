@@ -1328,7 +1328,7 @@ static BOOLEAN hasPurePower (LObject *L,int last, int *length,kStrategy strat)
  *    - objects with pure powers greater than objects without
  *    - objects with pure powers:
  *       - length between pure power and leading term (smaller length compares greater than longer length)
- *       - "old" comparator
+ *       - degree plus ecart (reverse order; equal objects LIFO)
  *    - objects without pure powers:
  *       - "old" comparator
  */
@@ -1340,13 +1340,35 @@ int compareInL10 (const LObject &lhs, const LObject &rhs, const kStrategy strat)
   if (hasppl && hasppr) {
     if (lenl < lenr) return -1;
     if (lenl > lenr) return 1;
-    return strat->compareInLOld(lhs, rhs, strat);
+    auto dl = lhs.GetpFDeg() + lhs.ecart;
+    auto dr = rhs.GetpFDeg() + rhs.ecart;
+    if (dl < dr) return -1;
+    if (dl > dr) return 1;
+    if (lhs.seq < rhs.seq) return 1;
+    else return -1;
+    //return 0;
+    //return strat->compareInLOld(lhs, rhs, strat);
   } else if (hasppl) {
     return -1;
   } else if (hasppr) {
     return 1;
   } else {
-    return strat->compareInLOld(lhs, rhs, strat);
+    //return strat->compareInLOld(lhs, rhs, strat);
+    auto comp = strat->compareInLOld(lhs, rhs, strat);
+    if (comp != 0) return comp;
+    if ((strat->compareInLOld == compareL11Ringls)
+        || (strat->compareInLOld == compareL110Ring)
+        || (strat->compareInLOld == compareL0)
+        || (strat->compareInLOld == compareL11Ring)
+        || (strat->compareInLOld == compareLSpecial)
+        || (strat->compareInLOld == compareLSig)) {
+      // these comparators order equal Lobjects FIFO (most are LIFO), so seq ordering is 1,2,3
+      if (lhs.seq < rhs.seq) return 1;
+      else return -1;
+    } else {
+      if (lhs.seq > rhs.seq) return 1;
+      else return -1;
+    }
   }
 }
 
@@ -1554,7 +1576,7 @@ static void updateT(kStrategy strat)
 */
 static bool firstUpdate(kStrategy strat)
 {
-  bool reorderL = false;
+  bool switch_to_compareInLOld = false;
   if (strat->update)
   {
     kTest_TS(strat);
@@ -1584,10 +1606,10 @@ static bool firstUpdate(kStrategy strat)
     }
     if (TEST_OPT_FASTHC)
     {
-      reorderL = true;
+      switch_to_compareInLOld = true;
     }
     if (TEST_OPT_FINDET)
-      return reorderL;
+      return switch_to_compareInLOld;
 
     strat->use_buckets = kMoraUseBucket(strat);
     updateT(strat);
@@ -1599,7 +1621,7 @@ static bool firstUpdate(kStrategy strat)
     }
   }
   kTest_TS(strat);
-  return reorderL;
+  return switch_to_compareInLOld;
 }
 
 /*2
@@ -1632,21 +1654,21 @@ void enterSMora (LObject &p,int atS,kStrategy strat, int atR)
   {
     if (newHEdge(strat))
     {
-      bool reorderL = firstUpdate(strat);
+      bool switch_to_compareInLOld = firstUpdate(strat);
       if (TEST_OPT_FINDET)
         return;
 
       /*- cuts elements in L above noether -*/
       updateLHC(strat);
       /*- reorders L -*/
-      if (reorderL) {
-        std::vector<LObject> oldL(strat->Lqueue.begin(), strat->Lqueue.end());
-        strat->Lqueue.clear();
+      std::vector<LObject> oldL(strat->Lqueue.rbegin(), strat->Lqueue.rend());
+      strat->Lqueue.clear();
+      if (switch_to_compareInLOld) {
         strat->posInL = strat->posInLOld;
         strat->compareInL = strat->compareInLOld;
         strat->lastAxis = 0;
-        for (auto& Lp: oldL) strat->Lqueue.push(Lp);
       }
+      for (auto& Lp: oldL) strat->Lqueue.push(Lp);
     }
   }
   else if ((strat->kNoether==NULL)
@@ -1659,7 +1681,7 @@ void enterSMora (LObject &p,int atS,kStrategy strat, int atR)
       {
         updateL(FALSE,strat);
         // Change sort ordering and reorder L
-        std::vector<LObject> oldL(strat->Lqueue.begin(), strat->Lqueue.end());
+        std::vector<LObject> oldL(strat->Lqueue.rbegin(), strat->Lqueue.rend());
         strat->Lqueue.clear();
         strat->posInLOld = strat->posInL;
         strat->posInLOldFlag = FALSE;
@@ -1917,7 +1939,8 @@ ideal mora (ideal F, ideal Q,intvec *w,bigintmat *hilb,kStrategy strat)
   {
     updateL(FALSE,strat);
     // Change sort ordering and reorder L
-    std::vector<LObject> oldL(strat->Lqueue.begin(), strat->Lqueue.end());
+    std::vector<LObject> oldL(strat->Lqueue.rbegin(), strat->Lqueue.rend());
+    strat->Lqueue.clear();
     strat->posInLOld = strat->posInL;
     strat->posInLOldFlag = FALSE;
     strat->posInL = posInL10;
