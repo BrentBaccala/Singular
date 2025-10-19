@@ -1328,7 +1328,7 @@ static BOOLEAN hasPurePower (LObject *L,int last, int *length,kStrategy strat)
  *    - objects with pure powers greater than objects without
  *    - objects with pure powers:
  *       - length between pure power and leading term (smaller length compares greater than longer length)
- *       - degree plus ecart (reverse order; equal objects LIFO)
+ *       - "old" comparator
  *    - objects without pure powers:
  *       - "old" comparator
  */
@@ -1340,35 +1340,13 @@ int compareInL10 (const LObject &lhs, const LObject &rhs, const kStrategy strat)
   if (hasppl && hasppr) {
     if (lenl < lenr) return -1;
     if (lenl > lenr) return 1;
-    auto dl = lhs.GetpFDeg() + lhs.ecart;
-    auto dr = rhs.GetpFDeg() + rhs.ecart;
-    if (dl < dr) return -1;
-    if (dl > dr) return 1;
-    if (lhs.seq < rhs.seq) return 1;
-    else return -1;
-    //return 0;
-    //return strat->compareInLOld(lhs, rhs, strat);
+    return strat->compareInLOld(lhs, rhs, strat);
   } else if (hasppl) {
     return -1;
   } else if (hasppr) {
     return 1;
   } else {
-    //return strat->compareInLOld(lhs, rhs, strat);
-    auto comp = strat->compareInLOld(lhs, rhs, strat);
-    if (comp != 0) return comp;
-    if ((strat->compareInLOld == compareL11Ringls)
-        || (strat->compareInLOld == compareL110Ring)
-        || (strat->compareInLOld == compareL0)
-        || (strat->compareInLOld == compareL11Ring)
-        || (strat->compareInLOld == compareLSpecial)
-        || (strat->compareInLOld == compareLSig)) {
-      // these comparators order equal Lobjects FIFO (most are LIFO), so seq ordering is 1,2,3
-      if (lhs.seq < rhs.seq) return 1;
-      else return -1;
-    } else {
-      if (lhs.seq > rhs.seq) return 1;
-      else return -1;
-    }
+    return strat->compareInLOld(lhs, rhs, strat);
   }
 }
 
