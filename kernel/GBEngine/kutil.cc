@@ -5967,13 +5967,6 @@ int posInL11Ringls (const LSet set, const int length,
   }
 }
 
-void LQueue::push(LObject& lobject)
-{
-    lobject.seq = seq;
-    seq ++;
-    insert(lobject);
-}
-
 /*2 Position for rings L: Here I am
 * looks up the position of polynomial p in set
 * e is the ecart of p

@@ -313,7 +313,17 @@ public:
   using writable_set<LObject, CompareLObject>::end;
   using writable_set<LObject, CompareLObject>::rbegin;
   using writable_set<LObject, CompareLObject>::rend;
-  void push(LObject& lobject);
+  using writable_set<LObject, CompareLObject>::key_comp;
+  using writable_set<LObject, CompareLObject>::empty;
+  using writable_set<LObject, CompareLObject>::size;
+  using writable_set<LObject, CompareLObject>::size_type;
+  using writable_set<LObject, CompareLObject>::erase;
+  void push(LObject& lobject) {
+    /* We track a sequence number to allow FIFO or LIFO ordering to be selected for equal objects */
+    lobject.seq = seq;
+    seq ++;
+    insert(lobject);
+  }
   bool would_be_top(LObject& lobject) {
     /* Would lobject be the top object in the queue if it were pushed?
      * Yes if either the queue is empty or lobject is less than the first object.
@@ -331,11 +341,6 @@ public:
   const LObject& top(void) {
     return *begin();
   }
-  using writable_set<LObject, CompareLObject>::key_comp;
-  using writable_set<LObject, CompareLObject>::empty;
-  using writable_set<LObject, CompareLObject>::size;
-  using writable_set<LObject, CompareLObject>::size_type;
-  using writable_set<LObject, CompareLObject>::erase;
   template <typename F>
   void remove_if(F&& predicate) {
     writable_set<LObject, CompareLObject>::erase(std::remove_if(writable_set<LObject, CompareLObject>::begin(), writable_set<LObject, CompareLObject>::end(), predicate), writable_set<LObject, CompareLObject>::end());
