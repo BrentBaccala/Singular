@@ -2422,7 +2422,7 @@ static BOOLEAN jjEXTENDED_SYSTEM(leftv res, leftv h)
          else
          {
            test_PosInT=NULL;
-           test_PosInL=NULL;
+           test_CompareInL=NULL;
          }
          si_opt_2|=Sy_bit(23);
          return FALSE;

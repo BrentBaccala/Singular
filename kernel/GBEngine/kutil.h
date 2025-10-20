@@ -280,27 +280,18 @@ EXTERN_VAR int HCord;
  * "L" is the set of critical pairs, maintained as a priority queue,
  * and we wish to regularly pop the largest item from the queue.
  * However, we also wish to iterate over the entire set in order,
- * which precludes organizing it as a heap, so we maintain it as a
- * sorted std::vector<LObject>.
- *
- * Singular's design uses the posInL method to locate where in the
- * queue a new LObject is to be inserted.  To use std::sort, we wrap
- * posInL in a Compare type designed to mimic a single element LSet
- * and perform a comparision by computing the "position" of the second
- * element in the LSet.
- *
- * I've started using std::stable_sort instead of std::sort because
- * in the original design, when a new LObject compared equal to
- * existing LObjects, it was added at the end of those objects.
- * Mimic this by adding the LObject with push_back and then
- * std::stable_sort.
+ * which precludes organizing it as a heap.  Also, our legacy C code
+ * modifies the objects once they're in the queue, which precludes
+ * using std::map or std::multimap, since their objects are immutable.
+ * We use a custom class writable_set, which is derived from
+ * std::multimap, but stores pointers in the tree and therefore
+ * allows the objects themselves to be modified.
  */
 
 class CompareLObject {
 public:
   skStrategy * parent;
   int (*compareInL) (const LObject &lhs, const LObject &rhs, const kStrategy strat);
-  int (*posInL)(const LSet set, const int length, LObject* L,const kStrategy strat);
   bool operator() (const LObject &lhs, const LObject &rhs) const;
 };
 
@@ -363,14 +354,10 @@ public:
   int (*red2)(LObject * L,kStrategy strat) = NULL;
   void (*initEcart)(TObject * L) = NULL;
   int (*posInT)(const TSet T,const int tl,LObject &h) = NULL;
-  int (*posInL)(const LSet set, const int length,
-                LObject* L,const kStrategy strat) = NULL;
   int (*compareInL) (const LObject &lhs, const LObject &rhs, const kStrategy strat) = NULL;
   int (*compareInLOld) (const LObject &lhs, const LObject &rhs, const kStrategy strat) = NULL;
   void (*enterS)(LObject &h, int pos,kStrategy strat, int atR/* =-1*/ ) = NULL;
   void (*initEcartPair)(LObject * h, poly f, poly g, int ecartF, int ecartG) = NULL;
-  int (*posInLOld)(const LSet Ls,const int Ll,
-                   LObject* Lo,const kStrategy strat) = NULL;
   void (*enterOnePair) (int i,poly p,int ecart, int isFromQ,kStrategy strat, int atR /*= -1*/) = NULL;
   void (*chainCrit) (poly p,int ecart,kStrategy strat) = NULL;
   BOOLEAN (*syzCrit) (poly sig, unsigned long not_sevSig, kStrategy strat) = NULL;
@@ -460,14 +447,14 @@ public:
   /*BOOLEAN*/ char fromT = '\0';
   /*BOOLEAN*/ char noetherSet = '\0';
   /*BOOLEAN*/ char update = '\0';
-  /*BOOLEAN*/ char posInLOldFlag = '\0';
+  /*BOOLEAN*/ char compareInLOldFlag = '\0';
   /*BOOLEAN*/ char use_buckets = '\0';
   // if set, pLDeg(p, l) == (pFDeg(pLast(p), pLength)
   /*BOOLEAN*/ char LDegLast = '\0';
   // if set, then L.length == L.pLength
   /*BOOLEAN*/ char length_pLength = '\0';
   // if set, then posInL does not depend on L.length
-  /*BOOLEAN*/ char posInLDependsOnLength = '\0';
+  /*BOOLEAN*/ char compareInLDependsOnLength = '\0';
   /*FALSE, if posInL == posInL10*/
 #ifdef HAVE_PLURAL
   // set this flag to 1 to stop the product criteria
@@ -498,6 +485,7 @@ int compareL0 (const LObject &lhs, const LObject &rhs, const kStrategy strat);
 int compareL0Ring (const LObject &lhs, const LObject &rhs, const kStrategy strat);
 int compareLSig (const LObject &lhs, const LObject &rhs, const kStrategy strat);
 int compareLSigRing (const LObject &lhs, const LObject &rhs, const kStrategy strat);
+int compareL10 (const LObject &lhs, const LObject &rhs, const kStrategy strat);
 int compareL11 (const LObject &lhs, const LObject &rhs, const kStrategy strat);
 int compareL11Ring (const LObject &lhs, const LObject &rhs, const kStrategy strat);
 int compareLF5C (const LObject &lhs, const LObject &rhs, const kStrategy strat);
@@ -582,39 +570,7 @@ int posInT_pLength(const TSet set,const int length,LObject &p);
 
 
 void reorderS (int* suc,kStrategy strat);
-int posInLF5C (const LSet set, const int length,
-               LObject* L,const kStrategy strat);
-int posInLSig (const LSet set, const int length,
-               LObject* L,const kStrategy strat);
-int posInLSigRing (const LSet set, const int length,
-               LObject* L,const kStrategy strat);
 int posInSyz (const kStrategy strat, const poly sig);
-int posInL0 (const LSet set, const int length,
-             LObject* L,const kStrategy strat);
-int posInL11 (const LSet set, const int length,
-             LObject* L,const kStrategy strat);
-int posInL11Ring (const LSet set, const int length,
-             LObject* L,const kStrategy strat);
-int posInLF5CRing (const LSet set, const int length,
-             LObject* L,const kStrategy strat);
-int posInL11Ringls (const LSet set, const int length,
-             LObject* L,const kStrategy strat);
-int posInL13 (const LSet set, const int length,
-             LObject* L,const kStrategy strat);
-int posInL15 (const LSet set, const int length,
-             LObject* L,const kStrategy strat);
-int posInL15Ring (const LSet set, const int length,
-             LObject* L,const kStrategy strat);
-int posInL17 (const LSet set, const int length,
-             LObject* L,const kStrategy strat);
-int posInL10 (const LSet set, const int length,
-             LObject* L,const kStrategy strat);
-int posInL10Ring (const LSet set, const int length,
-             LObject* L,const kStrategy strat);
-int posInL110 (const LSet set, const int length,
-             LObject* L,const kStrategy strat);
-int posInLSpecial (const LSet set, const int length,
-             LObject *L,const kStrategy strat);
 KINLINE poly redtailBba (poly p,int end_pos,kStrategy strat,BOOLEAN normalize=FALSE);
 KINLINE poly redtailBbaBound (poly p,int end_pos,kStrategy strat,int bound,BOOLEAN normalize=FALSE);
 KINLINE poly redtailBba_Ring (poly p,int end_pos,kStrategy strat);
@@ -1006,8 +962,7 @@ ideal bbaShift(ideal F, ideal Q,intvec *w,bigintmat *hilb,kStrategy strat);
 
 // test syz strategy: // will be removed soon
 EXTERN_VAR int (*test_PosInT)(const TSet T,const int tl,LObject &h);
-EXTERN_VAR int (*test_PosInL)(const LSet set, const int length,
-                LObject* L,const kStrategy strat);
+EXTERN_VAR int (*test_CompareInL)(const LObject &lhs, const LObject &rhs, const kStrategy strat);
 
 static inline void kDeleteLcm(LObject *P)
 {

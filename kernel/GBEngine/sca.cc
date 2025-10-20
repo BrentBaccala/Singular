@@ -430,7 +430,7 @@ ideal k_sca_bba (const ideal F, const ideal Q, const intvec */*w*/, const bigint
   BOOLEAN withT = FALSE;
 
   initBuchMoraCrit(strat); // sets Gebauer, honey, sugarCrit // sca - ok???
-  initBuchMoraPos(strat); // sets strat->posInL, strat->posInT // check!! (Plural's: )
+  initBuchMoraPos(strat); // sets strat->compareInL, strat->posInT // check!! (Plural's: )
 
 //   initHilbCrit(F, Q, &hilb, strat);
 
@@ -468,7 +468,7 @@ ideal k_sca_bba (const ideal F, const ideal Q, const intvec */*w*/, const bigint
   if (BVERBOSE(23))
   {
     if (test_PosInT!=NULL) strat->posInT=test_PosInT;
-    if (test_PosInL!=NULL) strat->posInL=test_PosInL;
+    if (test_CompareInL!=NULL) strat->compareInL=test_CompareInL;
     kDebugPrint(strat);
   }
 

@@ -80,8 +80,7 @@ VAR long sba_interreduction_operations;
 #endif
 
   VAR int (*test_PosInT)(const TSet T,const int tl,LObject &h);
-  VAR int (*test_PosInL)(const LSet set, const int length,
-                LObject* L,const kStrategy strat);
+  VAR int (*test_CompareInL)(const LObject &lhs, const LObject &rhs, const kStrategy strat);
 
 #ifdef STDZ_EXCHANGE_DURING_REDUCTION
 int kFindSameLMInT_Z(const kStrategy strat, const LObject* L, const int start)
@@ -841,7 +840,7 @@ int redRing_Z (LObject* h,kStrategy strat)
         (! strat->Lqueue.empty()) && ((d > reddeg) || (pass > strat->LazyPass)))
     {
       h->SetLmCurrRing();
-      if (strat->posInLDependsOnLength)
+      if (strat->compareInLDependsOnLength)
         h->SetLength(strat->length_pLength);
       if (! strat->Lqueue.would_be_top(*h)) {
 #ifdef KDEBUG
@@ -1049,7 +1048,7 @@ int redRing (LObject* h,kStrategy strat)
         (! strat->Lqueue.empty()) && ((d > reddeg) || (pass > strat->LazyPass)))
     {
       h->SetLmCurrRing();
-      if (strat->posInLDependsOnLength)
+      if (strat->compareInLDependsOnLength)
         h->SetLength(strat->length_pLength);
       if (! strat->Lqueue.would_be_top(*h)) {
 #ifdef KDEBUG
@@ -2642,7 +2641,7 @@ ideal bba (ideal F, ideal Q,intvec *w,bigintmat *hilb,kStrategy strat)
   if (BVERBOSE(23))
   {
     if (test_PosInT!=NULL) strat->posInT=test_PosInT;
-    if (test_PosInL!=NULL) strat->posInL=test_PosInL;
+    if (test_CompareInL!=NULL) strat->compareInL=test_CompareInL;
     kDebugPrint(strat);
   }
 
@@ -3139,7 +3138,7 @@ ideal sba (ideal F0, ideal Q,intvec *w,bigintmat *hilb,kStrategy strat)
   if (BVERBOSE(23))
   {
     if (test_PosInT!=NULL) strat->posInT=test_PosInT;
-    if (test_PosInL!=NULL) strat->posInL=test_PosInL;
+    if (test_CompareInL!=NULL) strat->compareInL=test_CompareInL;
     kDebugPrint(strat);
   }
   // We add the elements directly in S from the previous loop
@@ -4273,10 +4272,8 @@ void f5c (kStrategy strat, int& olddeg, int& minimcnt, int& hilbeledeg,
   //strat->tl = -1;
   Lqueue.key_comp().parent = NULL;
   if(rField_is_Ring(currRing)) {
-    Lqueue.key_comp().posInL = posInLF5CRing;
     Lqueue.key_comp().compareInL = compareLF5CRing;
   } else {
-    Lqueue.key_comp().posInL = posInLF5C;
     Lqueue.key_comp().compareInL = compareLF5C;
   }
   while (strat->tl >= 0)
@@ -4611,7 +4608,7 @@ ideal bbaShift(ideal F, ideal Q,intvec *w,bigintmat *hilb,kStrategy strat)
   if (BVERBOSE(23))
   {
     if (test_PosInT!=NULL) strat->posInT=test_PosInT;
-    if (test_PosInL!=NULL) strat->posInL=test_PosInL;
+    if (test_CompareInL!=NULL) strat->compareInL=test_CompareInL;
     kDebugPrint(strat);
   }
 
@@ -5044,7 +5041,7 @@ int redFirstShift (LObject* h,kStrategy strat)
           && ((d >= reddeg) || (pass > strat->LazyPass)))
       {
         h->SetLmCurrRing();
-        if (strat->posInLDependsOnLength)
+        if (strat->compareInLDependsOnLength)
           h->SetLength(strat->length_pLength);
         if (! strat->Lqueue.would_be_top(*h))
         {
