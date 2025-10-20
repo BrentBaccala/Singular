@@ -3248,7 +3248,7 @@ void chainCritNormal (poly p,int ecart,kStrategy strat)
     kMergeBintoL(strat);
     for (auto jt = strat->L.begin(); jt != strat->L.end(); )
     {
-      if (std::next(jt) == strat->L.end())
+      if (jt + 1 == strat->L.end())
       {
         /*now L[0] cannot be canceled any more and the tail can be removed*/
         if (jt->p2 == strat->tail) jt->p2 = p;
@@ -3263,7 +3263,7 @@ void chainCritNormal (poly p,int ecart,kStrategy strat)
           {
             /*L[i] could be canceled but we search for a better one to cancel*/
             strat->c3++;
-            LSet::iterator lt = std::next(it);
+            auto lt = it + 1;
             if (isInPairsetL(lt,jt->p1,it->p1,strat)
             && (pNext(lt->p) == strat->tail)
             && (!pLmEqual(it->p,lt->p))
@@ -3325,7 +3325,7 @@ void chainCritSig (poly p,int /*ecart*/,kStrategy strat)
   kMergeBintoL(strat);
   for (auto jt = strat->L.begin(); jt != strat->L.end(); )
   {
-    if (std::next(jt) == strat->L.end())
+    if (jt + 1 == strat->L.end())
     {
       /*now L[0] cannot be canceled any more and the tail can be removed*/
       if (jt->p2 == strat->tail) jt->p2 = p;
@@ -3340,7 +3340,7 @@ void chainCritSig (poly p,int /*ecart*/,kStrategy strat)
         {
           /*L[i] could be canceled but we search for a better one to cancel*/
           strat->c3++;
-          LSet::iterator lt = std::next(it);
+          auto lt = it + 1;
           if (isInPairsetL(lt,jt->p1,it->p1,strat)
           && (pNext(lt->p) == strat->tail)
           && (!pLmEqual(it->p,lt->p))
@@ -3600,7 +3600,7 @@ void chainCritPart (poly p,int ecart,kStrategy strat)
     kMergeBintoL(strat);
     for (auto jt = strat->L.begin(); jt != strat->L.end(); )
     {
-      if (std::next(jt) == strat->L.end())
+      if (jt + 1 == strat->L.end())
       {
         /*now L[0] cannot be canceled any more and the tail can be removed*/
         if (jt->p2 == strat->tail) jt->p2 = p;
@@ -3615,7 +3615,7 @@ void chainCritPart (poly p,int ecart,kStrategy strat)
           {
             /*L[i] could be canceled but we search for a better one to cancel*/
             strat->c3++;
-            LSet::iterator lt = std::next(it);
+            auto lt = it + 1;
             if (isInPairsetL(lt,jt->p1,it->p1,strat)
             && (pNext(lt->p) == strat->tail)
             && (!pLmEqual(it->p,lt->p))
@@ -3955,7 +3955,7 @@ void chainCritRing (poly p,int, kStrategy strat)
   kMergeBintoL(strat);
   for (auto jt = strat->L.begin(); jt != strat->L.end(); )
   {
-    if (std::next(jt) == strat->L.end())
+    if (jt + 1 == strat->L.end())
     {
       /*now L[0] cannot be canceled any more and the tail can be removed*/
       if (jt->p2 == strat->tail) jt->p2 = p;
@@ -3983,7 +3983,7 @@ void chainCritRing (poly p,int, kStrategy strat)
             PrintLn();
           }
 #endif
-          LSet::iterator lt = std::next(it);
+          auto lt = it + 1;
           if (isInPairsetL(lt,jt->p1,it->p1,strat)
           && (pNext(lt->p) == strat->tail)
           && (!pLmEqual(it->p,lt->p))
