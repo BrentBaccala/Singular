@@ -286,7 +286,7 @@ EXTERN_VAR int HCord;
 
 class CompareLObject {
 public:
-  skStrategy * parent;
+  skStrategy * parent = NULL;
   int (*compareL) (const LObject &lhs, const LObject &rhs, const kStrategy strat);
   bool operator() (const LObject &lhs, const LObject &rhs) const;
 };
@@ -304,7 +304,6 @@ public:
   using writable_set<LObject, CompareLObject>::empty;
   using writable_set<LObject, CompareLObject>::size;
   using writable_set<LObject, CompareLObject>::size_type;
-  using writable_set<LObject, CompareLObject>::erase;
   void push(LObject& lobject) {
     /* We track a sequence number to allow FIFO or LIFO ordering to be selected for equal objects */
     lobject.seq = seq;
@@ -322,7 +321,12 @@ public:
     lobject.seq = seq;
     return (empty() || key_comp()(lobject, top()));
   }
+  iterator erase(iterator it);
   void pop(void) {
+    /* We don't call our erase() method because it would deallocate a bunch of pointers in the LObject and we don't want that done here */
+    writable_set<LObject, CompareLObject>::erase(begin());
+  }
+  void pop_and_erase(void) {
     erase(begin());
   }
   const LObject& top(void) {

@@ -377,7 +377,7 @@ static void completeReduceFac (kStrategy strat, ideal_list FL)
                 pWrite(n->D->m[j]);
                 messageSets(n);
               }
-              while (! n->L.empty()) n->L.pop();
+              while (! n->L.empty()) n->L.pop_and_erase();
               while (n->tl >= 0)
               {
                 int i=n->sl;
@@ -421,7 +421,7 @@ static void completeReduceFac (kStrategy strat, ideal_list FL)
                 Print("empty set because:L[%p]\n",(void *)Lj);
                 iiWriteMatrix((matrix)Lj->d,"L",1,currRing,0);
               }
-              while (! n->L.empty()) n->L.pop();
+              while (! n->L.empty()) n->L.pop_and_erase();
               while (n->tl >= 0)
               {
                 int i=n->sl;
@@ -483,7 +483,7 @@ ideal bbafac (ideal /*F*/, ideal Q,intvec* /*w*/,kStrategy strat, ideal_list FL)
       * 24 IN test and the degree +ecart of L[strat->Ll] is bigger then
       *a predefined number Kstd1_deg
       */
-      while (! strat->L.empty()) strat->L.pop();
+      while (! strat->L.empty()) strat->L.pop_and_erase();
       break;
     }
     /* picks the last element from the lazyset L */
@@ -665,7 +665,7 @@ ideal bbafac (ideal /*F*/, ideal Q,intvec* /*w*/,kStrategy strat, ideal_list FL)
                   messageSets(n);
                 }
                 //if (n->Ll >=0) Print("Ll:%d|",n->Ll);
-                while (! n->L.empty()) n->L.pop();
+                while (! n->L.empty()) n->L.pop_and_erase();
                 //if (n->tl >=0) Print("tl:%d|",n->tl);
                 while (n->tl >= 0)
                 {
@@ -715,7 +715,7 @@ ideal bbafac (ideal /*F*/, ideal Q,intvec* /*w*/,kStrategy strat, ideal_list FL)
                   #endif
                   iiWriteMatrix((matrix)Lj->d,"L",1,currRing,0);
                 }
-                while (! n->L.empty()) n->L.pop();
+                while (! n->L.empty()) n->L.pop_and_erase();
                 while (n->tl >= 0)
                 {
                   int i=n->sl;

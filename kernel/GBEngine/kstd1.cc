@@ -1479,7 +1479,7 @@ static void updateLHC(kStrategy strat)
     else
     {
 #ifdef KDEBUG
-      kTest_L(&(*it), strat, TRUE, i, strat->T, strat->tl);
+      //kTest_L(&(*it), strat, TRUE, i, strat->T, strat->tl);
 #endif
       it ++;
     }
@@ -1898,7 +1898,7 @@ ideal mora (ideal F, ideal Q,intvec *w,bigintmat *hilb,kStrategy strat)
     if (siCntrlc)
     {
       while (! strat->L.empty())
-        strat->L.pop();
+        strat->L.pop_and_erase();
       strat->noClearS=TRUE;
     }
     if (TEST_OPT_DEGBOUND
@@ -1914,7 +1914,7 @@ ideal mora (ideal F, ideal Q,intvec *w,bigintmat *hilb,kStrategy strat)
         && (strat->L.top().ecart+strat->L.top().GetpFDeg()> Kstd1_deg)
       )
       {
-        strat->L.pop();
+        strat->L.pop_and_erase();
         //if (TEST_OPT_PROT)
         //{
         //   PrintS("D"); mflush();
@@ -2038,7 +2038,7 @@ ideal mora (ideal F, ideal Q,intvec *w,bigintmat *hilb,kStrategy strat)
         *   (multBound)
         *   && multiplicity of the ideal is smaller then a predefined number mu
         */
-        while (! strat->L.empty()) strat->L.pop();
+        while (! strat->L.empty()) strat->L.pop_and_erase();
       }
     }
     kTest_TS(strat);

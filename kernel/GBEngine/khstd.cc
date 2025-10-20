@@ -107,7 +107,7 @@ void khCheck( ideal Q, intvec *w, bigintmat *hilb, int &eledeg, int &count,
               PrintS("h");
               mflush();
             }
-            strat->L.pop();
+            strat->L.pop_and_erase();
           }
           delete newhilb;
           return;
@@ -128,7 +128,7 @@ void khCheck( ideal Q, intvec *w, bigintmat *hilb, int &eledeg, int &count,
         PrintS("h");
         mflush();
       }
-      strat->L.pop();
+      strat->L.pop_and_erase();
     }
   }
 }
@@ -218,7 +218,7 @@ void khCheck( ideal Q, intvec *w, poly hilb, const ring Qt, int &eledeg, int &co
               PrintS("h");
               mflush();
             }
-            strat->L.pop();
+            strat->L.pop_and_erase();
           }
           delete newhilb;
           return;
@@ -239,7 +239,7 @@ void khCheck( ideal Q, intvec *w, poly hilb, const ring Qt, int &eledeg, int &co
         PrintS("h");
         mflush();
       }
-      strat->L.pop();
+      strat->L.pop_and_erase();
     }
   }
 }
@@ -274,7 +274,7 @@ so delete all the remaining pairs
         PrintS("h");
         mflush();
       }
-      strat->L.pop();
+      strat->L.pop_and_erase();
     }
     delete newhilb;
     return;

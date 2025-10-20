@@ -195,7 +195,7 @@ ideal k_sca_gr_bba(const ideal F, const ideal Q, const intvec *, const bigintmat
       // stops computation if
       // 24 IN test and the degree +ecart of L[strat->Ll] is bigger then
       // a predefined number Kstd1_deg
-      while (! strat->L.empty()) strat->L.pop();
+      while (! strat->L.empty()) strat->L.pop_and_erase();
       break;
     }
 
@@ -554,7 +554,7 @@ ideal k_sca_bba (const ideal F, const ideal Q, const intvec */*w*/, const bigint
 #ifdef KDEBUG
 //        if (TEST_OPT_DEBUG){PrintS("^^^^^^^^^^^^!!!!");}
 #endif
-        strat->L.pop();
+        strat->L.pop_and_erase();
 //        if (TEST_OPT_PROT) PrintS("^!");
       }
       if (strat->L.empty()) break;
@@ -988,7 +988,7 @@ ideal k_sca_mora(const ideal F, const ideal Q, const intvec */*w*/, const bigint
         && (strat->L.top().ecart+strat->L.top().GetpFDeg()> Kstd1_deg)
       )
       {
-        strat->L.pop();
+        strat->L.pop_and_erase();
         //if (TEST_OPT_PROT)
         //{
         //   PrintS("D"); mflush();
@@ -1115,7 +1115,7 @@ ideal k_sca_mora(const ideal F, const ideal Q, const intvec */*w*/, const bigint
         // * - 23
         // *   (multBound)
         // *   && multiplicity of the ideal is smaller then a predefined number mu
-        while (! strat->L.empty()) strat->L.pop();
+        while (! strat->L.empty()) strat->L.pop_and_erase();
       }
     }
 #endif

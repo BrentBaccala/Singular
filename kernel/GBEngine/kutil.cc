@@ -5572,6 +5572,58 @@ int compareL11Ringls (const LObject &lhs, const LObject &rhs, const kStrategy)
   return 0;
 }
 
+LSet::iterator LSet::erase(LSet::iterator it) {
+  LObject& Lp = *it;
+  const kStrategy strat = key_comp().parent;
+
+  if (Lp.lcm!=NULL)
+  {
+    kDeleteLcm(&Lp);
+  }
+  if (Lp.sig!=NULL)
+  {
+    if (pGetCoeff(Lp.sig) != NULL)
+      pLmDelete(Lp.sig);
+    else
+      pLmFree(Lp.sig);
+  }
+  /* f5c() special case: strat will be NULL, so we won't have access to strat->tail, but we should run this test */
+  if (strat!=NULL && Lp.p!=NULL)
+  {
+    if (pNext(Lp.p) == strat->tail)
+    {
+      if (pGetCoeff(Lp.p) != NULL)
+        pLmDelete(Lp.p);
+      else
+        pLmFree(Lp.p);
+      /*- tail belongs to several int spolys -*/
+    }
+    else
+    {
+      // search p in T, if it is there, do not delete it
+      if (rHasGlobalOrdering(currRing) || (kFindInT(Lp.p, strat) < 0))
+      {
+        // assure that for global orderings kFindInT fails
+        //assume((rHasLocalOrMixedOrdering(currRing)) && (kFindInT(set[j].p, strat) >= 0));
+        Lp.Delete();
+      }
+    }
+  }
+#if 0
+  /* the old code - we're deleting an LObject in the LSet, but we do something to strat->P at the same time! */
+#ifdef HAVE_SHIFTBBA
+  if (is_shifted_p1(/*strat->P.p1,*/strat))
+  {
+    // clean up strat->P.p1: may be shifted
+    pLmDelete(strat->P.p1);
+    strat->P.p1=NULL;
+  }
+#endif
+#endif
+  return writable_set<LObject, CompareLObject>::erase(it);
+}
+
+
 /*2 Position for rings L: Here I am
 * looks up the position of polynomial p in set
 * e is the ecart of p
@@ -7088,7 +7140,7 @@ void initSL (ideal F, ideal Q,kStrategy strat)
        && pIsConstant(strat->L.top().p))
   {
     auto unit = strat->L.top();  // Make a copy, not a reference
-    while (! strat->L.empty()) strat->L.pop();
+    while (! strat->L.empty()) strat->L.pop_and_erase();
     strat->L.push(unit);
   }
 }
@@ -7238,7 +7290,7 @@ void initSLSba (ideal F, ideal Q,kStrategy strat)
        && pIsConstant(strat->L.top().p))
   {
     auto unit = strat->L.top();  // Make a copy, not a reference
-    while (! strat->L.empty()) strat->L.pop();
+    while (! strat->L.empty()) strat->L.pop_and_erase();
     strat->L.push(unit);
   }
 }

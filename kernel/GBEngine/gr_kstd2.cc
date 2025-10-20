@@ -1085,7 +1085,7 @@ ideal k_gnc_gr_bba(const ideal F, const ideal Q, const intvec *, const bigintmat
       * 24 IN test and the degree +ecart of L[strat->Ll] is bigger then
       *a predefined number Kstd1_deg
       */
-      while (! strat->L.empty()) strat->L.pop();
+      while (! strat->L.empty()) strat->L.pop_and_erase();
       break;
     }
     /* picks the last element from the lazyset L */

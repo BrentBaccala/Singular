@@ -2658,7 +2658,7 @@ ideal bba (ideal F, ideal Q,intvec *w,bigintmat *hilb,kStrategy strat)
     if (siCntrlc)
     {
       while (! strat->L.empty())
-        strat->L.pop();
+        strat->L.pop_and_erase();
       strat->noClearS=TRUE;
     }
     if (TEST_OPT_DEGBOUND
@@ -2676,7 +2676,7 @@ ideal bba (ideal F, ideal Q,intvec *w,bigintmat *hilb,kStrategy strat)
             || ((!strat->honey) && (currRing->pFDeg(strat->L.top().p,currRing)>Kstd1_deg)))
       )
       {
-	strat->L.pop();
+	strat->L.pop_and_erase();
         if(TEST_OPT_PROT) PrintS("D");
       }
       if (strat->L.empty()) break;
@@ -3813,7 +3813,7 @@ ideal sba (ideal F0, ideal Q,intvec *w,bigintmat *hilb,kStrategy strat)
     while (!strat->L.empty() && (strat->L.top().p1 != NULL || strat->L.top().p2 != NULL))
     {
       //printf("\nDeleted element from queue\n");
-      strat->L.pop();
+      strat->L.pop_and_erase();
     }
     #endif
     //for(int kk = strat->sl;kk>=0;kk--)
@@ -4622,7 +4622,7 @@ ideal bbaShift(ideal F, ideal Q,intvec *w,bigintmat *hilb,kStrategy strat)
     if (siCntrlc)
     {
       while (! strat->L.empty())
-        strat->L.pop();
+        strat->L.pop_and_erase();
       strat->noClearS=TRUE;
     }
     if (TEST_OPT_DEGBOUND
@@ -4639,7 +4639,7 @@ ideal bbaShift(ideal F, ideal Q,intvec *w,bigintmat *hilb,kStrategy strat)
         && ((strat->honey && (strat->L.top().ecart+currRing->pFDeg(strat->L.top().p,currRing)>Kstd1_deg))
             || ((!strat->honey) && (currRing->pFDeg(strat->L.top().p,currRing)>Kstd1_deg)))
         )
-        strat->L.pop();
+        strat->L.pop_and_erase();
       if (strat->L.empty()) break;
       else strat->noClearS=TRUE;
     }
