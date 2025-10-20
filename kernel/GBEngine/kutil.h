@@ -32,9 +32,6 @@
 #define HAVE_TAIL_RING
 
 #define setmax 128
-#define setmaxL ((int)((4096-12)/sizeof(LObject)))
-#define setmaxLinc ((int)((4096)/sizeof(LObject)))
-
 #define setmaxT ((int)((4096-12)/sizeof(TObject)))
 #define setmaxTinc ((int)((4096)/sizeof(TObject)))
 
