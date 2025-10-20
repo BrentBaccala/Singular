@@ -3101,7 +3101,7 @@ ideal sba (ideal F0, ideal Q,intvec *w,bigintmat *hilb,kStrategy strat)
   printf("ordSgn = %d\n",currRing->OrdSgn);
   printf("\n");
 #endif
-  int   srmax,lrmax, red_result = 1;
+  int   srmax, red_result = 1;
   int   olddeg;
   LQueue::size_type reduc;
   int hilbeledeg=1,hilbcount=0,minimcnt=0;
@@ -3118,7 +3118,7 @@ ideal sba (ideal F0, ideal Q,intvec *w,bigintmat *hilb,kStrategy strat)
   idTest(strat->Shdl);
   if (strat->minim>0) strat->M=idInit(IDELEMS(F),F->rank);
   srmax = strat->sl;
-  reduc = olddeg = lrmax = 0;
+  reduc = olddeg = 0;
 #ifndef NO_BUCKETS
   if (!TEST_OPT_NOT_BUCKETS)
     strat->use_buckets = 1;
@@ -3162,7 +3162,6 @@ ideal sba (ideal F0, ideal Q,intvec *w,bigintmat *hilb,kStrategy strat)
   /* compute------------------------------------------------------- */
   while (! strat->Lqueue.empty())
   {
-    if (strat->Lqueue.size() > lrmax) lrmax =strat->Lqueue.size();/*stat.*/
     #ifdef KDEBUG
       if (TEST_OPT_DEBUG) messageSets(strat);
     #endif
@@ -3193,7 +3192,7 @@ ideal sba (ideal F0, ideal Q,intvec *w,bigintmat *hilb,kStrategy strat)
       // 1. interreduction of the current standard basis
       // 2. generation of new principal syzygy rules for syzCriterion
       f5c ( strat, olddeg, minimcnt, hilbeledeg, hilbcount, srmax,
-          lrmax, reduc, Q, w, hilb );
+          reduc, Q, w, hilb );
 #endif
       // initialize new syzygy rules for the next iteration step
       initSyzRules(strat);
@@ -4256,7 +4255,7 @@ ideal kNF2Bound (ideal F,ideal Q,ideal q,int bound,kStrategy strat, int lazyRedu
 * 3. strat->S and strat->T are completely new computed in these steps
 ********************************************************************/
 void f5c (kStrategy strat, int& olddeg, int& minimcnt, int& hilbeledeg,
-          int& hilbcount, int& srmax, int& lrmax, LQueue::size_type& reduc, ideal Q,
+          int& hilbcount, int& srmax, LQueue::size_type& reduc, ideal Q,
           intvec *w,bigintmat *hilb )
 {
   int red_result = 1;
@@ -4266,7 +4265,7 @@ void f5c (kStrategy strat, int& olddeg, int& minimcnt, int& hilbeledeg,
   hilbcount=0;
   minimcnt=0;
   srmax = 0; // strat->sl is 0 at this point
-  reduc = olddeg = lrmax = 0;
+  reduc = olddeg = 0;
   // we cannot use strat->T anymore
   //cleanT(strat);
   //strat->tl = -1;

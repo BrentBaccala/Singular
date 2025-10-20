@@ -320,7 +320,7 @@ public:
      * Yes if either the queue is empty or lobject is less than the first object.
      *
      * Strictly speaking, maybe we should make a copy of lobject before setting its seq value
-     * to what it would be if it were pushed, but in fact, it doesn't get used anywhere
+     * to what it would be if it were pushed, but in fact, seq doesn't get used anywhere
      * except in the key_comp comparison function, so we can set it without making a copy.
      */
     lobject.seq = seq;
@@ -766,7 +766,7 @@ ideal kNF2Bound (ideal F,ideal Q,ideal q,int bound, kStrategy strat, int lazyRed
 void initBba(kStrategy strat);
 void initSba(ideal F,kStrategy strat);
 void f5c (kStrategy strat, int& olddeg, int& minimcnt, int& hilbeledeg,
-          int& hilbcount, int& srmax, int& lrmax, LQueue::size_type& reduc, ideal Q,
+          int& hilbcount, int& srmax, LQueue::size_type& reduc, ideal Q,
           intvec *w,bigintmat *hilb );
 
 /***************************************************************
