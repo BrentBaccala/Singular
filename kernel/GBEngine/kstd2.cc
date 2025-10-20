@@ -4259,7 +4259,7 @@ void f5c (kStrategy strat, int& olddeg, int& minimcnt, int& hilbeledeg,
           intvec *w,bigintmat *hilb )
 {
   int red_result = 1;
-  LSet L;
+  LSet localL;
   hilbeledeg=1;
   hilbcount=0;
   minimcnt=0;
@@ -4268,11 +4268,11 @@ void f5c (kStrategy strat, int& olddeg, int& minimcnt, int& hilbeledeg,
   // we cannot use strat->T anymore
   //cleanT(strat);
   //strat->tl = -1;
-  L.key_comp().parent = NULL;
+  localL.key_comp().parent = NULL;
   if(rField_is_Ring(currRing)) {
-    L.key_comp().compareL = compareLF5CRing;
+    localL.key_comp().compareL = compareLF5CRing;
   } else {
-    L.key_comp().compareL = compareLF5C;
+    localL.key_comp().compareL = compareLF5C;
   }
   while (strat->tl >= 0)
   {
@@ -4301,7 +4301,7 @@ void f5c (kStrategy strat, int& olddeg, int& minimcnt, int& hilbeledeg,
           }
           strat->initEcart(&h);
           h.sev = pGetShortExpVector(h.p);
-	  L.push(h);
+          localL.push(h);
         }
       }
     }
@@ -4315,11 +4315,11 @@ void f5c (kStrategy strat, int& olddeg, int& minimcnt, int& hilbeledeg,
 #endif
   //enterpairs(pOne(),0,0,-1,strat,strat->tl);
   //strat->sl = -1;
-  /* picks the last element from the lazyset L */
-  while (! L.empty())
+  /* picks the last element from the lazyset localL */
+  while (! localL.empty())
   {
-    strat->P = L.top();
-    L.pop();
+    strat->P = localL.top();
+    localL.pop();
 //#if 1
 #ifdef DEBUGF5
     PrintS("NEXT PAIR TO HANDLE IN INTERRED ALGORITHM\n");
@@ -4384,7 +4384,7 @@ void f5c (kStrategy strat, int& olddeg, int& minimcnt, int& hilbeledeg,
       PrintS("Poly before red: ");
       pWrite(strat->P.p);
 #endif
-      /* complete reduction of the element chosen from L */
+      /* complete reduction of the element chosen from localL */
       red_result = strat->red2(&strat->P,strat);
       if (errorreported)  break;
     }
