@@ -1552,9 +1552,8 @@ static void updateT(kStrategy strat)
 /*2
 * arranges red, pos and T if strat->kAllAxis (first time)
 */
-static bool firstUpdate(kStrategy strat)
+static void firstUpdate(kStrategy strat)
 {
-  bool switch_to_compareInLOld = false;
   if (strat->update)
   {
     kTest_TS(strat);
@@ -1584,10 +1583,12 @@ static bool firstUpdate(kStrategy strat)
     }
     if (TEST_OPT_FASTHC)
     {
-      switch_to_compareInLOld = true;
+      strat->posInL = strat->posInLOld;
+      strat->compareInL = strat->compareInLOld;
+      strat->lastAxis = 0;
     }
     if (TEST_OPT_FINDET)
-      return switch_to_compareInLOld;
+      return;
 
     strat->use_buckets = kMoraUseBucket(strat);
     updateT(strat);
@@ -1599,7 +1600,7 @@ static bool firstUpdate(kStrategy strat)
     }
   }
   kTest_TS(strat);
-  return switch_to_compareInLOld;
+  return;
 }
 
 /*2
@@ -1632,21 +1633,14 @@ void enterSMora (LObject &p,int atS,kStrategy strat, int atR)
   {
     if (newHEdge(strat))
     {
-      bool switch_to_compareInLOld = firstUpdate(strat);
+      firstUpdate(strat);
       if (TEST_OPT_FINDET)
         return;
 
       /*- cuts elements in L above noether -*/
       updateLHC(strat);
       /*- reorders L -*/
-      std::vector<LObject> oldL(strat->Lqueue.rbegin(), strat->Lqueue.rend());
-      strat->Lqueue.clear();
-      if (switch_to_compareInLOld) {
-        strat->posInL = strat->posInLOld;
-        strat->compareInL = strat->compareInLOld;
-        strat->lastAxis = 0;
-      }
-      for (auto& Lp: oldL) strat->Lqueue.push(Lp);
+      strat->Lqueue.reorder();
     }
   }
   else if ((strat->kNoether==NULL)
@@ -1659,15 +1653,13 @@ void enterSMora (LObject &p,int atS,kStrategy strat, int atR)
       {
         updateL(FALSE,strat);
         // Change sort ordering and reorder L
-        std::vector<LObject> oldL(strat->Lqueue.rbegin(), strat->Lqueue.rend());
-        strat->Lqueue.clear();
         strat->posInLOld = strat->posInL;
         strat->posInLOldFlag = FALSE;
         strat->posInL = posInL10;
         strat->compareInLOld = strat->compareInL;
         strat->compareInL = compareInL10;
         strat->posInLDependsOnLength = TRUE;
-        for (auto& Lp: oldL) strat->Lqueue.push(Lp);
+        strat->Lqueue.reorder();
       }
     }
     else if (strat->lastAxis)
@@ -1917,14 +1909,12 @@ ideal mora (ideal F, ideal Q,intvec *w,bigintmat *hilb,kStrategy strat)
   {
     updateL(FALSE,strat);
     // Change sort ordering and reorder L
-    std::vector<LObject> oldL(strat->Lqueue.rbegin(), strat->Lqueue.rend());
-    strat->Lqueue.clear();
     strat->posInLOld = strat->posInL;
     strat->posInLOldFlag = FALSE;
     strat->posInL = posInL10;
     strat->compareInLOld = strat->compareInL;
     strat->compareInL = compareInL10;
-    for (auto& Lp: oldL) strat->Lqueue.push(Lp);
+    strat->Lqueue.reorder();
   }
   kTest_TS(strat);
   strat->use_buckets = kMoraUseBucket(strat);

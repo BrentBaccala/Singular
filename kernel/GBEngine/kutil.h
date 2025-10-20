@@ -11,6 +11,7 @@
 #include <string.h>
 
 #include "writable_set.h"
+#include <vector>
 #include <algorithm>
 
 #include "omalloc/omalloc.h"
@@ -338,6 +339,11 @@ public:
   template <typename F>
   void remove_if(F&& predicate) {
     writable_set<LObject, CompareLObject>::erase(std::remove_if(writable_set<LObject, CompareLObject>::begin(), writable_set<LObject, CompareLObject>::end(), predicate), writable_set<LObject, CompareLObject>::end());
+  }
+  void reorder(void) {
+    std::vector<LObject> oldL(rbegin(), rend());
+    clear();
+    for (auto& Lp: oldL) push(Lp);
   }
 };
 
