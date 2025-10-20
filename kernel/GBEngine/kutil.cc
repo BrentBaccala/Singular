@@ -1264,7 +1264,7 @@ static void enterOnePairRing (int i,poly p,int /*ecart*/, int isFromQ,kStrategy 
     nDelete(&t);
   }
   #endif
-  int      j,compare,compareCoeff;
+  int      compare,compareCoeff;
   LObject  h;
 
 #ifdef KDEBUG
@@ -1414,7 +1414,6 @@ static void enterOnePairRing (int i,poly p,int /*ecart*/, int isFromQ,kStrategy 
     return;
   }
   h.tailRing = strat->tailRing;
-  int posx;
   //h.pCleardenom();
   //pSetm(h.p);
   h.i_r1 = -1;h.i_r2 = -1;
@@ -1838,7 +1837,7 @@ void enterOnePairNormal (int i,poly p,int ecart, int isFromQ,kStrategy strat, in
 {
   assume(i<=strat->sl);
 
-  int      l,j,compare;
+  int      compare;
   LObject  Lp;
   Lp.i_r = -1;
 
@@ -2126,7 +2125,7 @@ static void enterOnePairLift (int i,poly p,int ecart, int isFromQ,kStrategy stra
   if ((strat->S[i]==NULL) || (p==NULL))
     return;
 
-  int      l,j,compare;
+  int      compare;
   LObject  Lp;
   Lp.i_r = -1;
 
@@ -2333,7 +2332,6 @@ static void enterOnePairSig (int i, poly p, poly pSig, int, int ecart, int isFro
 {
   assume(i<=strat->sl);
 
-  int      l;
   poly m1 = NULL,m2 = NULL; // we need the multipliers for the s-polynomial to compute
               // the corresponding signatures for criteria checks
   LObject  Lp;
@@ -3065,7 +3063,7 @@ void kMergeBintoL(kStrategy strat)
 */
 void chainCritNormal (poly p,int ecart,kStrategy strat)
 {
-  int i,j;
+  int j;
 
   /*
   *pairtest[i] is TRUE if spoly(S[i],p) == 0.
@@ -3876,7 +3874,7 @@ void initenterpairsSigRing (poly h,poly hSig,int hFrom,int k,int ecart,int isFro
 */
 void chainCritRing (poly p,int, kStrategy strat)
 {
-  int i,j;
+  int j;
   /*
   *pairtest[i] is TRUE if spoly(S[i],p) == 0.
   *In this case all elements in B such
@@ -5511,7 +5509,7 @@ int posInSyz (const kStrategy strat, poly sig)
 * critical pairs to strat->L only behind all other critical pairs which are
 * still in strat->L!
 */
-int compareLF5C (const LObject &lhs, const LObject &rhs, const kStrategy)
+int compareLF5C (const LObject &, const LObject &, const kStrategy)
 {
   return 0;
 }
@@ -11066,7 +11064,7 @@ static void enterOnePairRingShift (poly q, poly p, int /*ecart*/, int isFromQ, k
     nDelete(&t);
   }
   #endif
-  int      j,compare,compareCoeff;
+  int      compare,compareCoeff;
   LObject  h;
 
 #ifdef KDEBUG
@@ -11244,7 +11242,6 @@ static void enterOnePairRingShift (poly q, poly p, int /*ecart*/, int isFromQ, k
     return;
   }
   h.tailRing = strat->tailRing;
-  int posx;
   //h.pCleardenom();
   //pSetm(h.p);
   h.i_r1 = -1;h.i_r2 = -1;
@@ -11425,7 +11422,7 @@ BOOLEAN enterOnePairShift (poly q, poly p, int ecart, int isFromQ, kStrategy str
 
   /* need additionally: int up_to_degree, poly V0 with the variables in (0)  or just the number lV = the length of the first block */
 
-  int      l,j,compare;
+  int      compare;
   LObject  Lp;
   Lp.i_r = -1;
 

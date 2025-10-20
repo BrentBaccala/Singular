@@ -4259,7 +4259,6 @@ void f5c (kStrategy strat, int& olddeg, int& minimcnt, int& hilbeledeg,
           intvec *w,bigintmat *hilb )
 {
   int red_result = 1;
-  int pos  = 0;
   LQueue Lqueue;
   hilbeledeg=1;
   hilbcount=0;
