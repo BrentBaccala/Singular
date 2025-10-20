@@ -5423,6 +5423,12 @@ int posInT19 (const TSet set,const int length,LObject &p)
   }
 }
 
+/* Ordering procedure:
+ *    - total degree (reversed)
+ *    - p1 == NULL before p1 != NULL
+ *    - leading monomial
+ */
+
 int compareLSpecial (const LObject &lhs, const LObject &rhs, const kStrategy)
 {
   auto dl = lhs.GetpFDeg();
@@ -5430,14 +5436,14 @@ int compareLSpecial (const LObject &lhs, const LObject &rhs, const kStrategy)
   if (dl < dr) return -1;
   if (dl > dr) return 1;
 
-  // p1 != NULL comes after p1 == NULL
   if ((lhs.p1 == NULL) && (rhs.p1 != NULL)) return 1;
   if ((lhs.p1 != NULL) && (rhs.p1 == NULL)) return -1;
 
   return (pLmCmp(lhs.p,rhs.p) * currRing->OrdSgn);
 }
 
-/* Ordering procedure: leading monomial
+/* Ordering procedure:
+ *    - leading monomial
  */
 
 int compareL0 (const LObject &lhs, const LObject &rhs, const kStrategy)
@@ -5445,19 +5451,29 @@ int compareL0 (const LObject &lhs, const LObject &rhs, const kStrategy)
   return (pLmCmp(lhs.p,rhs.p) * currRing->OrdSgn);
 }
 
+/* Ordering procedure:
+ *    - leading monomial (ring version)
+ */
+
 int compareL0Ring (const LObject &lhs, const LObject &rhs, const kStrategy)
 {
   return (pLtCmp(lhs.p,rhs.p) * currRing->OrdSgn);
 }
 
-/* Ordering procedure: signature */
+/* Ordering procedure:
+ *    - signature
+ */
 
 int compareLSig (const LObject &lhs, const LObject &rhs, const kStrategy)
 {
   return (pLtCmp(lhs.sig,rhs.sig) * currRing->OrdSgn);
 }
 
-/* UNUSED Ordering procedure: pLtCmp on signature, FDeg, pLtCmp on poly */
+/* UNUSED Ordering procedure:
+ *    - signature
+ *    - total degree
+ *    - leading monomial
+ */
 
 int compareLSigRing (const LObject &lhs, const LObject &rhs, const kStrategy)
 {
@@ -5493,18 +5509,22 @@ int posInSyz (const kStrategy strat, poly sig)
   }
 }
 
-/*2
-*
-* is only used in F5C, must ensure that the interreduction process does add new
-* critical pairs to strat->L only behind all other critical pairs which are
-* still in strat->L!
-*/
+/* Ordering procedure: all elements equal
+ *
+ * is only used in F5C, must ensure that the interreduction process does add new
+ * critical pairs to strat->L only behind all other critical pairs which are
+ * still in strat->L!
+ */
+
 int compareLF5C (const LObject &, const LObject &, const kStrategy)
 {
   return 0;
 }
 
-/* Ordering procedure: totaldegree, pComp on poly */
+/* Ordering procedure:
+ *    - total degree (reversed)
+ *    - leading monomial
+ */
 
 int compareL11 (const LObject &lhs, const LObject &rhs, const kStrategy)
 {
@@ -5515,6 +5535,10 @@ int compareL11 (const LObject &lhs, const LObject &rhs, const kStrategy)
   return (pLmCmp(lhs.p,rhs.p) * currRing->OrdSgn);
 }
 
+/* Ordering procedure:
+ *    - total degree (reversed)
+ *    - leading monomial (ring version)
+ */
 
 int compareL11Ring (const LObject &lhs, const LObject &rhs, const kStrategy)
 {
@@ -5525,6 +5549,11 @@ int compareL11Ring (const LObject &lhs, const LObject &rhs, const kStrategy)
   return (pLtCmp(lhs.p,rhs.p) * currRing->OrdSgn);
 }
 
+/* Ordering procedure:
+ *    - total degree (reversed)
+ *    - leading monomial (ring version)
+ */
+
 int compareLF5CRing (const LObject &lhs, const LObject &rhs, const kStrategy)
 {
   auto dl = lhs.GetpFDeg();
@@ -5533,6 +5562,11 @@ int compareLF5CRing (const LObject &lhs, const LObject &rhs, const kStrategy)
   if (dl > dr) return 1;
   return (pLtCmp(lhs.p,rhs.p) * currRing->OrdSgn);
 }
+
+/* Ordering procedure:
+ *    - total degree (reversed)
+ *    - coefficient (larger first)
+ */
 
 int compareL11Ringls (const LObject &lhs, const LObject &rhs, const kStrategy)
 {
@@ -5612,6 +5646,12 @@ inline int getIndexRng(long coeff)
   }
 } */
 
+/* Ordering procedure:
+ *    - total degree (reversed)
+ *    - length (reversed)
+ *    - leading monomial
+ */
+
 int compareL110 (const LObject &lhs, const LObject &rhs, const kStrategy)
 {
   auto dl = lhs.GetpFDeg();
@@ -5622,6 +5662,12 @@ int compareL110 (const LObject &lhs, const LObject &rhs, const kStrategy)
   if (lhs.length > rhs.length) return 1;
   return (pLmCmp(lhs.p,rhs.p) * currRing->OrdSgn);
 }
+
+/* Ordering procedure:
+ *    - total degree (reversed)
+ *    - length (reversed)
+ *    - leading monomial (ring version)
+ */
 
 int compareL110Ring (const LObject &lhs, const LObject &rhs, const kStrategy)
 {
@@ -5661,6 +5707,11 @@ int compareL15 (const LObject &lhs, const LObject &rhs, const kStrategy)
   return (pLmCmp(lhs.p,rhs.p) * currRing->OrdSgn);
 }
 
+/* Ordering procedure:
+ *    - maximal degree (reversed)
+ *    - leading monomial (ring version)
+ */
+
 int compareL15Ring (const LObject &lhs, const LObject &rhs, const kStrategy)
 {
   auto dl = lhs.GetpFDeg() + lhs.ecart;
@@ -5669,6 +5720,12 @@ int compareL15Ring (const LObject &lhs, const LObject &rhs, const kStrategy)
   if (dl > dr) return 1;
   return (pLtCmp(lhs.p,rhs.p) * currRing->OrdSgn);
 }
+
+/* Ordering procedure:
+ *    - maximal degree (reversed)
+ *    - ecart (reversed)
+ *    - leading monomial
+ */
 
 int compareL17 (const LObject &lhs, const LObject &rhs, const kStrategy)
 {
@@ -5681,6 +5738,12 @@ int compareL17 (const LObject &lhs, const LObject &rhs, const kStrategy)
   return (pLmCmp(lhs.p,rhs.p) * currRing->OrdSgn);
 }
 
+/* Ordering procedure:
+ *    - maximal degree (reversed)
+ *    - ecart (reversed)
+ *    - leading monomial (ring version)
+ */
+
 int compareL17Ring (const LObject &lhs, const LObject &rhs, const kStrategy)
 {
   auto dl = lhs.GetpFDeg() + lhs.ecart;
@@ -5691,6 +5754,13 @@ int compareL17Ring (const LObject &lhs, const LObject &rhs, const kStrategy)
   if (lhs.ecart > rhs.ecart) return 1;
   return (pLtCmp(lhs.p,rhs.p) * currRing->OrdSgn);
 }
+
+/* Ordering procedure:
+ *    - component (reversed)
+ *    - maximal degree (reversed)
+ *    - ecart (reversed)
+ *    - leading monomial
+ */
 
 int compareL17_c (const LObject &lhs, const LObject &rhs, const kStrategy)
 {
@@ -5708,6 +5778,13 @@ int compareL17_c (const LObject &lhs, const LObject &rhs, const kStrategy)
   if (lhs.ecart > rhs.ecart) return 1;
   return (pLmCmp(lhs.p,rhs.p) * currRing->OrdSgn);
 }
+
+/* Ordering procedure:
+ *    - component (reversed)
+ *    - maximal degree (reversed)
+ *    - ecart (reversed)
+ *    - leading monomial (ring version)
+ */
 
 int compareL17_cRing (const LObject &lhs, const LObject &rhs, const kStrategy)
 {
