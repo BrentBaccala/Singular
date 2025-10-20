@@ -127,11 +127,11 @@ int redGrFirst (LObject* h,kStrategy strat)
       *-if the degree jumps
       *-if the number of pre-defined reductions jumps
       */
-      if (! strat->Lqueue.empty()
+      if (! strat->L.empty()
       && ((d >= reddeg) || (pass > strat->LazyPass))
       && !strat->homog)
       {
-        if (! strat->Lqueue.would_be_top(*h))
+        if (! strat->L.would_be_top(*h))
         {
           i=strat->sl+1;
           do
@@ -139,7 +139,7 @@ int redGrFirst (LObject* h,kStrategy strat)
             i--;
             if (i<0) return 0;
           } while (!pDivisibleBy(strat->S[i],(*h).p));
-          strat->Lqueue.push(*h);
+          strat->L.push(*h);
 #ifdef KDEBUG
           if (TEST_OPT_DEBUG) Print(" degree jumped; ->L\n");
 #endif
@@ -147,7 +147,7 @@ int redGrFirst (LObject* h,kStrategy strat)
           return 0;
         }
       }
-      if ((TEST_OPT_PROT) && strat->Lqueue.empty() && (d >= reddeg))
+      if ((TEST_OPT_PROT) && strat->L.empty() && (d >= reddeg))
       {
         reddeg = d+1;
         Print(".%d",d);mflush();
@@ -571,10 +571,10 @@ static int nc_redLazy (LObject* h,kStrategy strat)
       /*- try to reduce the s-polynomial -*/
       pass++;
       d = currRing->pFDeg((*h).p,currRing);
-      if (!strat->Lqueue.empty() && ((d > reddeg) || (pass > strat->LazyPass)))
+      if (!strat->L.empty() && ((d > reddeg) || (pass > strat->LazyPass)))
       {
-        assert(strat->compareL == compareL11);  // prior to using LQueue, the code has L11 hard-wired, so check that that's what's being used
-        if (! strat->Lqueue.would_be_top(*h))
+        assert(strat->compareL == compareL11);  // prior to using LSet, the code has L11 hard-wired, so check that that's what's being used
+        if (! strat->L.would_be_top(*h))
         {
           i=strat->sl+1;
           do
@@ -588,12 +588,12 @@ static int nc_redLazy (LObject* h,kStrategy strat)
           }
           while (!pDivisibleBy(strat->S[i],(*h).p));
           if (TEST_OPT_DEBUG) Print(" ->L[%d]\n",at);
-          strat->Lqueue.push(*h);
+          strat->L.push(*h);
           (*h).p = NULL;
           return 0;
         }
       }
-      else if ((TEST_OPT_PROT) && strat->Lqueue.empty() && (d != reddeg))
+      else if ((TEST_OPT_PROT) && strat->L.empty() && (d != reddeg))
       {
         Print(".%d",d);mflush();
         reddeg = d;
@@ -685,12 +685,12 @@ static int nc_redHoney (LObject*  h,kStrategy strat)
         * if possible h goes to the lazy-set L,i.e
         * if its position in L would be not the last one
         */
-        if (! strat->Lqueue.empty())
+        if (! strat->L.empty())
         {
-          if (! strat->Lqueue.would_be_top(*h))
+          if (! strat->L.would_be_top(*h))
           /*- h will not become the next element to reduce -*/
           {
-            strat->Lqueue.push(*h);
+            strat->L.push(*h);
             if (TEST_OPT_DEBUG) Print(" ecart too big: -> L\n");
             (*h).p = NULL;
             return 0;
@@ -749,9 +749,9 @@ static int nc_redHoney (LObject*  h,kStrategy strat)
       */
       pass++;
       d = currRing->pFDeg((*h).p,currRing)+(*h).ecart;
-      if (!strat->Lqueue.empty() && ((d > reddeg) || (pass > strat->LazyPass)))
+      if (!strat->L.empty() && ((d > reddeg) || (pass > strat->LazyPass)))
       {
-        if (! strat->Lqueue.would_be_top(*h))
+        if (! strat->L.would_be_top(*h))
         {
           /*test if h is already standardbasis element*/
           i=strat->sl+1;
@@ -764,14 +764,14 @@ static int nc_redHoney (LObject*  h,kStrategy strat)
               return 0;
             }
           } while (!pDivisibleBy(strat->S[i],(*h).p));
-          strat->Lqueue.push(*h);
+          strat->L.push(*h);
           if (TEST_OPT_DEBUG)
             Print(" degree jumped: -> L\n");
           (*h).p = NULL;
           return 0;
         }
       }
-      else if (TEST_OPT_PROT && strat->Lqueue.empty() && (d > reddeg))
+      else if (TEST_OPT_PROT && strat->L.empty() && (d > reddeg))
       {
         reddeg = d;
         Print(".%d",d); mflush();
@@ -906,16 +906,16 @@ static int nc_redBest (LObject*  h,kStrategy strat)
         d = currRing->pFDeg((*h).p,currRing);
         if (strat->honey)
           d += (*h).ecart;
-        if (! strat->Lqueue.empty() && ((pass > strat->LazyPass) || (d > reddeg)))
+        if (! strat->L.empty() && ((pass > strat->LazyPass) || (d > reddeg)))
         {
-          if (! strat->Lqueue.would_be_top(*h))
+          if (! strat->L.would_be_top(*h))
           {
-            strat->Lqueue.push(*h);
+            strat->L.push(*h);
             (*h).p = NULL;
             return 0;
           }
         }
-        else if (TEST_OPT_PROT && strat->Lqueue.empty() && (d != reddeg))
+        else if (TEST_OPT_PROT && strat->L.empty() && (d != reddeg))
         {
           reddeg = d;
           Print("%d.");
@@ -1051,7 +1051,7 @@ ideal k_gnc_gr_bba(const ideal F, const ideal Q, const intvec *, const bigintmat
   // intvec *w=NULL;
   // intvec *hilb=NULL;
   int   olddeg;
-  LQueue::size_type reduc;
+  LSet::size_type reduc;
   int red_result=1;
   int /*hilbeledeg=1,*/hilbcount=0/*,minimcnt=0*/;
 
@@ -1070,27 +1070,27 @@ ideal k_gnc_gr_bba(const ideal F, const ideal Q, const intvec *, const bigintmat
   reduc = olddeg = 0;
 
   /* compute------------------------------------------------------- */
-  while (! strat->Lqueue.empty())
+  while (! strat->L.empty())
   {
     if (TEST_OPT_DEBUG) messageSets(strat);
 
-    if (strat->Lqueue.size() == 1) strat->interpt=TRUE;
+    if (strat->L.size() == 1) strat->interpt=TRUE;
     if (TEST_OPT_DEGBOUND
     && ((strat->honey
-    && (strat->Lqueue.top().ecart+currRing->pFDeg(strat->Lqueue.top().p,currRing)>Kstd1_deg))
-       || ((!strat->honey) && (currRing->pFDeg(strat->Lqueue.top().p,currRing)>Kstd1_deg))))
+    && (strat->L.top().ecart+currRing->pFDeg(strat->L.top().p,currRing)>Kstd1_deg))
+       || ((!strat->honey) && (currRing->pFDeg(strat->L.top().p,currRing)>Kstd1_deg))))
     {
       /*
       *stops computation if
       * 24 IN test and the degree +ecart of L[strat->Ll] is bigger then
       *a predefined number Kstd1_deg
       */
-      while (! strat->Lqueue.empty()) strat->Lqueue.pop();
+      while (! strat->L.empty()) strat->L.pop();
       break;
     }
     /* picks the last element from the lazyset L */
-    strat->P = strat->Lqueue.top();
-    strat->Lqueue.pop();
+    strat->P = strat->L.top();
+    strat->L.pop();
     //kTest(strat);
 
     if (strat->P.p != NULL)

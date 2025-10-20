@@ -99,7 +99,7 @@ void khCheck( ideal Q, intvec *w, bigintmat *hilb, int &eledeg, int &count,
           eledeg = -n_Int(BIMATELEM(*hilb,1,deg+1),coeffs_BIGINT);
         else // we have newhilb = hilb
         {
-          while (! strat->Lqueue.empty())
+          while (! strat->L.empty())
           {
             count++;
             if(TEST_OPT_PROT)
@@ -107,7 +107,7 @@ void khCheck( ideal Q, intvec *w, bigintmat *hilb, int &eledeg, int &count,
               PrintS("h");
               mflush();
             }
-            strat->Lqueue.pop();
+            strat->L.pop();
           }
           delete newhilb;
           return;
@@ -120,7 +120,7 @@ void khCheck( ideal Q, intvec *w, bigintmat *hilb, int &eledeg, int &count,
       deg++;
     } /* loop */
     delete newhilb;
-    while (! strat->Lqueue.empty() && (degp(strat->Lqueue.top().p,currRing)-mw < deg)) // the essential step
+    while (! strat->L.empty() && (degp(strat->L.top().p,currRing)-mw < deg)) // the essential step
     {
       count++;
       if(TEST_OPT_PROT)
@@ -128,7 +128,7 @@ void khCheck( ideal Q, intvec *w, bigintmat *hilb, int &eledeg, int &count,
         PrintS("h");
         mflush();
       }
-      strat->Lqueue.pop();
+      strat->L.pop();
     }
   }
 }
@@ -210,7 +210,7 @@ void khCheck( ideal Q, intvec *w, poly hilb, const ring Qt, int &eledeg, int &co
           eledeg = -(*hilb)[deg];
         else // we have newhilb = hilb
         {
-          while (! strat->Lqueue.empty())
+          while (! strat->L.empty())
           {
             count++;
             if(TEST_OPT_PROT)
@@ -218,7 +218,7 @@ void khCheck( ideal Q, intvec *w, poly hilb, const ring Qt, int &eledeg, int &co
               PrintS("h");
               mflush();
             }
-            strat->Lqueue.pop();
+            strat->L.pop();
           }
           delete newhilb;
           return;
@@ -231,7 +231,7 @@ void khCheck( ideal Q, intvec *w, poly hilb, const ring Qt, int &eledeg, int &co
       deg++;
     } /* loop */
     delete newhilb;
-    while (!strat->Lqueue.empty() && (degp(strat->Lqueue.top().p,currRing)-mw < deg)) // the essential step
+    while (!strat->L.empty() && (degp(strat->L.top().p,currRing)-mw < deg)) // the essential step
     {
       count++;
       if(TEST_OPT_PROT)
@@ -239,7 +239,7 @@ void khCheck( ideal Q, intvec *w, poly hilb, const ring Qt, int &eledeg, int &co
         PrintS("h");
         mflush();
       }
-      strat->Lqueue.pop();
+      strat->L.pop();
     }
   }
 }
@@ -266,7 +266,7 @@ so delete all the remaining pairs
 
   if(newhilb->compare(hilb) == 0)
   {
-    while (! strat->Lqueue.empty())
+    while (! strat->L.empty())
     {
       count++;
       if(TEST_OPT_PROT)
@@ -274,7 +274,7 @@ so delete all the remaining pairs
         PrintS("h");
         mflush();
       }
-      strat->Lqueue.pop();
+      strat->L.pop();
     }
     delete newhilb;
     return;

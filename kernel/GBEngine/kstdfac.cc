@@ -62,10 +62,10 @@ static void copyT (kStrategy o,kStrategy n)
 */
 static void copyL (kStrategy o,kStrategy n)
 {
-  n->Lqueue = o->Lqueue;
+  n->L = o->L;
 
-  // Update references in the copied LQueue to point to new T array
-  for (auto& Lp : n->Lqueue)
+  // Update references in the copied LSet to point to new T array
+  for (auto& Lp : n->L)
   {
     poly p;
     int i;
@@ -377,7 +377,7 @@ static void completeReduceFac (kStrategy strat, ideal_list FL)
                 pWrite(n->D->m[j]);
                 messageSets(n);
               }
-              while (! n->Lqueue.empty()) n->Lqueue.pop();
+              while (! n->L.empty()) n->L.pop();
               while (n->tl >= 0)
               {
                 int i=n->sl;
@@ -421,7 +421,7 @@ static void completeReduceFac (kStrategy strat, ideal_list FL)
                 Print("empty set because:L[%p]\n",(void *)Lj);
                 iiWriteMatrix((matrix)Lj->d,"L",1,currRing,0);
               }
-              while (! n->Lqueue.empty()) n->Lqueue.pop();
+              while (! n->L.empty()) n->L.pop();
               while (n->tl >= 0)
               {
                 int i=n->sl;
@@ -452,7 +452,7 @@ static void completeReduceFac (kStrategy strat, ideal_list FL)
     for(i=0;i<IDELEMS(fac);i++) fac->m[i]=NULL;
     idDelete(&fac);
     idDelete(&fac_copy);
-    if (! strat->Lqueue.empty() && (strat->sl>=0)) break;
+    if (! strat->L.empty() && (strat->sl>=0)) break;
     else si=strat->sl+1;
   }
 }
@@ -460,35 +460,35 @@ static void completeReduceFac (kStrategy strat, ideal_list FL)
 ideal bbafac (ideal /*F*/, ideal Q,intvec* /*w*/,kStrategy strat, ideal_list FL)
 {
   int   olddeg;
-  LQueue::size_type reduc;
+  LSet::size_type reduc;
   int red_result = 1;
   reduc = olddeg = 0;
   /* compute------------------------------------------------------- */
-  if (strat->Lqueue.empty() && (strat->sl>=0))
+  if (strat->L.empty() && (strat->sl>=0))
   {
     if (TEST_OPT_REDSB) completeReduceFac(strat,FL);
   }
   kTest_TS(strat);
-  while (! strat->Lqueue.empty())
+  while (! strat->L.empty())
   {
     if (TEST_OPT_DEBUG) messageSets(strat);
-    if (strat->Lqueue.size() == 1) strat->interpt=TRUE;
+    if (strat->L.size() == 1) strat->interpt=TRUE;
     if (TEST_OPT_DEGBOUND
     && ((strat->honey
-        && (strat->Lqueue.top().ecart+currRing->pFDeg(strat->Lqueue.top().p,currRing)>Kstd1_deg))
-      || ((!strat->honey) && (currRing->pFDeg(strat->Lqueue.top().p,currRing)>Kstd1_deg))))
+        && (strat->L.top().ecart+currRing->pFDeg(strat->L.top().p,currRing)>Kstd1_deg))
+      || ((!strat->honey) && (currRing->pFDeg(strat->L.top().p,currRing)>Kstd1_deg))))
     {
       /*
       *stops computation if
       * 24 IN test and the degree +ecart of L[strat->Ll] is bigger then
       *a predefined number Kstd1_deg
       */
-      while (! strat->Lqueue.empty()) strat->Lqueue.pop();
+      while (! strat->L.empty()) strat->L.pop();
       break;
     }
     /* picks the last element from the lazyset L */
-    strat->P = strat->Lqueue.top();
-    strat->Lqueue.pop();
+    strat->P = strat->L.top();
+    strat->L.pop();
     if (pNext(strat->P.p) == strat->tail)
     {
       /* deletes the short spoly and computes */
@@ -606,7 +606,7 @@ ideal bbafac (ideal /*F*/, ideal Q,intvec* /*w*/,kStrategy strat, ideal_list FL)
         enterT(n->P,n);
         n->enterS(n->P,pos,n, n->tl);
         {
-          for (auto& Lp: n->Lqueue) {
+          for (auto& Lp: n->L) {
             Lp.i_r1= -1;
             for(ii=0; ii<=n->tl; ii++)
             {
@@ -665,7 +665,7 @@ ideal bbafac (ideal /*F*/, ideal Q,intvec* /*w*/,kStrategy strat, ideal_list FL)
                   messageSets(n);
                 }
                 //if (n->Ll >=0) Print("Ll:%d|",n->Ll);
-                while (! n->Lqueue.empty()) n->Lqueue.pop();
+                while (! n->L.empty()) n->L.pop();
                 //if (n->tl >=0) Print("tl:%d|",n->tl);
                 while (n->tl >= 0)
                 {
@@ -715,7 +715,7 @@ ideal bbafac (ideal /*F*/, ideal Q,intvec* /*w*/,kStrategy strat, ideal_list FL)
                   #endif
                   iiWriteMatrix((matrix)Lj->d,"L",1,currRing,0);
                 }
-                while (! n->Lqueue.empty()) n->Lqueue.pop();
+                while (! n->L.empty()) n->L.pop();
                 while (n->tl >= 0)
                 {
                   int i=n->sl;
@@ -750,7 +750,7 @@ ideal bbafac (ideal /*F*/, ideal Q,intvec* /*w*/,kStrategy strat, ideal_list FL)
     strat->P.lcm=NULL;
 #endif
     kTest_TS(strat);
-    if (strat->Lqueue.empty() && (strat->sl>=0))
+    if (strat->L.empty() && (strat->sl>=0))
     {
       if (TEST_OPT_REDSB) completeReduceFac(strat,FL);
     }

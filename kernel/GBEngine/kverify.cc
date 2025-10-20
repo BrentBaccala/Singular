@@ -66,12 +66,12 @@ BOOLEAN kVerify1(ideal F, ideal Q)
       initenterpairs(strat->S[i],i-1,0,FALSE,strat);
     }
   }
-  if (TEST_OPT_PROT) printf("%d pairs created\n",(int)strat->Lqueue.size());
+  if (TEST_OPT_PROT) printf("%d pairs created\n",(int)strat->L.size());
   if (TEST_OPT_DEBUG) messageSets(strat);
   /*---------------------------------------------------------------------*/
   BOOLEAN all_okay=TRUE;
   int i = 0;
-  for(auto it = strat->Lqueue.begin(); it != strat->Lqueue.end(); ++it, ++i)
+  for(auto it = strat->L.begin(); it != strat->L.end(); ++it, ++i)
   {
   /* spolys */
     int red_result=1;
@@ -177,10 +177,10 @@ BOOLEAN kVerify2(ideal F, ideal Q)
       initenterpairs(strat->S[i],i-1,0,FALSE,strat);
     }
   }
-  if (TEST_OPT_PROT) printf("%d pairs created\n",(int)strat->Lqueue.size());
+  if (TEST_OPT_PROT) printf("%d pairs created\n",(int)strat->L.size());
   if (TEST_OPT_DEGBOUND)
   {
-    strat->Lqueue.remove_if
+    strat->L.remove_if
       ([&](LObject lobject) {
          if (currRing->pFDeg(lobject.p,currRing)>Kstd1_deg) {
            if (TEST_OPT_PROT) { printf("D"); mflush(); }
@@ -196,7 +196,7 @@ BOOLEAN kVerify2(ideal F, ideal Q)
   if (cpus>=vspace::internals::MAX_PROCESS)
     cpus=vspace::internals::MAX_PROCESS-1;
   /* start no more than MAX_PROCESS-1 children */
-  if (cpus>strat->Lqueue.size()) cpus=strat->Lqueue.size();
+  if (cpus>strat->L.size()) cpus=strat->L.size();
   /* start no more children than elements in L */
   int parent_pid=getpid();
   using namespace vspace;
@@ -205,7 +205,7 @@ BOOLEAN kVerify2(ideal F, ideal Q)
   VRef<Queue<int> > queue = vnew<Queue<int> >();
   VRef<Queue<int> > rqueue = vnew<Queue<int> >();
   int i = 0;
-  for(auto it = strat->Lqueue.begin(); it != strat->Lqueue.end(); ++it, ++i)
+  for(auto it = strat->L.begin(); it != strat->L.end(); ++it, ++i)
   {
    queue->enqueue(i); // the tasks: process pair L[i]
   }
@@ -240,7 +240,7 @@ BOOLEAN kVerify2(ideal F, ideal Q)
       int red_result=1;
       /* picks the element from the lazyset L */
       LObject P;
-      auto it = strat->Lqueue.begin();
+      auto it = strat->L.begin();
       std::advance(it, ind);
       P = *it;
       if (TEST_OPT_PROT) { printf("."); mflush();}

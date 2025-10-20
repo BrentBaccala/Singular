@@ -195,7 +195,7 @@ public:
   poly  lcm;   /*- the lcm of p1,p2 -*/
   kBucket_pt bucket;
   int   i_r1, i_r2;
-  unsigned seq;       // the sequence number of the LQueue when this LObject was inserted
+  unsigned seq;       // the sequence number of the LSet when this LObject was inserted
                       // used when the LObject comparison function returns equality to determine L set ordering
   unsigned checked; // this is the index of S up to which
                       // the corresponding LObject was already checked in
@@ -274,7 +274,7 @@ public:
 
 EXTERN_VAR int HCord;
 
-/** @class LQueue
+/** @class LSet
  *
  * "L" is the set of critical pairs, maintained as a priority queue,
  * and we wish to regularly pop the largest item from the queue.
@@ -294,7 +294,7 @@ public:
   bool operator() (const LObject &lhs, const LObject &rhs) const;
 };
 
-class LQueue : public writable_set<LObject, CompareLObject> {
+class LSet : public writable_set<LObject, CompareLObject> {
 private:
   unsigned seq = 0;   // increments by one on every insertion; used to determine ordering
 public:
@@ -394,8 +394,8 @@ public:
   unsigned long* sevSig = NULL;
   unsigned long* sevT = NULL;
   TSet T = NULL;
-  LQueue  Lqueue;
-  LQueue  Bqueue;
+  LSet  L;
+  LSet  B;
 
   poly    kNoether = NULL;
   poly    t_kNoether = NULL; // same polys in tailring
@@ -512,7 +512,7 @@ inline bool CompareLObject::operator()(const LObject &lhs, const LObject &rhs) c
   if (parent != NULL) {
     comparator = parent->compareL;
   } else {
-    /* A special case used only in f5c() to construct a temporary LQueue without a parent */
+    /* A special case used only in f5c() to construct a temporary LSet without a parent */
     /* compareL10 (not used in f5c) is the only comparator that uses its third argument */
     comparator = compareL;
   }
@@ -610,7 +610,7 @@ void enterpairs (poly h, int k, int ec, int pos,kStrategy strat, int atR = -1);
 void entersets (LObject h);
 void pairs ();
 BOOLEAN sbaCheckGcdPair (LObject* h,kStrategy strat);
-void message (int i,int* olddeg,LQueue::size_type* reduc,kStrategy strat,int red_result);
+void message (int i,int* olddeg,LSet::size_type* reduc,kStrategy strat,int red_result);
 void messageStat (int hilbcount,kStrategy strat);
 void messageStatSBA (int hilbcount,kStrategy strat);
 #ifdef KDEBUG
@@ -765,7 +765,7 @@ ideal kNF2Bound (ideal F,ideal Q,ideal q,int bound, kStrategy strat, int lazyRed
 void initBba(kStrategy strat);
 void initSba(ideal F,kStrategy strat);
 void f5c (kStrategy strat, int& olddeg, int& minimcnt, int& hilbeledeg,
-          int& hilbcount, int& srmax, LQueue::size_type& reduc, ideal Q,
+          int& hilbcount, int& srmax, LSet::size_type& reduc, ideal Q,
           intvec *w,bigintmat *hilb );
 
 /***************************************************************
@@ -937,7 +937,7 @@ KINLINE void clearS (poly p, unsigned long p_sev, int* at, int* k,
 #ifdef HAVE_SHIFTBBA
 static inline BOOLEAN kExistsInL1(const poly p, const kStrategy strat)
 {
-  for(auto it = strat->Lqueue.begin(); it != strat->Lqueue.end(); ++it)
+  for(auto it = strat->L.begin(); it != strat->L.end(); ++it)
   {
     if (p == it->p1) return TRUE;
   }

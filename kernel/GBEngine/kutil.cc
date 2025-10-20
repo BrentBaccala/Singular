@@ -675,9 +675,9 @@ void initPairtest(kStrategy strat)
 *test whether (p1,p2) or (p2,p1) is in L at or after an iterator
 *it returns TRUE if yes and modifies the iterator to point to the match
 */
-BOOLEAN isInPairsetL(LQueue::iterator &it,poly p1,poly p2,kStrategy strat)
+BOOLEAN isInPairsetL(LSet::iterator &it,poly p1,poly p2,kStrategy strat)
 {
-  for (; it != strat->Lqueue.end(); it++) {
+  for (; it != strat->L.end(); it++) {
     if (((p1 == it->p1) && (p2 == it->p2))
     ||  ((p1 == it->p2) && (p2 == it->p1)))
       return TRUE;
@@ -1007,7 +1007,7 @@ BOOLEAN kTest (kStrategy strat)
 
   // test L
   i=0;
-  for (auto& Lp: strat->Lqueue) {
+  for (auto& Lp: strat->L) {
     kFalseReturn(kTest_L(&Lp, strat,
                          Lp.Next() != strat->tail, i,
                          strat->T, strat->tl));
@@ -1016,7 +1016,7 @@ BOOLEAN kTest (kStrategy strat)
       //if (strat->use_buckets && Lp.Next() != strat->tail &&
       //    Lp.Next() != NULL && Lp.p1 != NULL)
       //{
-      //  assume(strat->Lqueue[i].bucket != NULL);
+      //  assume(strat->L[i].bucket != NULL);
       //}
   }
 
@@ -1075,12 +1075,12 @@ BOOLEAN kTest_TS(kStrategy strat)
                             i, strat->S_2_R[i], j, strat->T[j].i_r);
     }
   }
-  // test strat->Lqueue[i].i_r1
+  // test strat->L[i].i_r1
   i=0;
   #ifdef HAVE_SHIFTBBA
   if (!rIsLPRing(currRing)) // in the Letterplace ring we currently don't set/use i_r1 and i_r2
   #endif
-  for (auto& Lp: strat->Lqueue) {
+  for (auto& Lp: strat->L) {
     if (Lp.p1 != NULL && Lp.p2)
     {
       if (Lp.i_r1 < 0 ||
@@ -1282,7 +1282,7 @@ static void enterOnePairRing (int i,poly p,int /*ecart*/, int isFromQ,kStrategy 
   *if the leading term of r divides lcm(s,p) then (s,p) will not enter B
   */
 
-  for(auto jt = strat->Bqueue.begin(); jt != strat->Bqueue.end(); )
+  for(auto jt = strat->B.begin(); jt != strat->B.end(); )
   {
     bool j_deleted = false;
     compare=pDivCompRing(jt->lcm,h.lcm);
@@ -1302,7 +1302,7 @@ static void enterOnePairRing (int i,poly p,int /*ecart*/, int isFromQ,kStrategy 
       }
       if(compareCoeff == pDivComp_GREATER)
       {
-        jt = strat->Bqueue.erase(jt);
+        jt = strat->B.erase(jt);
         j_deleted = true;
         strat->c3++;
       }
@@ -1331,7 +1331,7 @@ static void enterOnePairRing (int i,poly p,int /*ecart*/, int isFromQ,kStrategy 
       }
       if(compare == pDivComp_GREATER)
       {
-        jt = strat->Bqueue.erase(jt);
+        jt = strat->B.erase(jt);
         j_deleted = true;
         strat->c3++;
       }
@@ -1424,7 +1424,7 @@ static void enterOnePairRing (int i,poly p,int /*ecart*/, int isFromQ,kStrategy 
     h.t_p = k_LmInit_currRing_2_tailRing(h.p, strat->tailRing);
   if (strat->P.p!=NULL) strat->P.sev = pGetShortExpVector(strat->P.p);
   else strat->P.sev=0L;
-  strat->Bqueue.push(h);
+  strat->B.push(h);
   kTest_TS(strat);
 }
 
@@ -1558,7 +1558,7 @@ static BOOLEAN enterOneStrongPoly (int i,poly p,int /*ecart*/, int /*isFromQ*/,k
       h.i_r1 = -1;
       h.i_r2 = -1;
     }
-    strat->Lqueue.push(h);
+    strat->L.push(h);
   }
   else
   {
@@ -1815,7 +1815,7 @@ static BOOLEAN enterOneStrongPolySig (int i,poly p,poly sig,int /*ecart*/, int /
     h.i_r1 = -1;
     h.i_r2 = -1;
   }
-  strat->Lqueue.push(h);
+  strat->L.push(h);
   return TRUE;
 }
 
@@ -1885,7 +1885,7 @@ void enterOnePairNormal (int i,poly p,int ecart, int isFromQ,kStrategy strat, in
     *if the leading term of r divides lcm(s,p) then (s,p) will not enter B
     */
     {
-      for (auto jt = strat->Bqueue.begin(); jt != strat->Bqueue.end(); )
+      for (auto jt = strat->B.begin(); jt != strat->B.end(); )
       {
         compare=pDivComp(jt->lcm,Lp.lcm);
         if ((compare==1)
@@ -1903,7 +1903,7 @@ void enterOnePairNormal (int i,poly p,int ecart, int isFromQ,kStrategy strat, in
         if ((compare ==-1)
         && sugarDivisibleBy(Lp.ecart,jt->ecart))
         {
-          jt = strat->Bqueue.erase(jt);
+          jt = strat->B.erase(jt);
           strat->c3++;
         }
         else
@@ -1948,7 +1948,7 @@ void enterOnePairNormal (int i,poly p,int ecart, int isFromQ,kStrategy strat, in
       *if the leading term of s divides lcm(r,p) then (r,p) will be canceled
       *if the leading term of r divides lcm(s,p) then (s,p) will not enter B
       */
-      for(auto jt = strat->Bqueue.begin(); jt != strat->Bqueue.end(); )
+      for(auto jt = strat->B.begin(); jt != strat->B.end(); )
       {
         compare=pDivComp(jt->lcm,Lp.lcm);
         if (compare==1)
@@ -1964,7 +1964,7 @@ void enterOnePairNormal (int i,poly p,int ecart, int isFromQ,kStrategy strat, in
         else
         if (compare ==-1)
         {
-          jt = strat->Bqueue.erase(jt);
+          jt = strat->B.erase(jt);
           strat->c3++;
         }
         else
@@ -2081,7 +2081,7 @@ void enterOnePairNormal (int i,poly p,int ecart, int isFromQ,kStrategy strat, in
         nDelete(&(Lp.p->coef));
     }
 
-    strat->Bqueue.push(Lp);
+    strat->B.push(Lp);
   }
 }
 
@@ -2163,7 +2163,7 @@ static void enterOnePairLift (int i,poly p,int ecart, int isFromQ,kStrategy stra
     *if the leading term of r divides lcm(s,p) then (s,p) will not enter B
     */
     {
-      for (auto jt = strat->Bqueue.begin(); jt != strat->Bqueue.end(); )
+      for (auto jt = strat->B.begin(); jt != strat->B.end(); )
       {
         compare=pDivComp(jt->lcm,Lp.lcm);
         if ((compare==1)
@@ -2181,7 +2181,7 @@ static void enterOnePairLift (int i,poly p,int ecart, int isFromQ,kStrategy stra
         if ((compare ==-1)
         && sugarDivisibleBy(Lp.ecart,jt->ecart))
         {
-          jt = strat->Bqueue.erase(jt);
+          jt = strat->B.erase(jt);
           strat->c3++;
         }
         else
@@ -2222,7 +2222,7 @@ static void enterOnePairLift (int i,poly p,int ecart, int isFromQ,kStrategy stra
     *if the leading term of s divides lcm(r,p) then (r,p) will be canceled
     *if the leading term of r divides lcm(s,p) then (s,p) will not enter B
     */
-    for(auto jt = strat->Bqueue.begin(); jt != strat->Bqueue.end(); )
+    for(auto jt = strat->B.begin(); jt != strat->B.end(); )
     {
       compare=pDivComp(jt->lcm,Lp.lcm);
       if (compare==1)
@@ -2238,7 +2238,7 @@ static void enterOnePairLift (int i,poly p,int ecart, int isFromQ,kStrategy stra
       else
       if (compare ==-1)
       {
-        jt = strat->Bqueue.erase(jt);
+        jt = strat->B.erase(jt);
         strat->c3++;
       }
       else
@@ -2305,7 +2305,7 @@ static void enterOnePairLift (int i,poly p,int ecart, int isFromQ,kStrategy stra
         nDelete(&(Lp.p->coef));
     }
 
-    strat->Bqueue.push(Lp);
+    strat->B.push(Lp);
   }
 }
 
@@ -2564,7 +2564,7 @@ static void enterOnePairSig (int i, poly p, poly pSig, int, int ecart, int isFro
         nDelete(&(Lp.p->coef));
     }
 
-    strat->Bqueue.push(Lp);
+    strat->B.push(Lp);
   }
 }
 
@@ -2964,7 +2964,7 @@ static void enterOnePairSigRing (int i, poly p, poly pSig, int, int ecart, int i
         return;
       }
     }
-    strat->Lqueue.push(Lp);
+    strat->L.push(Lp);
   }
 }
 
@@ -3031,7 +3031,7 @@ void enterOnePairSpecial (int i,poly p,int ecart,kStrategy strat, int atR = -1)
       && (Lp.p->coef!=NULL))
         nDelete(&(Lp.p->coef));
     }
-    strat->Lqueue.push(Lp);
+    strat->L.push(Lp);
   }
 }
 
@@ -3040,10 +3040,10 @@ void enterOnePairSpecial (int i,poly p,int ecart,kStrategy strat, int atR = -1)
 */
 void kMergeBintoL(kStrategy strat)
 {
-  while (!strat->Bqueue.empty()) {
-    auto Lobj = strat->Bqueue.top();
-    strat->Bqueue.pop();
-    strat->Lqueue.push(Lobj);
+  while (!strat->B.empty()) {
+    auto Lobj = strat->B.top();
+    strat->B.pop();
+    strat->L.push(Lobj);
   }
 }
 
@@ -3070,11 +3070,11 @@ void chainCritNormal (poly p,int ecart,kStrategy strat)
       {
         if (strat->pairtest[j])
         {
-          for (auto it = strat->Bqueue.begin(); it != strat->Bqueue.end(); )
+          for (auto it = strat->B.begin(); it != strat->B.end(); )
           {
             if (pLPDivisibleBy(strat->S[j],it->lcm))
             {
-              it = strat->Bqueue.erase(it);
+              it = strat->B.erase(it);
               strat->c3++;
             }
             else
@@ -3091,11 +3091,11 @@ void chainCritNormal (poly p,int ecart,kStrategy strat)
       {
         if (strat->pairtest[j])
         {
-          for (auto it = strat->Bqueue.begin(); it != strat->Bqueue.end(); )
+          for (auto it = strat->B.begin(); it != strat->B.end(); )
           {
             if (pDivisibleBy(strat->S[j],it->lcm))
             {
-              it = strat->Bqueue.erase(it);
+              it = strat->B.erase(it);
               strat->c3++;
             }
             else
@@ -3116,7 +3116,7 @@ void chainCritNormal (poly p,int ecart,kStrategy strat)
     *and lcm(s,r)#lcm(s,p) and lcm(s,r)#lcm(r,p)
     *and in case the sugar is o.k. then L[j] can be canceled
     */
-      for (auto it = strat->Lqueue.begin(); it != strat->Lqueue.end(); )
+      for (auto it = strat->L.begin(); it != strat->L.end(); )
       {
         if (sugarDivisibleBy(ecart,it->ecart)
         && ((it->p == strat->tail) || (rHasGlobalOrdering(currRing)))
@@ -3124,7 +3124,7 @@ void chainCritNormal (poly p,int ecart,kStrategy strat)
         {
           if (it->p == strat->tail)
           {
-            it = strat->Lqueue.erase(it);
+            it = strat->L.erase(it);
             strat->c3++;
           }
           else
@@ -3138,21 +3138,21 @@ void chainCritNormal (poly p,int ecart,kStrategy strat)
       *in B all elements with the same lcm except the "best"
       *(i.e. the last one in B with this property) will be canceled
       */
-      for (auto jt = strat->Bqueue.begin(); jt != strat->Bqueue.end(); )
+      for (auto jt = strat->B.begin(); jt != strat->B.end(); )
       {
         bool j_deleted = false;
-        for (auto it = jt + 1; it != strat->Bqueue.end(); )
+        for (auto it = jt + 1; it != strat->B.end(); )
         {
           if (pLmEqual(jt->lcm,it->lcm))
           {
             strat->c3++;
             if (sugarDivisibleBy(jt->ecart,it->ecart))
             {
-              it = strat->Bqueue.erase(it);
+              it = strat->B.erase(it);
             }
             else
             {
-              jt = strat->Bqueue.erase(jt);
+              jt = strat->B.erase(jt);
               j_deleted = true;
               break;
             }
@@ -3170,13 +3170,13 @@ void chainCritNormal (poly p,int ecart,kStrategy strat)
       *and lcm(s,r)#lcm(s,p) and lcm(s,r)#lcm(r,p)
       *and in case the sugar is o.k. then L[j] can be canceled
       */
-      for (auto it = strat->Lqueue.begin(); it != strat->Lqueue.end(); )
+      for (auto it = strat->L.begin(); it != strat->L.end(); )
       {
         if (pCompareChain(p,it->p1,it->p2,it->lcm))
         {
           if ((pNext(it->p) == strat->tail)||(rHasGlobalOrdering(currRing)))
           {
-            it = strat->Lqueue.erase(it);
+            it = strat->L.erase(it);
             strat->c3++;
           }
           else
@@ -3191,14 +3191,14 @@ void chainCritNormal (poly p,int ecart,kStrategy strat)
       *(i.e. the last one in B with this property) will be canceled
       */
       /* XXX I don't think this will work with std::array because deleting it will invalidate jt */
-      for (auto jt = strat->Bqueue.begin(); jt != strat->Bqueue.end(); ++jt)
+      for (auto jt = strat->B.begin(); jt != strat->B.end(); ++jt)
       {
-        for (auto it = jt + 1; it != strat->Bqueue.end(); )
+        for (auto it = jt + 1; it != strat->B.end(); )
         {
           if (pLmEqual(jt->lcm,it->lcm))
           {
             strat->c3++;
-            it = strat->Bqueue.erase(it);
+            it = strat->B.erase(it);
           }
           else
             ++it;
@@ -3212,7 +3212,7 @@ void chainCritNormal (poly p,int ecart,kStrategy strat)
   }
   else
   {
-    for (auto jt = strat->Lqueue.begin(); jt != strat->Lqueue.end(); )
+    for (auto jt = strat->L.begin(); jt != strat->L.end(); )
     {
       #ifdef HAVE_SHIFTBBA
       if ((jt->p1!=NULL) &&
@@ -3223,7 +3223,7 @@ void chainCritNormal (poly p,int ecart,kStrategy strat)
       {
         if ((pNext(jt->p) == strat->tail)||(rHasGlobalOrdering(currRing)))
         {
-          jt = strat->Lqueue.erase(jt);
+          jt = strat->L.erase(jt);
           strat->c3++;
         }
         else
@@ -3246,9 +3246,9 @@ void chainCritNormal (poly p,int ecart,kStrategy strat)
     *B[i].p with the same leading term
     */
     kMergeBintoL(strat);
-    for (auto jt = strat->Lqueue.begin(); jt != strat->Lqueue.end(); )
+    for (auto jt = strat->L.begin(); jt != strat->L.end(); )
     {
-      if (std::next(jt) == strat->Lqueue.end())
+      if (std::next(jt) == strat->L.end())
       {
         /*now L[0] cannot be canceled any more and the tail can be removed*/
         if (jt->p2 == strat->tail) jt->p2 = p;
@@ -3256,14 +3256,14 @@ void chainCritNormal (poly p,int ecart,kStrategy strat)
       }
       if (jt->p2 == p)
       {
-        for (auto it = jt + 1; it != strat->Lqueue.end(); )
+        for (auto it = jt + 1; it != strat->L.end(); )
         {
           bool i_deleted = false;
           if ((it->p2 == p) && pLmEqual(jt->lcm,it->lcm))
           {
             /*L[i] could be canceled but we search for a better one to cancel*/
             strat->c3++;
-            LQueue::iterator lt = std::next(it);
+            LSet::iterator lt = std::next(it);
             if (isInPairsetL(lt,jt->p1,it->p1,strat)
             && (pNext(lt->p) == strat->tail)
             && (!pLmEqual(it->p,lt->p))
@@ -3279,12 +3279,12 @@ void chainCritNormal (poly p,int ecart,kStrategy strat)
               *L[l] will be canceled, we cannot cancel L[i] later on,
               *so we mark it with "tail"
               */
-              strat->Lqueue.erase(lt);
+              strat->L.erase(lt);
             }
             else
             {
               i_deleted = true;
-              it = strat->Lqueue.erase(it);
+              it = strat->L.erase(it);
             }
           }
           if (!i_deleted)
@@ -3323,9 +3323,9 @@ void chainCritOpt_1 (poly,int,kStrategy strat)
 void chainCritSig (poly p,int /*ecart*/,kStrategy strat)
 {
   kMergeBintoL(strat);
-  for (auto jt = strat->Lqueue.begin(); jt != strat->Lqueue.end(); )
+  for (auto jt = strat->L.begin(); jt != strat->L.end(); )
   {
-    if (std::next(jt) == strat->Lqueue.end())
+    if (std::next(jt) == strat->L.end())
     {
       /*now L[0] cannot be canceled any more and the tail can be removed*/
       if (jt->p2 == strat->tail) jt->p2 = p;
@@ -3333,14 +3333,14 @@ void chainCritSig (poly p,int /*ecart*/,kStrategy strat)
     }
     if (jt->p2 == p)
     {
-      for (auto it = jt + 1; it != strat->Lqueue.end(); )
+      for (auto it = jt + 1; it != strat->L.end(); )
       {
         bool i_deleted = false;
         if ((it->p2 == p) && pLmEqual(jt->lcm,it->lcm))
         {
           /*L[i] could be canceled but we search for a better one to cancel*/
           strat->c3++;
-          LQueue::iterator lt = std::next(it);
+          LSet::iterator lt = std::next(it);
           if (isInPairsetL(lt,jt->p1,it->p1,strat)
           && (pNext(lt->p) == strat->tail)
           && (!pLmEqual(it->p,lt->p))
@@ -3356,12 +3356,12 @@ void chainCritSig (poly p,int /*ecart*/,kStrategy strat)
              *L[l] will be canceled, we cannot cancel L[i] later on,
              *so we mark it with "tail"
              */
-            strat->Lqueue.erase(lt);
+            strat->L.erase(lt);
           }
           else
           {
             i_deleted = true;
-            it = strat->Lqueue.erase(it);
+            it = strat->L.erase(it);
           }
         }
         if (!i_deleted)
@@ -3393,7 +3393,7 @@ void chainCritPart (poly p,int ecart,kStrategy strat)
     {
       if (strat->pairtest[j])
       {
-        for (auto it = strat->Bqueue.begin(); it != strat->Bqueue.end(); )
+        for (auto it = strat->B.begin(); it != strat->B.end(); )
         {
           if (_p_LmDivisibleByPart(strat->S[j],currRing,
              it->lcm,currRing,
@@ -3407,7 +3407,7 @@ void chainCritPart (poly p,int ecart,kStrategy strat)
                p_wrp(it->lcm,currRing);
                PrintLn();
             }
-            it = strat->Bqueue.erase(it);
+            it = strat->B.erase(it);
             strat->c3++;
           }
           else
@@ -3427,7 +3427,7 @@ void chainCritPart (poly p,int ecart,kStrategy strat)
     *and lcm(s,r)#lcm(s,p) and lcm(s,r)#lcm(r,p)
     *and in case the sugar is o.k. then L[j] can be canceled
     */
-      for (auto jt = strat->Lqueue.begin(); jt != strat->Lqueue.end(); )
+      for (auto jt = strat->L.begin(); jt != strat->L.end(); )
       {
         if (sugarDivisibleBy(ecart,jt->ecart)
         && ((jt->p == strat->tail) || (rHasGlobalOrdering(currRing)))
@@ -3443,7 +3443,7 @@ void chainCritPart (poly p,int ecart,kStrategy strat)
                p_wrp(jt->lcm,currRing);
                PrintLn();
             }
-            jt = strat->Lqueue.erase(jt);
+            jt = strat->L.erase(jt);
             strat->c3++;
           }
           else
@@ -3457,10 +3457,10 @@ void chainCritPart (poly p,int ecart,kStrategy strat)
       *in B all elements with the same lcm except the "best"
       *(i.e. the last one in B with this property) will be canceled
       */
-      for (auto jt = strat->Bqueue.begin(); jt != strat->Bqueue.end(); )
+      for (auto jt = strat->B.begin(); jt != strat->B.end(); )
       {
         bool j_deleted = false;
-        for (auto it = jt + 1; it != strat->Bqueue.end(); )
+        for (auto it = jt + 1; it != strat->B.end(); )
         {
           if (pLmEqual(jt->lcm,it->lcm))
           {
@@ -3475,7 +3475,7 @@ void chainCritPart (poly p,int ecart,kStrategy strat)
                 p_wrp(it->lcm,currRing);
                 PrintLn();
               }
-              it = strat->Bqueue.erase(it);
+              it = strat->B.erase(it);
               ++jt;
             }
             else
@@ -3488,7 +3488,7 @@ void chainCritPart (poly p,int ecart,kStrategy strat)
                 p_wrp(jt->lcm,currRing);
                 PrintLn();
               }
-              jt = strat->Bqueue.erase(jt);
+              jt = strat->B.erase(jt);
               j_deleted = true;
               break;
             }
@@ -3506,7 +3506,7 @@ void chainCritPart (poly p,int ecart,kStrategy strat)
       *and lcm(s,r)#lcm(s,p) and lcm(s,r)#lcm(r,p)
       *and in case the sugar is o.k. then L[j] can be canceled
       */
-      for (auto jt = strat->Lqueue.begin(); jt != strat->Lqueue.end(); )
+      for (auto jt = strat->L.begin(); jt != strat->L.end(); )
       {
         if (pCompareChainPart(p,jt->p1,jt->p2,jt->lcm))
         {
@@ -3520,7 +3520,7 @@ void chainCritPart (poly p,int ecart,kStrategy strat)
               p_wrp(jt->lcm,currRing);
               PrintLn();
             }
-            jt = strat->Lqueue.erase(jt);
+            jt = strat->L.erase(jt);
             strat->c3++;
           }
           else
@@ -3534,9 +3534,9 @@ void chainCritPart (poly p,int ecart,kStrategy strat)
       *in B all elements with the same lcm except the "best"
       *(i.e. the last one in B with this property) will be canceled
       */
-      for (auto jt = strat->Bqueue.begin(); jt != strat->Bqueue.end(); ++jt)
+      for (auto jt = strat->B.begin(); jt != strat->B.end(); ++jt)
       {
-        for (auto it = jt + 1; it != strat->Bqueue.end(); )
+        for (auto it = jt + 1; it != strat->B.end(); )
         {
           if (pLmEqual(jt->lcm,it->lcm))
           {
@@ -3547,7 +3547,7 @@ void chainCritPart (poly p,int ecart,kStrategy strat)
               Print(" delete B[i]\n");
             }
             strat->c3++;
-            it = strat->Bqueue.erase(it);
+            it = strat->B.erase(it);
           }
           else
             ++it;
@@ -3561,7 +3561,7 @@ void chainCritPart (poly p,int ecart,kStrategy strat)
   }
   else
   {
-    for (auto jt = strat->Lqueue.begin(); jt != strat->Lqueue.end(); )
+    for (auto jt = strat->L.begin(); jt != strat->L.end(); )
     {
       if (pCompareChainPart(p,jt->p1,jt->p2,jt->lcm))
       {
@@ -3575,7 +3575,7 @@ void chainCritPart (poly p,int ecart,kStrategy strat)
             p_wrp(jt->lcm,currRing);
             PrintLn();
           }
-          jt = strat->Lqueue.erase(jt);
+          jt = strat->L.erase(jt);
           strat->c3++;
         }
         else
@@ -3598,9 +3598,9 @@ void chainCritPart (poly p,int ecart,kStrategy strat)
     *B[i].p with the same leading term
     */
     kMergeBintoL(strat);
-    for (auto jt = strat->Lqueue.begin(); jt != strat->Lqueue.end(); )
+    for (auto jt = strat->L.begin(); jt != strat->L.end(); )
     {
-      if (std::next(jt) == strat->Lqueue.end())
+      if (std::next(jt) == strat->L.end())
       {
         /*now L[0] cannot be canceled any more and the tail can be removed*/
         if (jt->p2 == strat->tail) jt->p2 = p;
@@ -3608,14 +3608,14 @@ void chainCritPart (poly p,int ecart,kStrategy strat)
       }
       if (jt->p2 == p)
       {
-        for (auto it = jt + 1; it != strat->Lqueue.end(); )
+        for (auto it = jt + 1; it != strat->L.end(); )
         {
           bool i_deleted = false;
           if ((it->p2 == p) && pLmEqual(jt->lcm,it->lcm))
           {
             /*L[i] could be canceled but we search for a better one to cancel*/
             strat->c3++;
-            LQueue::iterator lt = std::next(it);
+            LSet::iterator lt = std::next(it);
             if (isInPairsetL(lt,jt->p1,it->p1,strat)
             && (pNext(lt->p) == strat->tail)
             && (!pLmEqual(it->p,lt->p))
@@ -3641,7 +3641,7 @@ void chainCritPart (poly p,int ecart,kStrategy strat)
                 p_wrp(lt->lcm,currRing);
                 PrintLn();
               }
-              strat->Lqueue.erase(lt);
+              strat->L.erase(lt);
             }
             else
             {
@@ -3654,7 +3654,7 @@ void chainCritPart (poly p,int ecart,kStrategy strat)
                 PrintLn();
               }
               i_deleted = true;
-              it = strat->Lqueue.erase(it);
+              it = strat->L.erase(it);
             }
           }
           if (!i_deleted)
@@ -3695,7 +3695,7 @@ void initenterpairs (poly h,int k,int ecart,int isFromQ,kStrategy strat, int atR
           {
             new_pair=TRUE;
             strat->enterOnePair(j,h,ecart,isFromQ,strat, atR);
-          //Print("j:%d, Lqueue.size():%d\n",j,(int)strat->Lqueue.size());
+          //Print("j:%d, L.size():%d\n",j,(int)strat->L.size());
           }
         }
       }
@@ -3705,7 +3705,7 @@ void initenterpairs (poly h,int k,int ecart,int isFromQ,kStrategy strat, int atR
         for (j=0; j<=k; j++)
         {
           strat->enterOnePair(j,h,ecart,isFromQ,strat, atR);
-          //Print("j:%d, Lqueue.size():%d\n",j,(int)strat->Lqueue.size());
+          //Print("j:%d, L.size():%d\n",j,(int)strat->L.size());
         }
       }
     }
@@ -3760,7 +3760,7 @@ void initenterpairsSig (poly h,poly hSig,int hFrom,int k,int ecart,int isFromQ,k
           {
             new_pair=TRUE;
             enterOnePairSig(j,h,hSig,hFrom,ecart,isFromQ,strat, atR);
-          //Print("j:%d, Lqueue.size():%d\n",j,(int)strat->Lqueue.size());
+          //Print("j:%d, L.size():%d\n",j,(int)strat->L.size());
           }
         }
       }
@@ -3770,7 +3770,7 @@ void initenterpairsSig (poly h,poly hSig,int hFrom,int k,int ecart,int isFromQ,k
         for (j=0; j<=k; j++)
         {
           enterOnePairSig(j,h,hSig,hFrom,ecart,isFromQ,strat, atR);
-          //Print("j:%d, Lqueue.size():%d\n",j,(int)strat->Lqueue.size());
+          //Print("j:%d, L.size():%d\n",j,(int)strat->L.size());
         }
       }
     }
@@ -3818,7 +3818,7 @@ void initenterpairsSigRing (poly h,poly hSig,int hFrom,int k,int ecart,int isFro
           if (!strat->fromQ[j])
           {
             enterOnePairSigRing(j,h,hSig,hFrom,ecart,isFromQ,strat, atR);
-          //Print("j:%d, Lqueue.size():%d\n",j,(int)strat->Lqueue.size());
+          //Print("j:%d, L.size():%d\n",j,(int)strat->L.size());
           }
         }
       }
@@ -3827,7 +3827,7 @@ void initenterpairsSigRing (poly h,poly hSig,int hFrom,int k,int ecart,int isFro
         for (j=0; j<=k && !strat->sigdrop; j++)
         {
           enterOnePairSigRing(j,h,hSig,hFrom,ecart,isFromQ,strat, atR);
-          //Print("j:%d, Lqueue.size():%d\n",j,(int)strat->Lqueue.size());
+          //Print("j:%d, L.size():%d\n",j,(int)strat->L.size());
         }
       }
     }
@@ -3878,7 +3878,7 @@ void chainCritRing (poly p,int, kStrategy strat)
       {
         if (strat->pairtest[j])
         {
-          for (auto it = strat->Bqueue.begin(); it != strat->Bqueue.end(); )
+          for (auto it = strat->B.begin(); it != strat->B.end(); )
           {
             if (pDivisibleBy(strat->S[j],it->lcm) && n_DivBy(pGetCoeff(it->lcm), pGetCoeff(strat->S[j]),currRing->cf))
             {
@@ -3897,7 +3897,7 @@ void chainCritRing (poly p,int, kStrategy strat)
                 PrintLn();
               }
 #endif
-              it = strat->Bqueue.erase(it);
+              it = strat->B.erase(it);
               strat->c3++;
             }
             else
@@ -3910,7 +3910,7 @@ void chainCritRing (poly p,int, kStrategy strat)
     strat->pairtest=NULL;
   }
   assume(!(strat->Gebauer || strat->fromT));
-  for (auto jt = strat->Lqueue.begin(); jt != strat->Lqueue.end(); )
+  for (auto jt = strat->L.begin(); jt != strat->L.end(); )
   {
     if ((jt->lcm != NULL) && n_DivBy(pGetCoeff(jt->lcm), pGetCoeff(p), currRing->cf))
     {
@@ -3918,7 +3918,7 @@ void chainCritRing (poly p,int, kStrategy strat)
       {
         if ((pNext(jt->p) == strat->tail)||(rHasGlobalOrdering(currRing)))
         {
-          jt = strat->Lqueue.erase(jt);
+          jt = strat->L.erase(jt);
           strat->c3++;
 #ifdef KDEBUG
           if (TEST_OPT_DEBUG)
@@ -3953,9 +3953,9 @@ void chainCritRing (poly p,int, kStrategy strat)
   *B[i].p with the same leading term
   */
   kMergeBintoL(strat);
-  for (auto jt = strat->Lqueue.begin(); jt != strat->Lqueue.end(); )
+  for (auto jt = strat->L.begin(); jt != strat->L.end(); )
   {
-    if (std::next(jt) == strat->Lqueue.end())
+    if (std::next(jt) == strat->L.end())
     {
       /*now L[0] cannot be canceled any more and the tail can be removed*/
       if (jt->p2 == strat->tail) jt->p2 = p;
@@ -3963,7 +3963,7 @@ void chainCritRing (poly p,int, kStrategy strat)
     }
     if (jt->p2 == p)
     {
-      for (auto it = jt + 1; it != strat->Lqueue.end(); )
+      for (auto it = jt + 1; it != strat->L.end(); )
       {
         bool i_deleted = false;
         // Element is from B and has the same lcm as L[j]
@@ -3983,7 +3983,7 @@ void chainCritRing (poly p,int, kStrategy strat)
             PrintLn();
           }
 #endif
-          LQueue::iterator lt = std::next(it);
+          LSet::iterator lt = std::next(it);
           if (isInPairsetL(lt,jt->p1,it->p1,strat)
           && (pNext(lt->p) == strat->tail)
           && (!pLmEqual(it->p,lt->p))
@@ -3999,12 +3999,12 @@ void chainCritRing (poly p,int, kStrategy strat)
             *L[l] will be canceled, we cannot cancel L[i] later on,
             *so we mark it with "tail"
             */
-            strat->Lqueue.erase(lt);
+            strat->L.erase(lt);
           }
           else
           {
             i_deleted = true;
-            it = strat->Lqueue.erase(it);
+            it = strat->L.erase(it);
           }
         }
         if (!i_deleted)
@@ -4174,7 +4174,7 @@ void enterExtendedSpoly(poly h,kStrategy strat)
           PrintLn();
         }
 #endif
-        strat->Lqueue.push(Lp);
+        strat->L.push(Lp);
       }
     }
   }
@@ -4264,8 +4264,8 @@ void enterExtendedSpolySig(poly h,poly hSig,kStrategy strat)
       }
       #else
       Lp.sig = pOne();
-      if(!strat->Lqueue.empty())
-        p_SetComp(Lp.sig,pGetComp(strat->Lqueue.begin()->sig)+1,currRing);
+      if(!strat->L.empty())
+        p_SetComp(Lp.sig,pGetComp(strat->L.begin()->sig)+1,currRing);
       else
         p_SetComp(Lp.sig,pGetComp(hSig)+1,currRing);
       #endif
@@ -4286,7 +4286,7 @@ void enterExtendedSpolySig(poly h,poly hSig,kStrategy strat)
         }
 #endif
   //pWrite(h);pWrite(hSig);pWrite(Lp.p);pWrite(Lp.sig);printf("\n------------------\n");getchar();
-        strat->Lqueue.push(Lp);
+        strat->L.push(Lp);
       }
     }
   }
@@ -5902,8 +5902,8 @@ BOOLEAN arriRewCriterionPre(poly sig, unsigned long not_sevSig, poly lm, kStrate
   //Over Rings, there are still some changes to do: considering coeffs
   if(rField_is_Ring(currRing))
     return FALSE;
-  auto found = strat->Bqueue.end();
-  for (auto it = strat->Bqueue.begin(); it != strat->Bqueue.end(); ++it)
+  auto found = strat->B.end();
+  for (auto it = strat->B.begin(); it != strat->B.end(); ++it)
   {
     if (pLmEqual(it->sig,sig))
     {
@@ -5911,11 +5911,11 @@ BOOLEAN arriRewCriterionPre(poly sig, unsigned long not_sevSig, poly lm, kStrate
       break;
     }
   }
-  if (found != strat->Bqueue.end())
+  if (found != strat->B.end())
   {
     if (pLmCmp(lm,found->GetLmCurrRing()) == -1)
     {
-      strat->Bqueue.erase(found);
+      strat->B.erase(found);
     }
     else
     {
@@ -6714,7 +6714,7 @@ poly redtailBba_Ring (LObject* L, int end_pos, kStrategy strat )
 /*2
 *checks the change degree and write progress report
 */
-void message (int i,int* olddeg,LQueue::size_type* reduc,kStrategy strat, int red_result)
+void message (int i,int* olddeg,LSet::size_type* reduc,kStrategy strat, int red_result)
 {
   if (i != *olddeg)
   {
@@ -6723,13 +6723,13 @@ void message (int i,int* olddeg,LQueue::size_type* reduc,kStrategy strat, int re
   }
   if (TEST_OPT_OLDSTD)
   {
-    if (strat->Lqueue.size() != *reduc+1)
+    if (strat->L.size() != *reduc+1)
     {
-      if (strat->Lqueue.size() != *reduc)
-        Print("(%zu)",strat->Lqueue.size());
+      if (strat->L.size() != *reduc)
+        Print("(%zu)",strat->L.size());
       else
         PrintS("-");
-      *reduc = strat->Lqueue.size()-1;
+      *reduc = strat->L.size()-1;
     }
     else
       PrintS(".");
@@ -6741,12 +6741,12 @@ void message (int i,int* olddeg,LQueue::size_type* reduc,kStrategy strat, int re
       PrintS("-");
     else if (red_result < 0)
       PrintS(".");
-    if ((red_result > 0) || ((strat->Lqueue.size() % 100)==0))
+    if ((red_result > 0) || ((strat->L.size() % 100)==0))
     {
-      if (strat->Lqueue.size() != *reduc+1 && strat->Lqueue.size() > 1)
+      if (strat->L.size() != *reduc+1 && strat->L.size() > 1)
       {
-        Print("(%zu)",strat->Lqueue.size());
-        *reduc = strat->Lqueue.size()-1;
+        Print("(%zu)",strat->L.size());
+        *reduc = strat->L.size()-1;
       }
     }
   }
@@ -6759,7 +6759,7 @@ void messageStat (int hilbcount,kStrategy strat)
 {
   //PrintS("\nUsage/Allocation of temporary storage:\n");
   //Print("%d/%d polynomials in standard base\n",srmax,IDELEMS(Shdl));
-  //Print("%d/%d polynomials in set L (for lazy alg.)",strat->Lqueue.size(),strat->Lqueue.capacity());
+  //Print("%d/%d polynomials in set L (for lazy alg.)",strat->L.size(),strat->L.capacity());
   Print("product criterion:%d chain criterion:%d\n",strat->cp,strat->c3);
   if (hilbcount!=0) Print("hilbert series criterion:%d\n",hilbcount);
   #ifdef HAVE_SHIFTBBA
@@ -6772,7 +6772,7 @@ void messageStatSBA (int hilbcount,kStrategy strat)
 {
   //PrintS("\nUsage/Allocation of temporary storage:\n");
   //Print("%d/%d polynomials in standard base\n",srmax,IDELEMS(Shdl));
-  //Print("%d/%d polynomials in set L (for lazy alg.)",strat->Lqueue.size(),strat->Lqueue.capacity());
+  //Print("%d/%d polynomials in set L (for lazy alg.)",strat->L.size(),strat->L.capacity());
   Print("syz criterion:%d rew criterion:%d\n",strat->nrsyzcrit,strat->nrrewcrit);
   //Print("product criterion:%d chain criterion:%d\n",strat->cp,strat->c3);
   if (hilbcount!=0) Print("hilbert series criterion:%d\n",hilbcount);
@@ -6816,8 +6816,8 @@ void messageSets (kStrategy strat)
     strat->newt = FALSE;
   }
   PrintS("\nset L");
-  i=strat->Lqueue.size()-1;
-  for (auto& Lp: strat->Lqueue) {
+  i=strat->L.size()-1;
+  for (auto& Lp: strat->L) {
     Print("\n%d:",i);
     p_wrp(Lp.p1, currRing, strat->tailRing);
     PrintS("  ");
@@ -7014,20 +7014,20 @@ void initSL (ideal F, ideal Q,kStrategy strat)
           if(errorreported) return;
           strat->initEcart(&h);
           h.sev = pGetShortExpVector(h.p);
-          strat->Lqueue.push(h);
+          strat->L.push(h);
         }
       }
     }
   }
   /*- test, if a unit is in F -*/
 
-  if (! strat->Lqueue.empty()
-       && n_IsUnit(pGetCoeff(strat->Lqueue.top().p), currRing->cf)
-       && pIsConstant(strat->Lqueue.top().p))
+  if (! strat->L.empty()
+       && n_IsUnit(pGetCoeff(strat->L.top().p), currRing->cf)
+       && pIsConstant(strat->L.top().p))
   {
-    auto unit = strat->Lqueue.top();  // Make a copy, not a reference
-    while (! strat->Lqueue.empty()) strat->Lqueue.pop();
-    strat->Lqueue.push(unit);
+    auto unit = strat->L.top();  // Make a copy, not a reference
+    while (! strat->L.empty()) strat->L.pop();
+    strat->L.push(unit);
   }
 }
 
@@ -7137,7 +7137,7 @@ void initSLSba (ideal F, ideal Q,kStrategy strat)
           }
           strat->initEcart(&h);
           h.sev = pGetShortExpVector(h.p);
-          strat->Lqueue.push(h);
+          strat->L.push(h);
         }
       }
       /*
@@ -7171,13 +7171,13 @@ void initSLSba (ideal F, ideal Q,kStrategy strat)
   }
   /*- test, if a unit is in F -*/
 
-  if (! strat->Lqueue.empty()
-       && n_IsUnit(pGetCoeff(strat->Lqueue.top().p), currRing->cf)
-       && pIsConstant(strat->Lqueue.top().p))
+  if (! strat->L.empty()
+       && n_IsUnit(pGetCoeff(strat->L.top().p), currRing->cf)
+       && pIsConstant(strat->L.top().p))
   {
-    auto unit = strat->Lqueue.top();  // Make a copy, not a reference
-    while (! strat->Lqueue.empty()) strat->Lqueue.pop();
-    strat->Lqueue.push(unit);
+    auto unit = strat->L.top();  // Make a copy, not a reference
+    while (! strat->L.empty()) strat->L.pop();
+    strat->L.push(unit);
   }
 }
 
@@ -7302,8 +7302,8 @@ void initSyzRules (kStrategy strat)
       p_SetCompP (Q.sig, comp, currRing);
       poly q          = p_One(currRing);
       if(rField_is_Ring(currRing))
-        p_SetCoeff(q,nCopy(p_GetCoeff(strat->Lqueue.top().p,currRing)),currRing);
-      p_ExpVectorCopy(q,strat->Lqueue.top().p,currRing);
+        p_SetCoeff(q,nCopy(p_GetCoeff(strat->L.top().p,currRing)),currRing);
+      p_ExpVectorCopy(q,strat->L.top().p,currRing);
       q               = p_Neg (q, currRing);
       p_SetCompP (q, __p_GetComp(strat->sig[k], currRing), currRing);
       Q.sig = p_Add_q (Q.sig, q, currRing);
@@ -8353,7 +8353,7 @@ void replaceInLAndSAndT(LObject &p, int tj, kStrategy strat)
   assume(p.FDeg == p.pFDeg());
 
   /* remove useless pairs from L set */
-  strat->Lqueue.remove_if
+  strat->L.remove_if
     ([&](LObject lobject) {
        if (lobject.p1 != NULL && pLtCmp(tp, lobject.p1) == 0) return true;
        if (lobject.p2 != NULL && pLtCmp(tp, lobject.p2) == 0) return true;
@@ -8623,8 +8623,8 @@ void enterSyz(LObject &p, kStrategy strat, int atT)
   Print("element in strat->syz: %d--%d  ",atT+1,strat->syzmax);
   pWrite(strat->syz[atT]);
 #endif
-  // recheck pairs in strat->Lqueue with new rule and delete correspondingly
-  strat->Lqueue.remove_if
+  // recheck pairs in strat->L with new rule and delete correspondingly
+  strat->L.remove_if
     ([&](LObject lobject) {
        //printf("\nCheck if syz is div by L\n");pWrite(strat->syz[atT]);pWrite(lobject.sig);
        //printf("\npLmShDivBy(syz,L) = %i\nn_DivBy(L,syz) = %i\n pLtCmp(L,syz) = %i",p_LmShortDivisibleBy( strat->syz[atT], strat->sevSyz[atT],lobject.sig, ~lobject.sevSig, currRing), n_DivBy(pGetCoeff(lobject.sig),pGetCoeff(strat->syz[atT]),currRing), pLtCmp(lobject.sig,strat->syz[atT])==1);
@@ -10227,7 +10227,7 @@ BOOLEAN kStratChangeTailRing(kStrategy strat, LObject *L, TObject* T, unsigned l
     strat->T[i].ShallowCopyDelete(new_tailRing, new_tailBin,
                                   p_shallow_copy_delete);
   }
-  for (auto& Lp: strat->Lqueue) {
+  for (auto& Lp: strat->L) {
     assume(Lp.p != NULL);
     if (pNext(Lp.p) != strat->tail)
       Lp.ShallowCopyDelete(new_tailRing, p_shallow_copy_delete);
@@ -10287,7 +10287,7 @@ void kStratInitChangeTailRing(kStrategy strat)
 
   assume(strat->tailRing == currRing);
 
-  for (auto& Lp: strat->Lqueue) {
+  for (auto& Lp: strat->L) {
     l = p_GetMaxExpL(Lp.p, currRing, l);
   }
   for (i=0; i<=strat->tl; i++)
@@ -10530,8 +10530,8 @@ ring sbaRing (kStrategy strat, const ring r, BOOLEAN /*complete*/, int /*sgn*/)
 
 skStrategy::skStrategy()
 {
-  Lqueue.key_comp().parent = this;
-  Bqueue.key_comp().parent = this;
+  L.key_comp().parent = this;
+  B.key_comp().parent = this;
   strat_nr++;
   nr=strat_nr;
   tailRing = currRing;
@@ -11018,7 +11018,7 @@ static BOOLEAN enterOneStrongPolyShift (poly q, poly p, int /*ecart*/, int /*isF
   assume(pIsInV(h.p));
   assume(pIsInV(h.p1));
 
-  strat->Lqueue.push(h);
+  strat->L.push(h);
   return TRUE;
 }
 #endif
@@ -11090,7 +11090,7 @@ static void enterOnePairRingShift (poly q, poly p, int /*ecart*/, int isFromQ, k
   *if the leading term of r divides lcm(s,p) then (s,p) will not enter B
   */
 
-  for(auto jt = strat->Bqueue.begin(); jt != strat->Bqueue.end(); )
+  for(auto jt = strat->B.begin(); jt != strat->B.end(); )
   {
     bool j_deleted = false;
     compare=pDivCompRing(jt->lcm,h.lcm);
@@ -11110,7 +11110,7 @@ static void enterOnePairRingShift (poly q, poly p, int /*ecart*/, int isFromQ, k
       }
       if(compareCoeff == pDivComp_GREATER)
       {
-        jt = strat->Bqueue.erase(jt);
+        jt = strat->B.erase(jt);
         j_deleted = true;
         strat->c3++;
       }
@@ -11139,7 +11139,7 @@ static void enterOnePairRingShift (poly q, poly p, int /*ecart*/, int isFromQ, k
       }
       if(compare == pDivComp_GREATER)
       {
-        jt = strat->Bqueue.erase(jt);
+        jt = strat->B.erase(jt);
         j_deleted = true;
         strat->c3++;
       }
@@ -11264,7 +11264,7 @@ static void enterOnePairRingShift (poly q, poly p, int /*ecart*/, int isFromQ, k
   assume(h.lcm != NULL);
   assume(pIsInV(h.lcm));
 
-  strat->Bqueue.push(h);
+  strat->B.push(h);
   kTest_TS(strat);
 }
 #endif
@@ -11477,7 +11477,7 @@ BOOLEAN enterOnePairShift (poly q, poly p, int ecart, int isFromQ, kStrategy str
     *if the leading term of r divides lcm(s,p) then (s,p) will not enter B
     */
     {
-      for (auto jt = strat->Bqueue.begin(); jt != strat->Bqueue.end(); )
+      for (auto jt = strat->B.begin(); jt != strat->B.end(); )
       {
         compare=pLPDivComp(jt->lcm,Lp.lcm);
         if ((compare==1)
@@ -11507,7 +11507,7 @@ BOOLEAN enterOnePairShift (poly q, poly p, int ecart, int isFromQ, kStrategy str
             Print("--- chain crit using pair to remove B[j].lcm=%s\n", pString(jt->lcm));
           }
 #endif
-          jt = strat->Bqueue.erase(jt);
+          jt = strat->B.erase(jt);
           strat->c3++;
         }
         else
@@ -11558,7 +11558,7 @@ BOOLEAN enterOnePairShift (poly q, poly p, int ecart, int isFromQ, kStrategy str
       *if the leading term of s divides lcm(r,p) then (r,p) will be canceled
       *if the leading term of r divides lcm(s,p) then (s,p) will not enter B
       */
-      for(auto jt = strat->Bqueue.begin(); jt != strat->Bqueue.end(); )
+      for(auto jt = strat->B.begin(); jt != strat->B.end(); )
       {
         compare=pLPDivComp(jt->lcm,Lp.lcm);
         if (compare==1)
@@ -11586,7 +11586,7 @@ BOOLEAN enterOnePairShift (poly q, poly p, int ecart, int isFromQ, kStrategy str
             Print("--- chain crit using pair to remove B[j].lcm=%s\n", pString(jt->lcm));
           }
 #endif
-          jt = strat->Bqueue.erase(jt);
+          jt = strat->B.erase(jt);
           strat->c3++;
         }
         else
@@ -11707,7 +11707,7 @@ BOOLEAN enterOnePairShift (poly q, poly p, int ecart, int isFromQ, kStrategy str
         nDelete(&(Lp.p->coef));
     }
 
-    strat->Bqueue.push(Lp);
+    strat->B.push(Lp);
 #ifdef CRITERION_DEBUG
     if (TEST_OPT_DEBUG) PrintS("+++ Entered pair\n");
 #endif

@@ -98,8 +98,8 @@ static BOOLEAN abort_if_monomial_sp(kStrategy strat)
     poly p=strat->P.p;
     if (pNext(p)==NULL)
     {
-      while (!strat->Lqueue.empty())
-        strat->Lqueue.pop();
+      while (!strat->L.empty())
+        strat->L.pop();
       return FALSE;
     }
   }
@@ -108,8 +108,8 @@ static BOOLEAN abort_if_monomial_sp(kStrategy strat)
     poly p=strat->P.t_p;
     if (pNext(p)==NULL)
     {
-      while (!strat->Lqueue.empty())
-        strat->Lqueue.pop();
+      while (!strat->L.empty())
+        strat->L.pop();
       return FALSE;
     }
   }
