@@ -5509,11 +5509,10 @@ int posInSyz (const kStrategy strat, poly sig)
   }
 }
 
-/* Ordering procedure: all elements equal
+/* Ordering procedure:
+ *    - all elements equal
  *
- * is only used in F5C, must ensure that the interreduction process does add new
- * critical pairs to strat->L only behind all other critical pairs which are
- * still in strat->L!
+ * Only used in F5C
  */
 
 int compareLF5C (const LObject &, const LObject &, const kStrategy)
@@ -5541,20 +5540,6 @@ int compareL11 (const LObject &lhs, const LObject &rhs, const kStrategy)
  */
 
 int compareL11Ring (const LObject &lhs, const LObject &rhs, const kStrategy)
-{
-  auto dl = lhs.GetpFDeg();
-  auto dr = rhs.GetpFDeg();
-  if (dl < dr) return -1;
-  if (dl > dr) return 1;
-  return (pLtCmp(lhs.p,rhs.p) * currRing->OrdSgn);
-}
-
-/* Ordering procedure:
- *    - total degree (reversed)
- *    - leading monomial (ring version)
- */
-
-int compareLF5CRing (const LObject &lhs, const LObject &rhs, const kStrategy)
 {
   auto dl = lhs.GetpFDeg();
   auto dr = rhs.GetpFDeg();

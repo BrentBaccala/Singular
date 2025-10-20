@@ -4270,7 +4270,7 @@ void f5c (kStrategy strat, int& olddeg, int& minimcnt, int& hilbeledeg,
   //strat->tl = -1;
   localL.key_comp().parent = NULL;
   if(rField_is_Ring(currRing)) {
-    localL.key_comp().compareL = compareLF5CRing;
+    localL.key_comp().compareL = compareL11Ring;
   } else {
     localL.key_comp().compareL = compareLF5C;
   }
