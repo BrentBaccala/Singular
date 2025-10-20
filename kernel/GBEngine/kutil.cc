@@ -8818,7 +8818,7 @@ void initSbaCrit(kStrategy strat)
   #endif
 }
 
-BOOLEAN kCompareInLDependsOnLength(int (*compare_in_l)
+BOOLEAN kCompareLDependsOnLength(int (*compare_in_l)
                                (const LObject &lhs, const LObject &rhs, const kStrategy strat))
 {
   if (compare_in_l == compareL110
@@ -8836,7 +8836,7 @@ void initBuchMoraPos (kStrategy strat)
   {
     if (strat->honey)
     {
-      strat->compareInL = compareL15;
+      strat->compareL = compareL15;
       // ok -- here is the deal: from my experiments for Singular-2-0
       // I conclude that that posInT_EcartpLength is the best of
       // posInT15, posInT_EcartFDegpLength, posInT_FDegLength, posInT_pLength
@@ -8848,23 +8848,23 @@ void initBuchMoraPos (kStrategy strat)
     }
     else if (currRing->pLexOrder && !TEST_OPT_INTSTRATEGY)
     {
-      strat->compareInL = compareL11;
+      strat->compareL = compareL11;
       strat->posInT = posInT11;
     }
     else if (TEST_OPT_INTSTRATEGY)
     {
-      strat->compareInL = compareL11;
+      strat->compareL = compareL11;
       strat->posInT = posInT11;
     }
     else
     {
-      strat->compareInL = compareL0;
+      strat->compareL = compareL0;
       strat->posInT = posInT0;
     }
-    //if (strat->minim>0) strat->compareInL = compareInLSpecial;
+    //if (strat->minim>0) strat->compareL = compareLSpecial;
     if (strat->homog)
     {
-      strat->compareInL = compareL110;
+      strat->compareL = compareL110;
       strat->posInT = posInT110;
     }
   }
@@ -8872,7 +8872,7 @@ void initBuchMoraPos (kStrategy strat)
   {
     if (strat->homog)
     {
-      strat->compareInL = compareL11;
+      strat->compareL = compareL11;
       strat->posInT = posInT11;
     }
     else
@@ -8880,36 +8880,36 @@ void initBuchMoraPos (kStrategy strat)
       if ((currRing->order[0]==ringorder_c)
       ||(currRing->order[0]==ringorder_C))
       {
-        strat->compareInL = compareL17_c;
+        strat->compareL = compareL17_c;
         strat->posInT = posInT17_c;
       }
       else
       {
-        strat->compareInL = compareL17;
+        strat->compareL = compareL17;
         strat->posInT = posInT17;
       }
     }
   }
   if (strat->minim>0)
   {
-    strat->compareInL = compareLSpecial;
+    strat->compareL = compareLSpecial;
   }
   // for further tests only
   if ((BTEST1(11)) || (BTEST1(12)))
   {
-    strat->compareInL = compareL11;
+    strat->compareL = compareL11;
   }
   else if ((BTEST1(13)) || (BTEST1(14)))
   {
-    strat->compareInL = compareL13;
+    strat->compareL = compareL13;
   }
   else if ((BTEST1(15)) || (BTEST1(16)))
   {
-    strat->compareInL = compareL15;
+    strat->compareL = compareL15;
   }
   else if ((BTEST1(17)) || (BTEST1(18)))
   {
-    strat->compareInL = compareL17;
+    strat->compareL = compareL17;
   }
   if (BTEST1(11))
     strat->posInT = posInT11;
@@ -8923,7 +8923,7 @@ void initBuchMoraPos (kStrategy strat)
     strat->posInT = posInT19;
   else if (BTEST1(12) || BTEST1(14) || BTEST1(16) || BTEST1(18))
     strat->posInT = posInT1;
-  strat->compareInLDependsOnLength = kCompareInLDependsOnLength(strat->compareInL);
+  strat->compareLDependsOnLength = kCompareLDependsOnLength(strat->compareL);
 }
 
 void initBuchMoraPosRing (kStrategy strat)
@@ -8932,7 +8932,7 @@ void initBuchMoraPosRing (kStrategy strat)
   {
     if (strat->honey)
     {
-      strat->compareInL = compareL15Ring;
+      strat->compareL = compareL15Ring;
       // ok -- here is the deal: from my experiments for Singular-2-0
       // I conclude that that posInT_EcartpLength is the best of
       // posInT15, posInT_EcartFDegpLength, posInT_FDegLength, posInT_pLength
@@ -8944,23 +8944,23 @@ void initBuchMoraPosRing (kStrategy strat)
     }
     else if (currRing->pLexOrder && !TEST_OPT_INTSTRATEGY)
     {
-      strat->compareInL = compareL11Ring;
+      strat->compareL = compareL11Ring;
       strat->posInT = posInT11;
     }
     else if (TEST_OPT_INTSTRATEGY)
     {
-      strat->compareInL = compareL11Ring;
+      strat->compareL = compareL11Ring;
       strat->posInT = posInT11;
     }
     else
     {
-      strat->compareInL = compareL0Ring;
+      strat->compareL = compareL0Ring;
       strat->posInT = posInT0;
     }
-    //if (strat->minim>0) strat->compareInL =compareInLSpecial;
+    //if (strat->minim>0) strat->compareL =compareLSpecial;
     if (strat->homog)
     {
-      strat->compareInL = compareL110Ring;
+      strat->compareL = compareL110Ring;
       strat->posInT = posInT110Ring;
     }
   }
@@ -8969,7 +8969,7 @@ void initBuchMoraPosRing (kStrategy strat)
     if (strat->homog)
     {
       //printf("\nHere 3\n");
-      strat->compareInL = compareL11Ring;
+      strat->compareL = compareL11Ring;
       strat->posInT = posInT11Ring;
     }
     else
@@ -8977,36 +8977,36 @@ void initBuchMoraPosRing (kStrategy strat)
       if ((currRing->order[0]==ringorder_c)
       ||(currRing->order[0]==ringorder_C))
       {
-        strat->compareInL = compareL17_cRing;
+        strat->compareL = compareL17_cRing;
         strat->posInT = posInT17_cRing;
       }
       else
       {
-        strat->compareInL = compareL11Ringls;
+        strat->compareL = compareL11Ringls;
         strat->posInT = posInT17Ring;
       }
     }
   }
   if (strat->minim>0)
   {
-    strat->compareInL = compareLSpecial;
+    strat->compareL = compareLSpecial;
   }
   // for further tests only
   if ((BTEST1(11)) || (BTEST1(12)))
   {
-    strat->compareInL = compareL11Ring;
+    strat->compareL = compareL11Ring;
   }
   else if ((BTEST1(13)) || (BTEST1(14)))
   {
-    strat->compareInL = compareL13;
+    strat->compareL = compareL13;
   }
   else if ((BTEST1(15)) || (BTEST1(16)))
   {
-    strat->compareInL = compareL15Ring;
+    strat->compareL = compareL15Ring;
   }
   else if ((BTEST1(17)) || (BTEST1(18)))
   {
-    strat->compareInL = compareL17Ring;
+    strat->compareL = compareL17Ring;
   }
   if (BTEST1(11))
     strat->posInT = posInT11Ring;
@@ -9020,7 +9020,7 @@ void initBuchMoraPosRing (kStrategy strat)
     strat->posInT = posInT19;
   else if (BTEST1(12) || BTEST1(14) || BTEST1(16) || BTEST1(18))
     strat->posInT = posInT1;
-  strat->compareInLDependsOnLength = kCompareInLDependsOnLength(strat->compareInL);
+  strat->compareLDependsOnLength = kCompareLDependsOnLength(strat->compareL);
 }
 
 void initBuchMora (ideal F,ideal Q,kStrategy strat)
@@ -9193,13 +9193,13 @@ void initSbaPos (kStrategy strat)
   {
     strat->posInT = posInT11;
   }
-  strat->compareInLDependsOnLength = FALSE;
-  strat->compareInL = compareLSig;
+  strat->compareLDependsOnLength = FALSE;
+  strat->compareL = compareLSig;
   /*
   if (rField_is_Ring(currRing))
   {
     strat->posInLSba  = posInLSigRing;
-    strat->compareInL = compareL11Ring;
+    strat->compareL = compareL11Ring;
   }*/
   //strat->posInT     = posInTSig;
 }
@@ -10766,24 +10766,24 @@ void kDebugPrint(kStrategy strat)
 #endif
     else if (strat->posInT==posInT_EcartpLength) printf("posInT_EcartpLength\n");
     else  printf("%p\n",(void*)strat->posInT);
-  printf("compareInL: ");
-    if (strat->compareInL==compareL0) printf("compareL0\n");
-    else if (strat->compareInL==compareL10) printf("compareL10\n");
-    else if (strat->compareInL==compareL11) printf("compareL11\n");
-    else if (strat->compareInL==compareL110) printf("compareL110\n");
-    else if (strat->compareInL==compareL13) printf("compareL13\n");
-    else if (strat->compareInL==compareL15) printf("compareL15\n");
-    else if (strat->compareInL==compareL17) printf("compareL17\n");
-    else if (strat->compareInL==compareL17_c) printf("compareL17_c\n");
-    else if (strat->compareInL==compareL0) printf("compareL0Ring\n");
-    else if (strat->compareInL==compareL11Ring) printf("compareL11Ring\n");
-    else if (strat->compareInL==compareL11Ringls) printf("compareL11Ringls\n");
-    else if (strat->compareInL==compareL110Ring) printf("compareL110Ring\n");
-    else if (strat->compareInL==compareL15Ring) printf("compareL15Ring\n");
-    else if (strat->compareInL==compareL17Ring) printf("compareL17Ring\n");
-    else if (strat->compareInL==compareL17_cRing) printf("compareL17_cRing\n");
-    else if (strat->compareInL==compareLSpecial) printf("compareLSpecial\n");
-    else  printf("%p\n",(void*)strat->compareInL);
+  printf("compareL: ");
+    if (strat->compareL==compareL0) printf("compareL0\n");
+    else if (strat->compareL==compareL10) printf("compareL10\n");
+    else if (strat->compareL==compareL11) printf("compareL11\n");
+    else if (strat->compareL==compareL110) printf("compareL110\n");
+    else if (strat->compareL==compareL13) printf("compareL13\n");
+    else if (strat->compareL==compareL15) printf("compareL15\n");
+    else if (strat->compareL==compareL17) printf("compareL17\n");
+    else if (strat->compareL==compareL17_c) printf("compareL17_c\n");
+    else if (strat->compareL==compareL0) printf("compareL0Ring\n");
+    else if (strat->compareL==compareL11Ring) printf("compareL11Ring\n");
+    else if (strat->compareL==compareL11Ringls) printf("compareL11Ringls\n");
+    else if (strat->compareL==compareL110Ring) printf("compareL110Ring\n");
+    else if (strat->compareL==compareL15Ring) printf("compareL15Ring\n");
+    else if (strat->compareL==compareL17Ring) printf("compareL17Ring\n");
+    else if (strat->compareL==compareL17_cRing) printf("compareL17_cRing\n");
+    else if (strat->compareL==compareLSpecial) printf("compareLSpecial\n");
+    else  printf("%p\n",(void*)strat->compareL);
   printf("enterS: ");
     if (strat->enterS==enterSBba) printf("enterSBba\n");
     else if (strat->enterS==enterSMora) printf("enterSMora\n");
@@ -10805,8 +10805,8 @@ void kDebugPrint(kStrategy strat)
     if (strat->chainCrit==chainCritNormal) printf("chainCritNormal\n");
     else if (strat->chainCrit==chainCritOpt_1) printf("chainCritOpt_1\n");
     else  printf("%p\n",(void*)strat->chainCrit);
-  printf("compareInLDependsOnLength=%d\n",
-         strat->compareInLDependsOnLength);
+  printf("compareLDependsOnLength=%d\n",
+         strat->compareLDependsOnLength);
   printf("%s\n",showOption());
   printf("LDeg: ");
     if (currRing->pLDeg==pLDeg0) printf("pLDeg0");

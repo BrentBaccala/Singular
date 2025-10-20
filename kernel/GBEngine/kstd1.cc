@@ -94,7 +94,7 @@ VAR BITSET validOpts=Sy_bit(0)
                 |Sy_bit(30)
                 |Sy_bit(31);
 
-//static BOOLEAN compareInLOldFlag;
+//static BOOLEAN compareLOldFlag;
            /*FALSE, if posInL == posInL10*/
 // returns TRUE if mora should use buckets, false otherwise
 static BOOLEAN kMoraUseBucket(kStrategy strat);
@@ -237,7 +237,7 @@ int redEcart (LObject* h,kStrategy strat)
       if (!TEST_OPT_REDTHROUGH && ! strat->Lqueue.empty())
       {
         h->SetLmCurrRing();
-        if (strat->honey && strat->compareInLDependsOnLength)
+        if (strat->honey && strat->compareLDependsOnLength)
           h->SetLength(strat->length_pLength);
         assume(h->FDeg == h->pFDeg());
         if (! strat->Lqueue.would_be_top(*h))
@@ -344,7 +344,7 @@ int redEcart (LObject* h,kStrategy strat)
         && ((d >= reddeg) || (pass > strat->LazyPass)))
     {
       h->SetLmCurrRing();
-      if (strat->honey && strat->compareInLDependsOnLength)
+      if (strat->honey && strat->compareLDependsOnLength)
         h->SetLength(strat->length_pLength);
       assume(h->FDeg == h->pFDeg());
       if (! strat->Lqueue.would_be_top(*h))
@@ -352,7 +352,7 @@ int redEcart (LObject* h,kStrategy strat)
         int dummy=strat->sl;
         if (kFindDivisibleByInS(strat, &dummy, h) < 0)
         {
-          if (strat->honey && !strat->compareInLDependsOnLength)
+          if (strat->honey && !strat->compareLDependsOnLength)
             h->SetLength(strat->length_pLength);
           return 1;
         }
@@ -466,7 +466,7 @@ int redRiloc (LObject* h,kStrategy strat)
       if (!TEST_OPT_REDTHROUGH && ! strat->Lqueue.empty())
       {
         h->SetLmCurrRing();
-        if (strat->honey && strat->compareInLDependsOnLength)
+        if (strat->honey && strat->compareLDependsOnLength)
           h->SetLength(strat->length_pLength);
         assume(h->FDeg == h->pFDeg());
         if (! strat->Lqueue.would_be_top(*h) && pLmCmp(h->p, strat->Lqueue.top().p) != 0 && !nEqual(h->p->coef, strat->Lqueue.top().p->coef))
@@ -522,7 +522,7 @@ int redRiloc (LObject* h,kStrategy strat)
         && ((d >= reddeg) || (pass > strat->LazyPass)))
     {
       h->SetLmCurrRing();
-      if (strat->honey && strat->compareInLDependsOnLength)
+      if (strat->honey && strat->compareLDependsOnLength)
         h->SetLength(strat->length_pLength);
       assume(h->FDeg == h->pFDeg());
       if (! strat->Lqueue.would_be_top(*h))
@@ -530,7 +530,7 @@ int redRiloc (LObject* h,kStrategy strat)
         int dummy=strat->sl;
         if (kFindDivisibleByInS(strat, &dummy, h) < 0)
         {
-          if (strat->honey && !strat->compareInLDependsOnLength)
+          if (strat->honey && !strat->compareLDependsOnLength)
             h->SetLength(strat->length_pLength);
           return 1;
         }
@@ -687,7 +687,7 @@ int redRiloc_Z (LObject* h,kStrategy strat)
             if (!TEST_OPT_REDTHROUGH && ! strat->Lqueue.empty())
             {
                 h->SetLmCurrRing();
-                if (strat->honey && strat->compareInLDependsOnLength)
+                if (strat->honey && strat->compareLDependsOnLength)
                     h->SetLength(strat->length_pLength);
                 assume(h->FDeg == h->pFDeg());
                 if (! strat->Lqueue.would_be_top(*h) && pLmCmp(h->p, strat->Lqueue.top().p) != 0 && !nEqual(h->p->coef, strat->Lqueue.top().p->coef))
@@ -743,7 +743,7 @@ int redRiloc_Z (LObject* h,kStrategy strat)
                 && ((d >= reddeg) || (pass > strat->LazyPass)))
         {
             h->SetLmCurrRing();
-            if (strat->honey && strat->compareInLDependsOnLength)
+            if (strat->honey && strat->compareLDependsOnLength)
                 h->SetLength(strat->length_pLength);
             assume(h->FDeg == h->pFDeg());
             if (! strat->Lqueue.would_be_top(*h))
@@ -751,7 +751,7 @@ int redRiloc_Z (LObject* h,kStrategy strat)
                 int dummy=strat->sl;
                 if (kFindDivisibleByInS(strat, &dummy, h) < 0)
                 {
-                    if (strat->honey && !strat->compareInLDependsOnLength)
+                    if (strat->honey && !strat->compareLDependsOnLength)
                         h->SetLength(strat->length_pLength);
                     return 1;
                 }
@@ -919,7 +919,7 @@ int redFirst (LObject* h,kStrategy strat)
           && ((d >= reddeg) || (pass > strat->LazyPass)))
       {
         h->SetLmCurrRing();
-        if (strat->compareInLDependsOnLength)
+        if (strat->compareLDependsOnLength)
           h->SetLength(strat->length_pLength);
         if (! strat->Lqueue.would_be_top(*h))
         {
@@ -1341,13 +1341,13 @@ int compareL10 (const LObject &lhs, const LObject &rhs, const kStrategy strat)
   if (hasppl && hasppr) {
     if (lenl < lenr) return -1;
     if (lenl > lenr) return 1;
-    return strat->compareInLOld(lhs, rhs, strat);
+    return strat->compareLOld(lhs, rhs, strat);
   } else if (hasppl) {
     return -1;
   } else if (hasppr) {
     return 1;
   } else {
-    return strat->compareInLOld(lhs, rhs, strat);
+    return strat->compareLOld(lhs, rhs, strat);
   }
 }
 
@@ -1551,7 +1551,7 @@ static void firstUpdate(kStrategy strat)
     }
     if (TEST_OPT_FASTHC)
     {
-      strat->compareInL = strat->compareInLOld;
+      strat->compareL = strat->compareLOld;
       strat->lastAxis = 0;
     }
     if (TEST_OPT_FINDET)
@@ -1613,17 +1613,17 @@ void enterSMora (LObject &p,int atS,kStrategy strat, int atR)
   else if ((strat->kNoether==NULL)
   && (TEST_OPT_FASTHC))
   {
-    if (strat->compareInLOldFlag)
+    if (strat->compareLOldFlag)
     {
       missingAxis(&strat->lastAxis,strat);
       if (strat->lastAxis)
       {
         updateL(FALSE,strat);
         // Change sort ordering and reorder L
-        strat->compareInLOldFlag = FALSE;
-        strat->compareInLOld = strat->compareInL;
-        strat->compareInL = compareL10;
-        strat->compareInLDependsOnLength = TRUE;
+        strat->compareLOldFlag = FALSE;
+        strat->compareLOld = strat->compareL;
+        strat->compareL = compareL10;
+        strat->compareLDependsOnLength = TRUE;
         strat->Lqueue.reorder();
       }
     }
@@ -1784,7 +1784,7 @@ void initMora(ideal F,kStrategy strat)
   for (j=(currRing->N); j>0; j--) strat->NotUsedAxis[j] = TRUE;
   strat->enterS = enterSMora;
   strat->initEcartPair = initEcartPairMora; /*- ecart approximation -*/
-  strat->compareInLOldFlag = TRUE;
+  strat->compareLOldFlag = TRUE;
   strat->initEcart = initEcartNormal;
   if (strat->homog)
     strat->red = redFirst;  /*take the first possible in T*/
@@ -1869,13 +1869,13 @@ ideal mora (ideal F, ideal Q,intvec *w,bigintmat *hilb,kStrategy strat)
   if (TEST_OPT_FASTHC) missingAxis(&strat->lastAxis,strat);
   /*updateS in initBuchMora has Hecketest
   * and could have put strat->kHEdgdeFound FALSE*/
-  if (TEST_OPT_FASTHC && (strat->lastAxis) && strat->compareInLOldFlag)
+  if (TEST_OPT_FASTHC && (strat->lastAxis) && strat->compareLOldFlag)
   {
     updateL(FALSE,strat);
     // Change sort ordering and reorder L
-    strat->compareInLOldFlag = FALSE;
-    strat->compareInLOld = strat->compareInL;
-    strat->compareInL = compareL10;
+    strat->compareLOldFlag = FALSE;
+    strat->compareLOld = strat->compareL;
+    strat->compareL = compareL10;
     strat->Lqueue.reorder();
   }
   kTest_TS(strat);
@@ -3552,7 +3552,7 @@ ideal kInterRedBba (ideal F, ideal Q, int &need_retry)
     initBuchMoraPos(strat);
   initBba(strat);
   /*set enterS, spSpolyShort, reduce, red, initEcart, initEcartPair*/
-  strat->compareInL=compareL0; /* ord according pComp */
+  strat->compareL=compareL0; /* ord according pComp */
 
   /*Shdl=*/initBuchMora(F, Q, strat);
   reduc = olddeg = 0;

@@ -291,7 +291,7 @@ EXTERN_VAR int HCord;
 class CompareLObject {
 public:
   skStrategy * parent;
-  int (*compareInL) (const LObject &lhs, const LObject &rhs, const kStrategy strat);
+  int (*compareL) (const LObject &lhs, const LObject &rhs, const kStrategy strat);
   bool operator() (const LObject &lhs, const LObject &rhs) const;
 };
 
@@ -354,8 +354,8 @@ public:
   int (*red2)(LObject * L,kStrategy strat) = NULL;
   void (*initEcart)(TObject * L) = NULL;
   int (*posInT)(const TSet T,const int tl,LObject &h) = NULL;
-  int (*compareInL) (const LObject &lhs, const LObject &rhs, const kStrategy strat) = NULL;
-  int (*compareInLOld) (const LObject &lhs, const LObject &rhs, const kStrategy strat) = NULL;
+  int (*compareL) (const LObject &lhs, const LObject &rhs, const kStrategy strat) = NULL;
+  int (*compareLOld) (const LObject &lhs, const LObject &rhs, const kStrategy strat) = NULL;
   void (*enterS)(LObject &h, int pos,kStrategy strat, int atR/* =-1*/ ) = NULL;
   void (*initEcartPair)(LObject * h, poly f, poly g, int ecartF, int ecartG) = NULL;
   void (*enterOnePair) (int i,poly p,int ecart, int isFromQ,kStrategy strat, int atR /*= -1*/) = NULL;
@@ -447,14 +447,14 @@ public:
   /*BOOLEAN*/ char fromT = '\0';
   /*BOOLEAN*/ char noetherSet = '\0';
   /*BOOLEAN*/ char update = '\0';
-  /*BOOLEAN*/ char compareInLOldFlag = '\0';
+  /*BOOLEAN*/ char compareLOldFlag = '\0';
   /*BOOLEAN*/ char use_buckets = '\0';
   // if set, pLDeg(p, l) == (pFDeg(pLast(p), pLength)
   /*BOOLEAN*/ char LDegLast = '\0';
   // if set, then L.length == L.pLength
   /*BOOLEAN*/ char length_pLength = '\0';
   // if set, then posInL does not depend on L.length
-  /*BOOLEAN*/ char compareInLDependsOnLength = '\0';
+  /*BOOLEAN*/ char compareLDependsOnLength = '\0';
   /*FALSE, if posInL == posInL10*/
 #ifdef HAVE_PLURAL
   // set this flag to 1 to stop the product criteria
@@ -511,11 +511,11 @@ inline bool CompareLObject::operator()(const LObject &lhs, const LObject &rhs) c
   int (*comparator) (const LObject &lhs, const LObject &rhs, const kStrategy strat);
 
   if (parent != NULL) {
-    comparator = parent->compareInL;
+    comparator = parent->compareL;
   } else {
     /* A special case used only in f5c() to construct a temporary LQueue without a parent */
-    /* compareInL10 (not used in f5c) is the only comparator that uses its third argument */
-    comparator = compareInL;
+    /* compareL10 (not used in f5c) is the only comparator that uses its third argument */
+    comparator = compareL;
   }
   auto comparison = comparator(lhs, rhs, parent);
   if (comparison == -1) return true;
@@ -962,7 +962,7 @@ ideal bbaShift(ideal F, ideal Q,intvec *w,bigintmat *hilb,kStrategy strat);
 
 // test syz strategy: // will be removed soon
 EXTERN_VAR int (*test_PosInT)(const TSet T,const int tl,LObject &h);
-EXTERN_VAR int (*test_CompareInL)(const LObject &lhs, const LObject &rhs, const kStrategy strat);
+EXTERN_VAR int (*test_CompareL)(const LObject &lhs, const LObject &rhs, const kStrategy strat);
 
 static inline void kDeleteLcm(LObject *P)
 {

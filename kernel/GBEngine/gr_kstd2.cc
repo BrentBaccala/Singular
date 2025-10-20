@@ -573,7 +573,7 @@ static int nc_redLazy (LObject* h,kStrategy strat)
       d = currRing->pFDeg((*h).p,currRing);
       if (!strat->Lqueue.empty() && ((d > reddeg) || (pass > strat->LazyPass)))
       {
-        assert(strat->compareInL == compareInL11);  // prior to using LQueue, the code has L11 hard-wired, so check that that's what's being used
+        assert(strat->compareL == compareL11);  // prior to using LQueue, the code has L11 hard-wired, so check that that's what's being used
         if (! strat->Lqueue.would_be_top(*h))
         {
           i=strat->sl+1;
@@ -1062,7 +1062,7 @@ ideal k_gnc_gr_bba(const ideal F, const ideal Q, const intvec *, const bigintmat
   initBuchMoraPos(strat);
   if (rIsRatGRing(currRing))
   {
-    strat->compareInL=compareL0; // by pCmp of lcm
+    strat->compareL=compareL0; // by pCmp of lcm
   }
   /*set enterS, spSpolyShort, reduce, red, initEcart, initEcartPair*/
   /*Shdl=*/initBuchMora(F, Q,strat);

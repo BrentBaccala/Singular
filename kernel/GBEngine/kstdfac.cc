@@ -140,10 +140,10 @@ kStrategy kStratCopy(kStrategy o)
   s->red=o->red;
   s->initEcart=o->initEcart;
   s->posInT=o->posInT;
-  s->compareInL=o->compareInL;
+  s->compareL=o->compareL;
   s->enterS=o->enterS;
   s->initEcartPair=o->initEcartPair;
-  s->compareInLOld=o->compareInLOld;
+  s->compareLOld=o->compareLOld;
   s->enterOnePair=o->enterOnePair;
   s->chainCrit=o->chainCrit;
   s->Shdl=idCopy(o->Shdl);
@@ -178,7 +178,7 @@ kStrategy kStratCopy(kStrategy o)
   //s->P=s->L[s->Ll+1];
   s->P.Init(o->tailRing);
   s->update=o->update;
-  s->compareInLOldFlag=o->compareInLOldFlag;
+  s->compareLOldFlag=o->compareLOldFlag;
   s->kModW = o->kModW;
 //   if (o->kModW!=NULL)
 //     s->kModW=ivCopy(o->kModW);
