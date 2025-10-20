@@ -193,7 +193,7 @@ public:
   kBucket_pt bucket;
   int   i_r1, i_r2;
   unsigned seq;       // the sequence number of the LSet when this LObject was inserted
-                      // used when the LObject comparison function returns equality to determine L set ordering
+                      // used to determine LSet ordering for equal LObjects
   unsigned checked; // this is the index of S up to which
                       // the corresponding LObject was already checked in
                       // critical pair creation => when entering the
@@ -327,10 +327,6 @@ public:
   }
   const LObject& top(void) {
     return *begin();
-  }
-  template <typename F>
-  void remove_if(F&& predicate) {
-    writable_set<LObject, CompareLObject>::erase(std::remove_if(writable_set<LObject, CompareLObject>::begin(), writable_set<LObject, CompareLObject>::end(), predicate), writable_set<LObject, CompareLObject>::end());
   }
   void reorder(void) {
     std::vector<LObject> oldL(rbegin(), rend());

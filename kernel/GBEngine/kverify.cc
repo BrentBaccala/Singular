@@ -180,14 +180,20 @@ BOOLEAN kVerify2(ideal F, ideal Q)
   if (TEST_OPT_PROT) printf("%d pairs created\n",(int)strat->L.size());
   if (TEST_OPT_DEGBOUND)
   {
-    strat->L.remove_if
-      ([&](LObject lobject) {
-         if (currRing->pFDeg(lobject.p,currRing)>Kstd1_deg) {
-           if (TEST_OPT_PROT) { printf("D"); mflush(); }
-           return true;
-         }
-         return false;
-       });
+    for (auto it = strat->L.begin(); it != strat->L.end(); )
+    {
+      if (currRing->pFDeg(it->p,currRing)>Kstd1_deg)
+      {
+        /*
+        * omit pairs if 24 IN test and the degree of L[i] is bigger then
+        *a predefined number Kstd1_deg
+        */
+        it = strat->L.erase(it);
+        if (TEST_OPT_PROT) { printf("D"); mflush(); }
+      }
+      else
+        it ++;
+    }
   }
   if (TEST_OPT_DEBUG) messageSets(strat);
   /*---------------------------------------------------------------------*/

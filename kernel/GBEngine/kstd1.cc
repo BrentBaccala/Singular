@@ -1429,32 +1429,31 @@ static void updateL(BOOLEAN searchPP, kStrategy strat)
 */
 static void updateLHC(kStrategy strat)
 {
-  int i = strat->L.size() - 1;
   kTest_TS(strat);
-  for (auto& Lp: strat->L)
+  for (auto it = strat->L.begin(); it != strat->L.end(); )
   {
-    if (pNext(Lp.p) == strat->tail)
+    if (pNext(it->p) == strat->tail)
     {
        /*- deletes the int spoly and computes -*/
-      if (pLmCmp(Lp.p,strat->kNoether) == -1)
+      if (pLmCmp(it->p,strat->kNoether) == -1)
       {
         if (rField_is_Ring(currRing))
-          pLmDelete(Lp.p);
+          pLmDelete(it->p);
         else
-          pLmFree(Lp.p);
-        Lp.p = NULL;
+          pLmFree(it->p);
+        it->p = NULL;
       }
       else
       {
         if (rField_is_Ring(currRing))
-          pLmDelete(Lp.p);
+          pLmDelete(it->p);
         else
-          pLmFree(Lp.p);
-        Lp.p = NULL;
+          pLmFree(it->p);
+        it->p = NULL;
         poly m1 = NULL, m2 = NULL;
         // check that spoly creation is ok
         while (strat->tailRing != currRing &&
-               !kCheckSpolyCreation(&Lp, strat, m1, m2))
+               !kCheckSpolyCreation(&(*it), strat, m1, m2))
         {
           assume(m1 == NULL && m2 == NULL);
           // if not, change to a ring where exponents are at least
@@ -1462,31 +1461,29 @@ static void updateLHC(kStrategy strat)
           kStratChangeTailRing(strat);
         }
         /* create the real one */
-        ksCreateSpoly(&Lp, strat->kNoetherTail(), FALSE,
+        ksCreateSpoly(&(*it), strat->kNoetherTail(), FALSE,
                       strat->tailRing, m1, m2, strat->R);
-        if (! Lp.IsNull())
+        if (! it->IsNull())
         {
-          Lp.SetLmCurrRing();
-          Lp.SetpFDeg();
-          Lp.ecart
-            = Lp.pLDeg(strat->LDegLast) - Lp.GetpFDeg();
-          if (strat->use_buckets) Lp.PrepareRed(TRUE);
+          it->SetLmCurrRing();
+          it->SetpFDeg();
+          it->ecart
+            = it->pLDeg(strat->LDegLast) - it->GetpFDeg();
+          if (strat->use_buckets) it->PrepareRed(TRUE);
         }
       }
     }
-    deleteHC(&Lp, strat);
-#ifdef KDEBUG
-    if (! Lp.IsNull())
+    deleteHC(&(*it), strat);
+    if (it->IsNull())
+      it = strat->L.erase(it);
+    else
     {
-      kTest_L(&Lp, strat, TRUE, i, strat->T, strat->tl);
-    }
+#ifdef KDEBUG
+      kTest_L(&(*it), strat, TRUE, i, strat->T, strat->tl);
 #endif
-    i --;
+      it ++;
+    }
   }
-  strat->L.remove_if
-    ([&](LObject lobject) {
-       return lobject.IsNull();
-     });
   kTest_TS(strat);
 }
 

@@ -8353,12 +8353,19 @@ void replaceInLAndSAndT(LObject &p, int tj, kStrategy strat)
   assume(p.FDeg == p.pFDeg());
 
   /* remove useless pairs from L set */
-  strat->L.remove_if
-    ([&](LObject lobject) {
-       if (lobject.p1 != NULL && pLtCmp(tp, lobject.p1) == 0) return true;
-       if (lobject.p2 != NULL && pLtCmp(tp, lobject.p2) == 0) return true;
-       return false;
-     });
+  for (auto it = strat->L.begin(); it != strat->L.end(); )
+  {
+    if (it->p1 != NULL && pLtCmp(tp, it->p1) == 0)
+    {
+      it = strat->L.erase(it);
+    }
+    else if (it->p2 != NULL && pLtCmp(tp, it->p2) == 0)
+    {
+      it = strat->L.erase(it);
+    }
+    else
+      it ++;
+  }
 
 #ifdef HAVE_SHIFTBBA
   if (rIsLPRing(currRing))
@@ -8624,21 +8631,22 @@ void enterSyz(LObject &p, kStrategy strat, int atT)
   pWrite(strat->syz[atT]);
 #endif
   // recheck pairs in strat->L with new rule and delete correspondingly
-  strat->L.remove_if
-    ([&](LObject lobject) {
-       //printf("\nCheck if syz is div by L\n");pWrite(strat->syz[atT]);pWrite(lobject.sig);
-       //printf("\npLmShDivBy(syz,L) = %i\nn_DivBy(L,syz) = %i\n pLtCmp(L,syz) = %i",p_LmShortDivisibleBy( strat->syz[atT], strat->sevSyz[atT],lobject.sig, ~lobject.sevSig, currRing), n_DivBy(pGetCoeff(lobject.sig),pGetCoeff(strat->syz[atT]),currRing), pLtCmp(lobject.sig,strat->syz[atT])==1);
-       if (p_LmShortDivisibleBy( strat->syz[atT], strat->sevSyz[atT],
-                                 lobject.sig, ~lobject.sevSig, currRing)
-           &&((!rField_is_Ring(currRing))
-              || (n_DivBy(pGetCoeff(lobject.sig),pGetCoeff(strat->syz[atT]),currRing->cf) && (pLtCmp(lobject.sig,strat->syz[atT])==1)))
-           ) {
-         //printf("\nYES!\n");
-         return true;
-       } else {
-         return false;
-       }
-     });
+  for (auto it = strat->L.begin(); it != strat->L.end(); )
+  {
+    //printf("\nCheck if syz is div by L\n");pWrite(strat->syz[atT]);pWrite(it->sig);
+    //printf("\npLmShDivBy(syz,L) = %i\nn_DivBy(L,syz) = %i\n pLtCmp(L,syz) = %i",p_LmShortDivisibleBy( strat->syz[atT], strat->sevSyz[atT],it->sig, ~it->sevSig, currRing), n_DivBy(pGetCoeff(it->sig),pGetCoeff(strat->syz[atT]),currRing), pLtCmp(it->sig,strat->syz[atT])==1);
+    if (p_LmShortDivisibleBy( strat->syz[atT], strat->sevSyz[atT],
+                              it->sig, ~it->sevSig, currRing)
+                              &&((!rField_is_Ring(currRing))
+                              || (n_DivBy(pGetCoeff(it->sig),pGetCoeff(strat->syz[atT]),currRing->cf) && (pLtCmp(it->sig,strat->syz[atT])==1)))
+                              )
+    {
+      //printf("\nYES!\n");
+      it = strat->L.erase(it);
+    }
+    else
+      it ++;
+  }
 
 //#if 1
 #ifdef DEBUGF5
