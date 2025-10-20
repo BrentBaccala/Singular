@@ -665,16 +665,6 @@ void cleanTSbaRing (kStrategy strat)
   strat->tl=-1;
 }
 
-static inline void enlargeL (LSet* L,int* length,const int incr)
-{
-  assume((*L)!=NULL);
-  assume(((*length)+incr)>0);
-
-  *L = (LSet)omReallocSize((*L),(*length)*sizeof(LObject),
-                                   ((*length)+incr)*sizeof(LObject));
-  (*length) += incr;
-}
-
 void initPairtest(kStrategy strat)
 {
   strat->pairtest = (BOOLEAN *)omAlloc0((strat->sl+2)*sizeof(BOOLEAN));
