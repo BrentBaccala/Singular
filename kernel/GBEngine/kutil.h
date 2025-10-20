@@ -62,7 +62,6 @@ typedef wlen_type* wlen_set;
 typedef class sTObject TObject;
 typedef class sLObject LObject;
 typedef TObject * TSet;
-typedef LObject * LSet;
 
 typedef struct denominator_list_s denominator_list_s;
 typedef denominator_list_s *denominator_list;
