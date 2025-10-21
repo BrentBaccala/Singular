@@ -5609,16 +5609,14 @@ LSet::iterator LSet::erase(LSet::iterator it) {
       }
     }
   }
-#if 0
-  /* the old code - we're deleting an LObject in the LSet, but we do something to strat->P at the same time! */
 #ifdef HAVE_SHIFTBBA
-  if (is_shifted_p1(/*strat->P.p1,*/strat))
+  /* this logic was added in commit 95b7138, to fix a memory leak */
+  if (strat!=NULL && is_shifted_p1(/*strat->P.p1,*/strat))
   {
     // clean up strat->P.p1: may be shifted
     pLmDelete(strat->P.p1);
     strat->P.p1=NULL;
   }
-#endif
 #endif
   return writable_set<LObject, CompareLObject>::erase(it);
 }
