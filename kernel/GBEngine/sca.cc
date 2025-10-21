@@ -465,13 +465,6 @@ ideal k_sca_bba (const ideal F, const ideal Q, const intvec */*w*/, const bigint
   if(!idIs0(F) &&(!rField_is_Ring()))  // create strong gcd poly computes with tailring and S[i] ->to be fixed
     kStratInitChangeTailRing(strat);
 #endif
-  if (BVERBOSE(23))
-  {
-    if (test_PosInT!=NULL) strat->posInT=test_PosInT;
-    if (test_CompareL!=NULL) strat->compareL=test_CompareL;
-    kDebugPrint(strat);
-  }
-
 
   ///////////////////////////////////////////////////////////////
   // SCA:

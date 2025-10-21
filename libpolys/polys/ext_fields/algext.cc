@@ -835,7 +835,42 @@ static number naInvers(number a, const coeffs cf)
 
   poly aFactor = NULL; poly mFactor = NULL; poly theGcd = NULL;
 // singclap_extgcd!
-  const BOOLEAN ret = singclap_extgcd ((poly)a, naMinpoly, theGcd, aFactor, mFactor, naRing);
+  BOOLEAN ret=FALSE;
+  #if 0 //#ifdef HAVE_FLINT
+   // context for modulus
+    ring R=naRing;
+    fmpz_mod_ctx_t ctxp;
+    fmpz_t p;
+    fmpz_init(p); fmpz_init_set_ui(p,R->ch);
+    fmpz_mod_ctx_init(ctxp,p);
+    fmpz_clear(p);
+    // convert modulus
+    fmpz_mod_poly_t modulus;
+    poly p=R->qideal->m[0];
+    fmpz_mod_poly_init2(modulus,deg(p)+1,ctxp);
+    while(p!=NULL)
+    {
+      fmpz_mod_poly_set_coeff_ui(result,p_GetExp(p,1,R),(long)(pGetCoeff(p)));
+      pIter(p);
+    }
+    // ctx for ring r
+    fq_ctx_t ctx ctx;
+       fq_ctx_init_modulus(ctx,modulus,ctxp,"a");
+    fmpz_mod_poly_clear(modulus);
+    // convert f, g
+
+    // gcd
+    // convert res
+    // cleanup
+    fq_ctx_clear(ctx);
+    fmpz_mod_ctx_clear(ctxp);
+    // return result
+    // see fq_gcdinv
+
+
+  #else
+  ret = singclap_extgcd ((poly)a, naMinpoly, theGcd, aFactor, mFactor, naRing);
+  #endif
 
   if (ret) return NULL;
   // if( ret ) theGcd = p_ExtGcd((poly)a, aFactor, naMinpoly, mFactor, naRing);

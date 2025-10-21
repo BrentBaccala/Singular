@@ -1884,10 +1884,7 @@ ideal mora (ideal F, ideal Q,intvec *w,bigintmat *hilb,kStrategy strat)
       kStratInitChangeTailRing(strat);
 #endif
 
-  if (BVERBOSE(23))
-  {
-    kDebugPrint(strat);
-  }
+  if (BVERBOSE(23)) kDebugPrint(strat); 
 
   /*- compute-------------------------------------------*/
   while (! strat->L.empty())

@@ -3882,6 +3882,10 @@ Defines a new function, within @code{apply} or for assigning.
 @smallexample
 @c example
   apply(1..3,x->{x**2});
+  proc t=x->{x mod 5};
+  t;
+  t(23);
+  proc p=t;
 @c example
 @end smallexample
 @end table

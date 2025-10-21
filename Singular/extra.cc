@@ -2385,49 +2385,6 @@ static BOOLEAN jjEXTENDED_SYSTEM(leftv res, leftv h)
     {
       char *sys_cmd=(char *)(h->Data());
       h=h->next;
-  /*==================== test syz strat =================*/
-      if (strcmp(sys_cmd, "syz") == 0)
-      {
-         if ((h!=NULL) && (h->Typ()==STRING_CMD))
-         {
-           const char *s=(const char *)h->Data();
-           if (strcmp(s,"posInT_EcartFDegpLength")==0)
-             test_PosInT=posInT_EcartFDegpLength;
-           else if (strcmp(s,"posInT_FDegpLength")==0)
-             test_PosInT=posInT_FDegpLength;
-           else if (strcmp(s,"posInT_pLength")==0)
-             test_PosInT=posInT_pLength;
-           else if (strcmp(s,"posInT0")==0)
-             test_PosInT=posInT0;
-           else if (strcmp(s,"posInT1")==0)
-             test_PosInT=posInT1;
-           else if (strcmp(s,"posInT2")==0)
-             test_PosInT=posInT2;
-           else if (strcmp(s,"posInT11")==0)
-             test_PosInT=posInT11;
-           else if (strcmp(s,"posInT110")==0)
-             test_PosInT=posInT110;
-           else if (strcmp(s,"posInT13")==0)
-             test_PosInT=posInT13;
-           else if (strcmp(s,"posInT15")==0)
-             test_PosInT=posInT15;
-           else if (strcmp(s,"posInT17")==0)
-             test_PosInT=posInT17;
-           else if (strcmp(s,"posInT17_c")==0)
-             test_PosInT=posInT17_c;
-           else if (strcmp(s,"posInT19")==0)
-             test_PosInT=posInT19;
-           else PrintS("valid posInT:0,1,2,11,110,13,15,17,17_c,19,_EcartFDegpLength,_FDegpLength,_pLength,_EcartpLength\n");
-         }
-         else
-         {
-           test_PosInT=NULL;
-           test_CompareL=NULL;
-         }
-         si_opt_2|=Sy_bit(23);
-         return FALSE;
-      }
-      else
   /*==================== locNF ======================================*/
       if(strcmp(sys_cmd,"locNF")==0)
       {

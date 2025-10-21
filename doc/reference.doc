@@ -4628,9 +4628,9 @@ See
 @item @strong{Syntax:}
 @code{modulo (} ideal_expression@code{,} ideal_expression @code{)}
 @*@code{modulo (} module_expression@code{,} module_expression @code{)}
-@*@code{modulo (} ideal_expression@code{,} ideal_expression{,} string_expression @code{)}
-@*@code{modulo (} module_expression@code{,} module_expression{,} string_expression @code{)}
-@*@code{modulo (} ideal_expression@code{,} ideal_expression{,} matrix_name @code{)}
+@*@code{modulo (} ideal_expression@code{,} ideal_expression@code{,} string_expression @code{)}
+@*@code{modulo (} module_expression@code{,} module_expression@code{,} string_expression @code{)}
+@*@code{modulo (} ideal_expression@code{,} ideal_expression@code{,} matrix_name @code{)}
 @item @strong{Type:}
 module
 @item @strong{Purpose:}

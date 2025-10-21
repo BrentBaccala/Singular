@@ -956,10 +956,6 @@ int redFirstShift (LObject* h,kStrategy strat); // ok
 ideal bbaShift(ideal F, ideal Q,intvec *w,bigintmat *hilb,kStrategy strat);
 #endif
 
-// test syz strategy: // will be removed soon
-EXTERN_VAR int (*test_PosInT)(const TSet T,const int tl,LObject &h);
-EXTERN_VAR int (*test_CompareL)(const LObject &lhs, const LObject &rhs, const kStrategy strat);
-
 static inline void kDeleteLcm(LObject *P)
 {
  if (P->lcm!=NULL)

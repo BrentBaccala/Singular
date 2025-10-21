@@ -5475,7 +5475,7 @@ int posInT19 (const TSet set,const int length,LObject &p)
 /*2
 *looks up the position of polynomial p in set
 *set[length] is the smallest element in set with respect
-*to the ordering-procedure totaldegree,length
+*to the ordering-procedure pFDeg, p1 == NULL, pComp
 */
 #if 0
 int posInLSpecial (const LSet set, const int length,
@@ -5770,6 +5770,7 @@ int posInSyz (const kStrategy strat, poly sig)
 * critical pairs to strat->L only behind all other critical pairs which are
 * still in strat->L!
 */
+// dummy, unused
 #if 0
 int posInLF5C (const LSet /*set*/, const int /*length*/,
                LObject* /*p*/,const kStrategy strat)
@@ -9836,7 +9837,6 @@ void initBuchMoraPos (kStrategy strat)
       strat->compareL = compareL0;
       strat->posInT = posInT0;
     }
-    //if (strat->minim>0) strat->compareL = compareLSpecial;
     if (strat->homog)
     {
       strat->compareL = compareL110;
@@ -9932,7 +9932,6 @@ void initBuchMoraPosRing (kStrategy strat)
       strat->compareL = compareL0Ring;
       strat->posInT = posInT0;
     }
-    //if (strat->minim>0) strat->compareL =compareLSpecial;
     if (strat->homog)
     {
       strat->compareL = compareL110Ring;
@@ -10106,10 +10105,6 @@ void initSbaPos (kStrategy strat)
   {
     if (strat->honey)
     {
-      // ok -- here is the deal: from my experiments for Singular-2-0
-      // I conclude that that posInT_EcartpLength is the best of
-      // posInT15, posInT_EcartFDegpLength, posInT_FDegLength, posInT_pLength
-      // see the table at the end of this file
       if (TEST_OPT_OLDSTD)
         strat->posInT = posInT15;
       else
@@ -10170,13 +10165,6 @@ void initSbaPos (kStrategy strat)
   }
   strat->compareLDependsOnLength = FALSE;
   strat->compareL = compareLSig;
-  /*
-  if (rField_is_Ring(currRing))
-  {
-    strat->posInLSba  = posInLSigRing;
-    strat->compareL = compareL11Ring;
-  }*/
-  //strat->posInT     = posInTSig;
 }
 
 void initSbaBuchMora (ideal F,ideal Q,kStrategy strat)

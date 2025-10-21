@@ -2010,6 +2010,14 @@ static poly p_MonPower(poly p, int exp, const ring r)
     number x, y;
     y = pGetCoeff(p);
     n_Power(y,exp,&x,r->cf);
+    #ifdef HAVE_RINGS // may have zero divisors
+    if (UNLIKELY(n_IsZero(x,r->cf)))
+    {
+      p_LmDelete(&p,r);
+      n_Delete(&x,r->cf);
+      return NULL;
+    }
+    #endif
     n_Delete(&y,r->cf);
     pSetCoeff0(p,x);
   }

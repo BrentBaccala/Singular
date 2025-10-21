@@ -2143,7 +2143,7 @@ YY_RULE_SETUP
                              yylplineno, brace1, yytext);
                            #endif
                            brace1--;
-                           if(brace2>0)
+                           if(brace2>1)
                            {
                              yylp_errno = YYLP_BODY_BR2;
                              return(1);
