@@ -92,8 +92,6 @@ VAR BITSET validOpts=Sy_bit(0)
                 |Sy_bit(30)
                 |Sy_bit(31);
 
-//static BOOLEAN compareLOldFlag;
-           /*FALSE, if posInL == posInL10*/
 // returns TRUE if mora should use buckets, false otherwise
 static BOOLEAN kMoraUseBucket(kStrategy strat);
 
