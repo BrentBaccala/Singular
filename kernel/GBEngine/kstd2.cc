@@ -3164,7 +3164,7 @@ ideal sba (ideal F0, ideal Q,intvec *w,bigintmat *hilb,kStrategy strat)
         && ((strat->honey && (strat->L.top().ecart+currRing->pFDeg(strat->L.top().p,currRing)>Kstd1_deg))
             || ((!strat->honey) && (currRing->pFDeg(strat->L.top().p,currRing)>Kstd1_deg)))
         )
-        strat->L.pop();
+        strat->L.pop_and_erase();
       if (strat->L.empty()) break;
       else strat->noClearS=TRUE;
     }
