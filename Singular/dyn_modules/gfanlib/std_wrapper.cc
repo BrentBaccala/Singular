@@ -152,7 +152,7 @@ static BOOLEAN abort_if_monomial_sp(kStrategy strat)
     if (pNext(p)==NULL)
     {
       while (!strat->L.empty())
-        strat->L.pop();
+        strat->L.pop_and_erase();
       return FALSE;
     }
   }
@@ -162,7 +162,7 @@ static BOOLEAN abort_if_monomial_sp(kStrategy strat)
     if (pNext(p)==NULL)
     {
       while (!strat->L.empty())
-        strat->L.pop();
+        strat->L.pop_and_erase();
       return FALSE;
     }
   }
