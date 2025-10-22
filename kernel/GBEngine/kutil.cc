@@ -3478,7 +3478,7 @@ void chainCritPart (poly p,int ecart,kStrategy strat)
       for (auto jt = strat->L.begin(); jt != strat->L.end(); )
       {
         if (sugarDivisibleBy(ecart,jt->ecart)
-        && ((jt->p == strat->tail) || (rHasGlobalOrdering(currRing)))
+        && ((pNext(jt->p) == strat->tail) || (rHasGlobalOrdering(currRing)))
         && pCompareChainPart(p,jt->p1,jt->p2,jt->lcm))
         {
           if (jt->p == strat->tail)
