@@ -1462,6 +1462,10 @@ static void updateL(BOOLEAN searchPP, kStrategy strat)
 */
 static void updateLHC(kStrategy strat)
 {
+
+#ifdef KDEBUG
+  int i = 0;
+#endif
   kTest_TS(strat);
   for (auto it = strat->L.begin(); it != strat->L.end(); )
   {
@@ -1512,7 +1516,7 @@ static void updateLHC(kStrategy strat)
     else
     {
 #ifdef KDEBUG
-      //kTest_L(&(*it), strat, TRUE, i, strat->T, strat->tl);
+      kTest_L(&(*it), strat, TRUE, i++, strat->T, strat->tl);
 #endif
       it ++;
     }
@@ -1597,7 +1601,6 @@ static void firstUpdate(kStrategy strat)
     }
   }
   kTest_TS(strat);
-  return;
 }
 
 /*2
@@ -1812,6 +1815,7 @@ void initMora(ideal F,kStrategy strat)
   for (j=(currRing->N); j>0; j--) strat->NotUsedAxis[j] = TRUE;
   strat->enterS = enterSMora;
   strat->initEcartPair = initEcartPairMora; /*- ecart approximation -*/
+  strat->compareLOld = strat->compareL;
   strat->compareLOldFlag = TRUE;
   strat->initEcart = initEcartNormal;
   if (strat->homog)
