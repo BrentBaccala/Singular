@@ -272,22 +272,21 @@ EXTERN_VAR int HCord;
 
 /** @class LSet
  *
- * "L" is the set of critical pairs, maintained as a priority queue,
- * and we wish to regularly pop the largest item from the queue.
- * However, we also wish to iterate over the entire set in order,
- * which precludes organizing it as a heap.  Also, our legacy C code
- * modifies the objects once they're in the queue, which precludes
- * using std::map or std::multimap, since their objects are immutable.
- * We use a custom class writable_set, which is derived from
- * std::multimap, but stores pointers in the tree and therefore
- * allows the objects themselves to be modified.
+ * "L" is the sorted set of critical pairs, and we wish to regularly
+ * pop the top item from the queue.  However, we also wish to iterate
+ * over the entire set in order, which precludes organizing it as a
+ * heap.  Also, our legacy C code modifies the objects once they're in
+ * the queue, which precludes using std::map or std::multimap, since
+ * their objects are immutable.  We use a custom class writable_set,
+ * which is derived from std::multimap, but stores pointers in the
+ * tree and therefore allows the objects themselves to be modified.
  */
 
 class CompareLObject {
 public:
   skStrategy * parent = NULL;
-  int (*compareL) (const LObject &lhs, const LObject &rhs, const kStrategy strat);
-  bool operator() (const LObject &lhs, const LObject &rhs) const;
+  int (*compareL) (const LObject &lhs, const LObject &rhs, const kStrategy strat) = NULL;
+  KINLINE bool operator() (const LObject &lhs, const LObject &rhs) const;
 };
 
 class LSet : public writable_set<LObject, CompareLObject> {
@@ -303,39 +302,13 @@ public:
   using writable_set<LObject, CompareLObject>::empty;
   using writable_set<LObject, CompareLObject>::size;
   using writable_set<LObject, CompareLObject>::size_type;
-  void push(LObject& lobject) {
-    /* We track a sequence number to allow FIFO or LIFO ordering to be selected for equal objects */
-    lobject.seq = seq;
-    seq ++;
-    insert(lobject);
-  }
-  bool would_be_top(LObject& lobject) {
-    /* Would lobject be the top object in the queue if it were pushed?
-     * Yes if either the queue is empty or lobject is less than the first object.
-     *
-     * Strictly speaking, maybe we should make a copy of lobject before setting its seq value
-     * to what it would be if it were pushed, but in fact, seq doesn't get used anywhere
-     * except in the key_comp comparison function, so we can set it without making a copy.
-     */
-    lobject.seq = seq;
-    return (empty() || key_comp()(lobject, top()));
-  }
+  KINLINE void push(LObject& lobject);
+  KINLINE bool would_be_top(LObject& lobject);
+  KINLINE void pop(void);
+  KINLINE void pop_and_erase(void);
+  KINLINE const LObject& top(void);
+  KINLINE void reorder(void);
   iterator erase(iterator it);
-  void pop(void) {
-    /* We don't call our erase() method because it would deallocate a bunch of pointers in the LObject and we don't want that done here */
-    writable_set<LObject, CompareLObject>::erase(begin());
-  }
-  void pop_and_erase(void) {
-    erase(begin());
-  }
-  const LObject& top(void) {
-    return *begin();
-  }
-  void reorder(void) {
-    std::vector<LObject> oldL(rbegin(), rend());
-    clear();
-    for (auto& Lp: oldL) push(Lp);
-  }
 };
 
 class skStrategy
@@ -496,37 +469,6 @@ int compareL17Ring (const LObject &lhs, const LObject &rhs, const kStrategy stra
 int compareL17_c (const LObject &lhs, const LObject &rhs, const kStrategy strat);
 int compareL17_cRing (const LObject &lhs, const LObject &rhs, const kStrategy strat);
 int compareLSpecial (const LObject &lhs, const LObject &rhs, const kStrategy strat);
-
-inline bool CompareLObject::operator()(const LObject &lhs, const LObject &rhs) const
-{
-  /* A C++ comparator is a less than operator, which, for a -1/0/1 comparator,
-   * is equivalent to cmp(lhs,rhs) == 1.  However, we want the tree ordered in
-   * reverse order, so that the object that compares largest is at the start.
-   */
-  int (*comparator) (const LObject &lhs, const LObject &rhs, const kStrategy strat);
-
-  if (parent != NULL) {
-    comparator = parent->compareL;
-  } else {
-    /* A special case used only in f5c() to construct a temporary LSet without a parent */
-    /* compareL10 (not used in f5c) is the only comparator that uses its third argument */
-    comparator = compareL;
-  }
-  auto comparison = comparator(lhs, rhs, parent);
-  if (comparison == -1) return true;
-  if (comparison == 1) return false;
-  if ((comparator == compareL11Ringls)
-      || (comparator == compareL110Ring)
-      || (comparator == compareL0)
-      || (comparator == compareL11Ring)
-      || (comparator == compareLSpecial)
-      || (comparator == compareLSig)) {
-    // these comparators order equal Lobjects FIFO (most are LIFO), so seq ordering is 1,2,3
-    return (lhs.seq < rhs.seq);
-  } else {
-    return (lhs.seq > rhs.seq);
-  }
-};
 
 void deleteHC(poly *p, int *e, int *l, kStrategy strat);
 void deleteHC(LObject* L, kStrategy strat, BOOLEAN fromNext = FALSE);
