@@ -12,7 +12,6 @@
 
 #include "writable_set.h"
 #include <vector>
-#include <algorithm>
 
 #include "omalloc/omalloc.h"
 #ifdef HAVE_OMALLOC

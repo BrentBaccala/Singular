@@ -843,7 +843,7 @@ int redRing_Z (LObject* h,kStrategy strat)
 #ifdef KDEBUG
         if (TEST_OPT_DEBUG) Print(" ->L\n");
 #endif
-        strat->L.push(*h);
+        strat->L.push(*h);        // NOT RING CHECKED OLIVER
         h->Clear();
         return -1;
       }
@@ -1051,7 +1051,7 @@ int redRing (LObject* h,kStrategy strat)
 #ifdef KDEBUG
         if (TEST_OPT_DEBUG) Print(" ->L\n");
 #endif
-        strat->L.push(*h);
+        strat->L.push(*h);        // NOT RING CHECKED OLIVER
         h->Clear();
         return -1;
       }
@@ -2666,7 +2666,7 @@ ideal bba (ideal F, ideal Q,intvec *w,bigintmat *hilb,kStrategy strat)
             || ((!strat->honey) && (currRing->pFDeg(strat->L.top().p,currRing)>Kstd1_deg)))
       )
       {
-	strat->L.pop_and_erase();
+        strat->L.pop_and_erase();
         if(TEST_OPT_PROT) PrintS("D");
       }
       if (strat->L.empty()) break;
@@ -3796,7 +3796,7 @@ ideal sba (ideal F0, ideal Q,intvec *w,bigintmat *hilb,kStrategy strat)
     // 1 - adds just the unused ones, 0 - adds everything
     while (!strat->L.empty() && (strat->L.top().p1 != NULL || strat->L.top().p2 != NULL))
     {
-      //printf("\nDeleted element from queue\n");
+      //printf("\nDeleted %p\n",strat->L.top().p);pWrite(strat->top().p);pWrite(strat->top().p1);pWrite(strat->L.top().p2);
       strat->L.pop_and_erase();
     }
     #endif

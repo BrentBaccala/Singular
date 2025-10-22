@@ -3219,27 +3219,26 @@ void chainCritNormal (poly p,int ecart,kStrategy strat)
       *and lcm(s,r)#lcm(s,p) and lcm(s,r)#lcm(r,p)
       *and in case the sugar is o.k. then L[j] can be canceled
       */
-      for (auto it = strat->L.begin(); it != strat->L.end(); )
+      for (auto jt = strat->L.begin(); jt != strat->L.end(); )
       {
-        if (pCompareChain(p,it->p1,it->p2,it->lcm))
+        if (pCompareChain(p,jt->p1,jt->p2,jt->lcm))
         {
-          if ((pNext(it->p) == strat->tail)||(rHasGlobalOrdering(currRing)))
+          if ((pNext(jt->p) == strat->tail)||(rHasGlobalOrdering(currRing)))
           {
-            it = strat->L.erase(it);
+            jt = strat->L.erase(jt);
             strat->c3++;
           }
           else
-            ++it;
+            ++jt;
         }
         else
-          ++it;
+          ++jt;
       }
       /*
       *this is GEBAUER-MOELLER:
       *in B all elements with the same lcm except the "best"
       *(i.e. the last one in B with this property) will be canceled
       */
-      /* XXX I don't think this will work with std::array because deleting it will invalidate jt */
       for (auto jt = strat->B.begin(); jt != strat->B.end(); ++jt)
       {
         for (auto it = jt + 1; it != strat->B.end(); )
@@ -3391,9 +3390,9 @@ void chainCritSig (poly p,int /*ecart*/,kStrategy strat)
           strat->c3++;
           auto lt = it + 1;
           if (isInPairsetL(lt,jt->p1,it->p1,strat)
-          && (pNext(lt->p) == strat->tail)
-          && (!pLmEqual(it->p,lt->p))
-          && pDivisibleBy(p,lt->lcm))
+              && (pNext(lt->p) == strat->tail)
+              && (!pLmEqual(it->p,lt->p))
+              && pDivisibleBy(p,lt->lcm))
           {
             /*
              *"NOT equal(...)" because in case of "equal" the element L[l]
@@ -9346,7 +9345,6 @@ void replaceInLAndSAndT(LObject &p, int tj, kStrategy strat)
     else
       it ++;
   }
-
 #ifdef HAVE_SHIFTBBA
   if (rIsLPRing(currRing))
     enterpairsShift(p.p, strat->sl, p.ecart, pos, strat, strat->tl); // TODO LP
@@ -9865,27 +9863,16 @@ void initBuchMoraPos (kStrategy strat)
       }
     }
   }
-  if (strat->minim>0)
-  {
-    strat->compareL = compareLSpecial;
-  }
+  if (strat->minim>0) strat->compareL = compareLSpecial;
   // for further tests only
   if ((BTEST1(11)) || (BTEST1(12)))
-  {
     strat->compareL = compareL11;
-  }
   else if ((BTEST1(13)) || (BTEST1(14)))
-  {
     strat->compareL = compareL13;
-  }
   else if ((BTEST1(15)) || (BTEST1(16)))
-  {
     strat->compareL = compareL15;
-  }
   else if ((BTEST1(17)) || (BTEST1(18)))
-  {
     strat->compareL = compareL17;
-  }
   if (BTEST1(11))
     strat->posInT = posInT11;
   else if (BTEST1(13))
@@ -9961,27 +9948,16 @@ void initBuchMoraPosRing (kStrategy strat)
       }
     }
   }
-  if (strat->minim>0)
-  {
-    strat->compareL = compareLSpecial;
-  }
+  if (strat->minim>0) strat->compareL = compareLSpecial;
   // for further tests only
   if ((BTEST1(11)) || (BTEST1(12)))
-  {
     strat->compareL = compareL11Ring;
-  }
   else if ((BTEST1(13)) || (BTEST1(14)))
-  {
     strat->compareL = compareL13;
-  }
   else if ((BTEST1(15)) || (BTEST1(16)))
-  {
     strat->compareL = compareL15Ring;
-  }
   else if ((BTEST1(17)) || (BTEST1(18)))
-  {
     strat->compareL = compareL17Ring;
-  }
   if (BTEST1(11))
     strat->posInT = posInT11Ring;
   else if (BTEST1(13))
@@ -11262,7 +11238,8 @@ void kStratInitChangeTailRing(kStrategy strat)
 
   assume(strat->tailRing == currRing);
 
-  for (auto& Lp: strat->L) {
+  for (auto& Lp: strat->L)
+  {
     l = p_GetMaxExpL(Lp.p, currRing, l);
   }
   for (i=0; i<=strat->tl; i++)

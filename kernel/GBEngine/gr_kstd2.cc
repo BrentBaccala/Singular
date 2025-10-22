@@ -573,7 +573,7 @@ static int nc_redLazy (LObject* h,kStrategy strat)
       d = currRing->pFDeg((*h).p,currRing);
       if (!strat->L.empty() && ((d > reddeg) || (pass > strat->LazyPass)))
       {
-        assert(strat->compareL == compareL11);  // prior to using LSet, the code has L11 hard-wired, so check that that's what's being used
+        assert(strat->compareL == compareL11);  // the code used to have L11 hard-wired, so check that that's what's being used
         if (! strat->L.would_be_top(*h))
         {
           i=strat->sl+1;

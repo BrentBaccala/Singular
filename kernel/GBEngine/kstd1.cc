@@ -13,8 +13,6 @@
 
 #define PRE_INTEGER_CHECK 0
 
-#include <vector>
-
 #include "kernel/mod2.h"
 
 #include "misc/options.h"
@@ -1636,9 +1634,8 @@ void enterSMora (LObject &p,int atS,kStrategy strat, int atR)
       if (TEST_OPT_FINDET)
         return;
 
-      /*- cuts elements in L above noether -*/
+      /*- cuts elements in L above noether and reorders L -*/
       updateLHC(strat);
-      /*- reorders L -*/
       strat->L.reorder();
     }
   }
@@ -1650,12 +1647,11 @@ void enterSMora (LObject &p,int atS,kStrategy strat, int atR)
       missingAxis(&strat->lastAxis,strat);
       if (strat->lastAxis)
       {
-        updateL(FALSE,strat);
-        // Change sort ordering and reorder L
-        strat->compareLOldFlag = FALSE;
         strat->compareLOld = strat->compareL;
+        strat->compareLOldFlag = FALSE;
         strat->compareL = compareL10;
         strat->compareLDependsOnLength = TRUE;
+        updateL(FALSE,strat);
         strat->L.reorder();
       }
     }
@@ -1903,11 +1899,10 @@ ideal mora (ideal F, ideal Q,intvec *w,bigintmat *hilb,kStrategy strat)
   * and could have put strat->kHEdgdeFound FALSE*/
   if (TEST_OPT_FASTHC && (strat->lastAxis) && strat->compareLOldFlag)
   {
-    updateL(FALSE,strat);
-    // Change sort ordering and reorder L
-    strat->compareLOldFlag = FALSE;
     strat->compareLOld = strat->compareL;
+    strat->compareLOldFlag = FALSE;
     strat->compareL = compareL10;
+    updateL(FALSE,strat);
     strat->L.reorder();
   }
   kTest_TS(strat);
@@ -1955,8 +1950,8 @@ ideal mora (ideal F, ideal Q,intvec *w,bigintmat *hilb,kStrategy strat)
       if (strat->L.empty()) break;
       else strat->noClearS=TRUE;
     }
-    if (strat->L.size() == 1) strat->interpt=TRUE;
     strat->P = strat->L.top();
+    if (strat->L.size() == 1) strat->interpt=TRUE;
     strat->L.pop();
     // create the real Spoly
     if (pNext(strat->P.p) == strat->tail)
