@@ -210,8 +210,7 @@ BOOLEAN kVerify2(ideal F, ideal Q)
   // Create a queue of int
   VRef<Queue<int> > queue = vnew<Queue<int> >();
   VRef<Queue<int> > rqueue = vnew<Queue<int> >();
-  int i = 0;
-  for(auto it = strat->L.begin(); it != strat->L.end(); ++it, ++i)
+  for(auto i = 0; i < strat->L.size(); ++i)
   {
    queue->enqueue(i); // the tasks: process pair L[i]
   }
@@ -246,9 +245,7 @@ BOOLEAN kVerify2(ideal F, ideal Q)
       int red_result=1;
       /* picks the element from the lazyset L */
       LObject P;
-      auto it = strat->L.begin();
-      std::advance(it, ind);
-      P = *it;
+      P = *(strat->L.begin() + ind);
       if (TEST_OPT_PROT) { printf("."); mflush();}
       if (pNext(P.p) == strat->tail)
       {
