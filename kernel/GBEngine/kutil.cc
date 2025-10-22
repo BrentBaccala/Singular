@@ -4313,7 +4313,7 @@ void enterExtendedSpolySig(poly h,poly hSig,kStrategy strat)
       #else
       Lp.sig = pOne();
       if(!strat->L.empty())
-        p_SetComp(Lp.sig,pGetComp(strat->L.begin()->sig)+1,currRing);
+        p_SetComp(Lp.sig,pGetComp(strat->L.end()->sig)+1,currRing);
       else
         p_SetComp(Lp.sig,pGetComp(hSig)+1,currRing);
       #endif
