@@ -1,6 +1,8 @@
 /*
  * writable_set - A std::multiset wrapper that allows in-place modification of elements
  *
+ * Created by Claude Sonnet 4.5 (2024-10-22)
+ *
  * OVERVIEW:
  * writable_set provides a container similar to std::multiset, but allows modification
  * of elements through iterators. Normally, std::set and std::multiset don't allow
@@ -26,6 +28,8 @@
  * - The ptr_compare stores a pointer to comp_, so modifications immediately affect
  *   the multiset's comparison behavior (though existing elements won't re-sort
  *   without explicit removal and re-insertion)
+ * - Call reorder() after modifying the comparator to rebuild the tree structure
+ *   with the new comparison function without reallocating objects
  *
  * USAGE CAVEAT:
  * When modifying elements through iterators, users must ensure the modification
@@ -34,24 +38,6 @@
  *   for (auto& obj : set) { obj.non_sort_field = value; }
  * Example of INCORRECT usage:
  *   for (auto& obj : set) { obj.sort_key = new_value; }
- *
- * PROMPT TO RECREATE THIS CLASS:
- * Create a C++ writable_set template class that wraps std::multiset with pointers
- * internally but hides the pointers from users. Template parameters: T (element type)
- * and Compare (comparator, defaults to std::less<T>). Implement a ptr_compare struct
- * that stores a Compare* and dereferences both sides when comparing. Store a Compare
- * comp_ member and pass &comp_ to ptr_compare in all constructors. Create an
- * iterator_wrapper template that automatically dereferences pointers, supporting
- * forward/reverse/const variants, range-based for loops, arithmetic (it+n, it-n),
- * and equality operators. Allocate objects with new on insert/emplace, delete on
- * erase/clear/destruction. Implement multiset interface: insert/emplace (return
- * iterator), erase (by iterator/range/value for forward iterators), find, count,
- * contains, clear, size, empty. Support all iterator types: begin/end/cbegin/cend/
- * rbegin/rend/crbegin/crend. Provide copy and move constructors/assignments. Add
- * key_comp() and value_comp() with both const and non-const overloads to allow
- * comparator inspection and modification. Include full documentation
- * explaining the design rationale, memory ownership, and user responsibility to not
- * break sort order when modifying elements.
  */
 
 #ifndef WRITABLE_SET_H
@@ -302,6 +288,22 @@ public:
     // Non-const access to comparator (allows modification)
     Compare& key_comp() { return comp_; }
     Compare& value_comp() { return comp_; }
+
+    // Reorder - rebuilds the tree with current comparison function
+    // without copying or deleting the objects
+    void reorder() {
+        // Swap the old tree to a local variable
+        set_type old_data{ptr_compare(&comp_)};
+        old_data.swap(data_);
+
+        // Now data_ is empty, old_data has all our pointers
+        // Re-insert all pointers from old tree into new tree
+        for (auto ptr : old_data) {
+            data_.insert(ptr);
+        }
+
+        // old_data destructor just clears pointers, doesn't delete objects
+    }
 };
 
 #endif // WRITABLE_SET_H

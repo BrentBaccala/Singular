@@ -302,12 +302,12 @@ public:
   using writable_set<LObject, CompareLObject>::empty;
   using writable_set<LObject, CompareLObject>::size;
   using writable_set<LObject, CompareLObject>::size_type;
+  using writable_set<LObject, CompareLObject>::reorder;
   KINLINE void push(LObject& lobject);
   KINLINE bool would_be_top(LObject& lobject);
   KINLINE void pop(void);
   KINLINE void pop_and_erase(void);
   KINLINE const LObject& top(void);
-  KINLINE void reorder(void);
   iterator erase(iterator it);
 };
 

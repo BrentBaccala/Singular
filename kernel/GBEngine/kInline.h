@@ -1025,12 +1025,6 @@ KINLINE void LSet::pop_and_erase(void) {
   erase(begin());
 }
 
-KINLINE void LSet::reorder(void) {
-  std::vector<LObject> oldL(rbegin(), rend());
-  clear();
-  for (auto& Lp: oldL) push(Lp);
-}
-
 /***************************************************************
  *
  * Conversion of polys
