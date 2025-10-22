@@ -284,7 +284,7 @@ EXTERN_VAR int HCord;
 
 class CompareLObject {
 public:
-  skStrategy * parent = NULL;
+  skStrategy * strat = NULL;
   int (*compareL) (const LObject &lhs, const LObject &rhs, const kStrategy strat) = NULL;
   KINLINE bool operator() (const LObject &lhs, const LObject &rhs) const;
 };

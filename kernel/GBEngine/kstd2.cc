@@ -4252,7 +4252,7 @@ void f5c (kStrategy strat, int& olddeg, int& minimcnt, int& hilbeledeg,
   // we cannot use strat->T anymore
   //cleanT(strat);
   //strat->tl = -1;
-  localL.key_comp().parent = NULL;
+  localL.key_comp().strat = strat;
   if(rField_is_Ring(currRing)) {
     localL.key_comp().compareL = compareL11Ring;
   } else {

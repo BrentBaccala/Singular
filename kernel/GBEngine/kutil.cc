@@ -1186,7 +1186,7 @@ static BOOLEAN is_shifted_p1(const kStrategy strat)
 
 LSet::iterator LSet::erase(LSet::iterator it) {
   LObject& Lp = *it;
-  const kStrategy strat = key_comp().parent;
+  const kStrategy strat = key_comp().strat;
 
   if (Lp.lcm!=NULL)
   {
@@ -1199,8 +1199,7 @@ LSet::iterator LSet::erase(LSet::iterator it) {
     else
       pLmFree(Lp.sig);
   }
-  /* f5c() special case: strat will be NULL, so we won't have access to strat->tail, but we should run this test */
-  if (strat!=NULL && Lp.p!=NULL)
+  if (Lp.p!=NULL)
   {
     if (pNext(Lp.p) == strat->tail)
     {
@@ -1222,8 +1221,8 @@ LSet::iterator LSet::erase(LSet::iterator it) {
     }
   }
   #ifdef HAVE_SHIFTBBA
-  /* this logic was added in commit 95b7138, to fix a memory leak */
-  if (strat!=NULL && is_shifted_p1(/*strat->P.p1,*/strat))
+  /* this logic was added in commit 95b7138 to fix a memory leak */
+  if (is_shifted_p1(/*strat->P.p1,*/strat))
   {
     // clean up strat->P.p1: may be shifted
     pLmDelete(strat->P.p1);
@@ -11482,8 +11481,8 @@ ring sbaRing (kStrategy strat, const ring r, BOOLEAN /*complete*/, int /*sgn*/)
 
 skStrategy::skStrategy()
 {
-  L.key_comp().parent = this;
-  B.key_comp().parent = this;
+  L.key_comp().strat = this;
+  B.key_comp().strat = this;
   strat_nr++;
   nr=strat_nr;
   tailRing = currRing;

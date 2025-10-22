@@ -958,31 +958,33 @@ KINLINE void    sLObject::T_1_2(const skStrategy* strat,
 
 KINLINE bool CompareLObject::operator()(const LObject &lhs, const LObject &rhs) const
 {
-  /* A C++ comparator is a less than operator, which, for a -1/0/1 comparator,
-   * is equivalent to cmp(lhs,rhs) == 1.  However, we want the tree ordered in
-   * reverse order, so that the object that compares largest is at the start.
-   */
   int (*comparator) (const LObject &lhs, const LObject &rhs, const kStrategy strat);
 
-  if (parent != NULL) {
-    comparator = parent->compareL;
-  } else {
-    /* A special case used only in f5c() to construct a temporary LSet without a parent */
-    /* compareL10 (not used in f5c) is the only comparator that uses its third argument */
+  if (compareL != NULL) {
+    /* A special case used only in f5c() to construct a local LSet with a different comparator */
     comparator = compareL;
+  } else {
+    comparator = strat->compareL;
   }
-  auto comparison = comparator(lhs, rhs, parent);
+  /* A C++ comparator is a less than operator, which, for a -1/0/1 comparator,
+   * is equivalent to cmp(lhs,rhs) == 1.  However, we want the tree ordered in
+   * reverse order, so that the object that compares largest is at the start,
+   * so we return true if cmp(lhs,rhs) == -1.
+   */
+  auto comparison = comparator(lhs, rhs, strat);
   if (comparison == -1) return true;
   if (comparison == 1) return false;
+  /* Objects that compare equal are stored either LIFO or FIFO */
   if ((comparator == compareL11Ringls)
       || (comparator == compareL110Ring)
       || (comparator == compareL0)
       || (comparator == compareL11Ring)
       || (comparator == compareLSpecial)
       || (comparator == compareLSig)) {
-    // these comparators order equal Lobjects FIFO (most are LIFO), so seq ordering is 1,2,3
+    /* These comparators order equal Lobjects FIFO, so seq ordering is 1,2,3 */
     return (lhs.seq < rhs.seq);
   } else {
+    /* The other comparators order equal Lobjects LIFO, so seq ordering is 3,2,1 */
     return (lhs.seq > rhs.seq);
   }
 };
@@ -1000,23 +1002,27 @@ KINLINE bool LSet::would_be_top(LObject& lobject) {
    *
    * Strictly speaking, maybe we should make a copy of lobject before setting its seq value
    * to what it would be if it were pushed, but in fact, seq doesn't get used anywhere
-   * except in the key_comp comparison function, so we can set it without making a copy.
+   * except in the comparison function, so we can set it without making a copy.
    */
   lobject.seq = seq;
   return (empty() || key_comp()(lobject, top()));
 }
 
+KINLINE const LObject& LSet::top(void) {
+  return *begin();
+}
+
 KINLINE void LSet::pop(void) {
-  /* We don't call our erase() method because it would deallocate a bunch of pointers in the LObject and we don't want that done here */
+  /* We don't call our erase() method because it would deallocate
+   * stuff in the LObject and we don't want that done here because we
+   * copied top() (typically to strat->P) before we called pop().
+   */
   writable_set<LObject, CompareLObject>::erase(begin());
 }
 
 KINLINE void LSet::pop_and_erase(void) {
+  /* In this case, we deallocate the LObject using the erase() method in kutil.cc */
   erase(begin());
-}
-
-KINLINE const LObject& LSet::top(void) {
-  return *begin();
 }
 
 KINLINE void LSet::reorder(void) {
