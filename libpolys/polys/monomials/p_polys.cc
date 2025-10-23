@@ -2182,6 +2182,42 @@ static poly p_TwoMonPower(poly p, int exp, const ring r)
 
 static poly p_Pow(poly p, int i, const ring r)
 {
+  #ifdef HAVE_FLINT
+  #if __FLINT_RELEASE >= 20503
+  if ((i>16) && rField_is_Q(r))
+  {
+    fmpq_mpoly_ctx_t ctx;
+    if (!convSingRFlintR(ctx,r))
+    {
+      fmpq_mpoly_t pp,res;
+      fmpq_mpoly_init(res,ctx);
+      convSingPFlintMP(pp,ctx,p,pLength(p),r);
+      fmpq_mpoly_pow_ui(res,pp,i,ctx);
+      poly pres=convFlintMPSingP(res,ctx,r);
+      fmpq_mpoly_clear(res,ctx);
+      fmpq_mpoly_clear(pp,ctx);
+      fmpq_mpoly_ctx_clear(ctx);
+      return pres;
+    }
+  }
+  else if ((>17) && rField_is_Zp(r))
+  {
+    nmod_mpoly_ctx_t ctx;
+    if (!convSingRFlintR(ctx,r))
+    {
+      nmod_mpoly_t pp,res;
+      convSingPFlintMP(pp,ctx,p,pLength(p),r);
+      nmod_mpoly_init(res,ctx);
+      fq_nmod_mpoly_pow_ui(res,pp,i,ctx);
+      poly pres=convFlintMPSingP(res,ctx,r);
+      nmod_mpoly_clear(res,ctx);
+      nmod_mpoly_clear(pp,ctx);
+      nmod_mpoly_ctx_clear(ctx);
+      return pres;
+    }
+  }
+  #endif
+  #endif
   poly rc = p_Copy(p,r);
   i -= 2;
   do
@@ -2290,7 +2326,7 @@ poly p_Power(poly p, int i, const ring r)
              || rField_is_Ring(r)
              )
             return p_Pow(p,i,r);
-          if ((char_p==0) || (i<=char_p))
+          if ((char_p==0) || (i<=char_p)) /* && pNext(rc)==NULL */
             return p_TwoMonPower(p,i,r);
           return p_Pow(p,i,r);
         }
