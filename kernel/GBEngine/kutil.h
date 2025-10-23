@@ -363,9 +363,8 @@ public:
   unsigned long* sevSig = NULL;
   unsigned long* sevT = NULL;
   TSet T = NULL;
-  LSet  L;
-  LSet  B;
-
+  LSet L;
+  LSet    B;
   poly    kNoether = NULL;
   poly    t_kNoether = NULL; // same polys in tailring
   KINLINE poly    kNoetherTail();
