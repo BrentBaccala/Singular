@@ -3304,28 +3304,32 @@ void chainCritNormal (poly p,int ecart,kStrategy strat)
     *B enters to L/their order with respect to B is permutated for elements
     *B[i].p with the same leading term
     */
-    kMergeBintoL(strat);
-    for (auto jt = strat->L.begin(); jt != strat->L.end(); )
+    for (auto jt = strat->L.begin(); jt != strat->L.end(); jt ++) {
+      if (jt->p2 == p) fprintf(stderr, "jt->p2 == p\n");
+      if (jt->p2 == strat->tail) fprintf(stderr, "jt->p2 == tail\n");
+    }
+    auto iterators = kMergeBintoL_and_return_iterators(strat);
+    for (auto jt = iterators.begin(); jt != iterators.end(); )
     {
-      if (jt + 1 == strat->L.end())
+      if (jt + 1 == iterators.end())
       {
         /*now L[0] cannot be canceled any more and the tail can be removed*/
-        if (jt->p2 == strat->tail) jt->p2 = p;
+        if ((*jt)->p2 == strat->tail) (*jt)->p2 = p;
         break;
       }
-      if (jt->p2 == p)
+      if ((*jt)->p2 == p)
       {
-        for (auto it = jt + 1; it != strat->L.end(); )
+        for (auto it = jt + 1; it != iterators.end(); )
         {
           bool i_deleted = false;
-          if ((it->p2 == p) && pLmEqual(jt->lcm,it->lcm))
+          if (((*it)->p2 == p) && pLmEqual((*jt)->lcm,(*it)->lcm))
           {
             /*L[i] could be canceled but we search for a better one to cancel*/
             strat->c3++;
-            auto lt = it + 1;
-            if (isInPairsetL(lt,jt->p1,it->p1,strat)
+            auto lt = *it + 1;
+            if (isInPairsetL(lt,(*jt)->p1,(*it)->p1,strat)
             && (pNext(lt->p) == strat->tail)
-            && (!pLmEqual(it->p,lt->p))
+            && (!pLmEqual((*it)->p,lt->p))
             && pDivisibleBy(p,lt->lcm))
             {
               /*
@@ -3333,7 +3337,7 @@ void chainCritNormal (poly p,int ecart,kStrategy strat)
               *is "older" and has to be from theoretical point of view behind
               *L[i], but we do not want to reorder L
               */
-              it->p2 = strat->tail;
+              (*it)->p2 = strat->tail;
               /*
               *L[l] will be canceled, we cannot cancel L[i] later on,
               *so we mark it with "tail"
@@ -3343,17 +3347,18 @@ void chainCritNormal (poly p,int ecart,kStrategy strat)
             else
             {
               i_deleted = true;
-              it = strat->L.erase(it);
+              strat->L.erase(*it);
+              it = iterators.erase(it);
             }
           }
           if (!i_deleted)
             ++it;
         }
       }
-      else if (jt->p2 == strat->tail)
+      else if ((*jt)->p2 == strat->tail)
       {
         /*now L[j] cannot be canceled any more and the tail can be removed*/
-        jt->p2 = p;
+        (*jt)->p2 = p;
       }
       ++jt;
     }
