@@ -3095,6 +3095,18 @@ void kMergeBintoL(kStrategy strat)
   }
 }
 
+std::vector<LSet::iterator> kMergeBintoL_and_return_iterators(kStrategy strat)
+{
+  std::vector<LSet::iterator> iterators(strat->B.size());
+  int i = 0;
+  while (!strat->B.empty()) {
+    auto Lobj = strat->B.top();
+    strat->B.pop();
+    iterators[i++] = strat->L.push(Lobj);
+  }
+  return iterators;
+}
+
 /*2
 *the pairset B of pairs of type (s[i],p) is complete now. It will be updated
 *using the chain-criterion in B and L and enters B to L

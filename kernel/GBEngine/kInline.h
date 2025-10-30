@@ -989,7 +989,7 @@ KINLINE bool CompareLObject::operator()(const LObject &lhs, const LObject &rhs) 
   }
 };
 
-KINLINE void LSet::push(LObject& lobject) {
+KINLINE LSet::iterator LSet::push(LObject& lobject) {
   /* We track a sequence number to allow FIFO or LIFO ordering to be selected for equal objects */
   lobject.seq = seq;
   seq ++;
@@ -1009,7 +1009,7 @@ KINLINE void LSet::push(LObject& lobject) {
     if (lobject.t_p != NULL)
       pSetCoeff0(lobject.t_p, pGetCoeff(lobject.p));
   }
-  insert(lobject);
+  return insert(lobject);
 }
 
 KINLINE bool LSet::would_be_top(LObject& lobject) {
