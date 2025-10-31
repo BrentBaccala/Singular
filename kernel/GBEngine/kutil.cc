@@ -3314,67 +3314,37 @@ void chainCritNormal (poly p,int ecart,kStrategy strat)
     *except the case the element (s,r) has also the same lcm
     *and is on the worst position with respect to (s,p) and (r,p)
     */
-    /*
-    *B enters to L/their order with respect to B is permutated for elements
-    *B[i].p with the same leading term
-    */
-    for (auto jt = strat->L.begin(); jt != strat->L.end(); jt ++) {
-      if (jt->p2 == p) fprintf(stderr, "jt->p2 == p\n");
-      if (jt->p2 == strat->tail) fprintf(stderr, "jt->p2 == tail\n");
-    }
     auto iterators = kMergeBintoL_and_return_iterators(strat);
-    for (auto jt = iterators.begin(); jt != iterators.end(); )
+    for (auto jt = iterators.begin(); jt != iterators.end(); jt++)
     {
-      if (jt + 1 == iterators.end())
+      for (auto it = jt + 1; it != iterators.end(); )
       {
-        /*now L[0] cannot be canceled any more and the tail can be removed*/
-        if ((*jt)->p2 == strat->tail) (*jt)->p2 = p;
-        break;
-      }
-      if ((*jt)->p2 == p)
-      {
-        for (auto it = jt + 1; it != iterators.end(); )
+        if (pLmEqual((*jt)->lcm,(*it)->lcm))
         {
-          bool i_deleted = false;
-          if (((*it)->p2 == p) && pLmEqual((*jt)->lcm,(*it)->lcm))
+          /* it could be canceled but we search for a better one to cancel*/
+          strat->c3++;
+          auto lt = *it + 1;
+          if (isInPairsetL(lt,(*jt)->p1,(*it)->p1,strat)
+          && (pNext(lt->p) == strat->tail)
+          && (!pLmEqual((*it)->p,lt->p))
+          && pDivisibleBy(p,lt->lcm))
           {
-            /*L[i] could be canceled but we search for a better one to cancel*/
-            strat->c3++;
-            auto lt = *it + 1;
-            if (isInPairsetL(lt,(*jt)->p1,(*it)->p1,strat)
-            && (pNext(lt->p) == strat->tail)
-            && (!pLmEqual((*it)->p,lt->p))
-            && pDivisibleBy(p,lt->lcm))
-            {
-              /*
-              *"NOT equal(...)" because in case of "equal" the element L[l]
-              *is "older" and has to be from theoretical point of view behind
-              *L[i], but we do not want to reorder L
-              */
-              (*it)->p2 = strat->tail;
-              /*
-              *L[l] will be canceled, we cannot cancel L[i] later on,
-              *so we mark it with "tail"
-              */
-              strat->L.erase(lt);
-            }
-            else
-            {
-              i_deleted = true;
-              strat->L.erase(*it);
-              it = iterators.erase(it);
-            }
+            /*
+            *"NOT equal(...)" because in case of "equal" the element lt
+            *is "older" and has to be from theoretical point of view behind
+            *it, but we do not want to reorder L
+            */
+            strat->L.erase(lt);
           }
-          if (!i_deleted)
-            ++it;
+          else
+          {
+            strat->L.erase(*it);
+          }
+          it = iterators.erase(it);
         }
+        else
+          ++it;
       }
-      else if ((*jt)->p2 == strat->tail)
-      {
-        /*now L[j] cannot be canceled any more and the tail can be removed*/
-        (*jt)->p2 = p;
-      }
-      ++jt;
     }
   }
 }
@@ -3671,80 +3641,55 @@ void chainCritPart (poly p,int ecart,kStrategy strat)
     *except the case the element (s,r) has also the same lcm
     *and is on the worst position with respect to (s,p) and (r,p)
     */
-    /*
-    *B enters to L/their order with respect to B is permutated for elements
-    *B[i].p with the same leading term
-    */
-    kMergeBintoL(strat);
-    for (auto jt = strat->L.begin(); jt != strat->L.end(); )
+    auto iterators = kMergeBintoL_and_return_iterators(strat);
+    for (auto jt = iterators.begin(); jt != iterators.end(); jt++)
     {
-      if (jt + 1 == strat->L.end())
+      for (auto it = jt + 1; it != iterators.end(); )
       {
-        /*now L[0] cannot be canceled any more and the tail can be removed*/
-        if (jt->p2 == strat->tail) jt->p2 = p;
-        break;
-      }
-      if (jt->p2 == p)
-      {
-        for (auto it = jt + 1; it != strat->L.end(); )
+        if (pLmEqual((*jt)->lcm,(*it)->lcm))
         {
-          bool i_deleted = false;
-          if ((it->p2 == p) && pLmEqual(jt->lcm,it->lcm))
+          /* it could be canceled but we search for a better one to cancel*/
+          strat->c3++;
+          auto lt = *it + 1;
+          if (isInPairsetL((lt,(*jt)->p1,(*it)->p1,strat)
+          && (pNext(lt->p) == strat->tail)
+          && (!pLmEqual((*it)->p,lt->p))
+          && _p_LmDivisibleByPart(p,currRing,
+                         lt->lcm,currRing,
+                         currRing->real_var_start, currRing->real_var_end))
           {
-            /*L[i] could be canceled but we search for a better one to cancel*/
-            strat->c3++;
-            auto lt = it + 1;
-            if (isInPairsetL(lt,jt->p1,it->p1,strat)
-            && (pNext(lt->p) == strat->tail)
-            && (!pLmEqual(it->p,lt->p))
-            && _p_LmDivisibleByPart(p,currRing,
-                           lt->lcm,currRing,
-                           currRing->real_var_start, currRing->real_var_end))
+            /*
+            *"NOT equal(...)" because in case of "equal" the element lt
+            *is "older" and has to be from theoretical point of view behind
+            *it, but we do not want to reorder L
+            */
+            if(TEST_OPT_DEBUG)
             {
-              /*
-              *"NOT equal(...)" because in case of "equal" the element L[l]
-              *is "older" and has to be from theoretical point of view behind
-              *L[i], but we do not want to reorder L
-              */
-              it->p2 = strat->tail;
-              /*
-              *L[l] will be canceled, we cannot cancel L[i] later on,
-              *so we mark it with "tail"
-              */
-              if(TEST_OPT_DEBUG)
-              {
-                PrintS("chain-crit-part: divisible_by p=");
-                p_wrp(p,currRing);
-                Print(" delete L[l]");
-                p_wrp(lt->lcm,currRing);
-                PrintLn();
-              }
-              strat->L.erase(lt);
+              PrintS("chain-crit-part: divisible_by p=");
+              p_wrp(p,currRing);
+              Print(" delete L[l]");
+              p_wrp(lt->lcm,currRing);
+              PrintLn();
             }
-            else
-            {
-              if(TEST_OPT_DEBUG)
-              {
-                PrintS("chain-crit-part: divisible_by(2) p=");
-                p_wrp(p,currRing);
-                Print(" delete L[i]");
-                p_wrp(it->lcm,currRing);
-                PrintLn();
-              }
-              i_deleted = true;
-              it = strat->L.erase(it);
-            }
+            strat->L.erase(lt);
           }
-          if (!i_deleted)
-            ++it;
+          else
+          {
+            if(TEST_OPT_DEBUG)
+            {
+              PrintS("chain-crit-part: divisible_by(2) p=");
+              p_wrp(p,currRing);
+              Print(" delete L[i]");
+              p_wrp((*it)->lcm,currRing);
+              PrintLn();
+            }
+            strat->L.erase(*it);
+          }
+          it = iterators.erase(it);
         }
+        else
+          ++it;
       }
-      else if (jt->p2 == strat->tail)
-      {
-        /*now L[j] cannot be canceled any more and the tail can be removed*/
-        jt->p2 = p;
-      }
-      ++jt;
     }
   }
 }
@@ -4028,75 +3973,50 @@ void chainCritRing (poly p,int, kStrategy strat)
   *except the case the element (s,r) has also the same lcm
   *and is on the worst position with respect to (s,p) and (r,p)
   */
-  /*
-  *B enters to L/their order with respect to B is permutated for elements
-  *B[i].p with the same leading term
-  */
-  kMergeBintoL(strat);
-  for (auto jt = strat->L.begin(); jt != strat->L.end(); )
+  auto iterators = kMergeBintoL_and_return_iterators(strat);
+  for (auto jt = iterators.begin(); jt != iterators.end(); jt++)
   {
-    if (jt + 1 == strat->L.end())
+    for (auto it = jt + 1; it != iterators.end(); jt++)
     {
-      /*now L[0] cannot be canceled any more and the tail can be removed*/
-      if (jt->p2 == strat->tail) jt->p2 = p;
-      break;
-    }
-    if (jt->p2 == p)
-    {
-      for (auto it = jt + 1; it != strat->L.end(); )
+      // Element is from B and has the same lcm as jt
+      if (n_DivBy(pGetCoeff((*jt)->lcm), pGetCoeff((*it)->lcm), currRing->cf)
+           && pLmEqual((*jt)->lcm,(*it)->lcm))
       {
-        bool i_deleted = false;
-        // Element is from B and has the same lcm as L[j]
-        if ((it->p2 == p) && n_DivBy(pGetCoeff(jt->lcm), pGetCoeff(it->lcm), currRing->cf)
-             && pLmEqual(jt->lcm,it->lcm))
-        {
-          /*L[i] could be canceled but we search for a better one to cancel*/
-          strat->c3++;
+        /* it could be canceled but we search for a better one to cancel*/
+        strat->c3++;
 #ifdef KDEBUG
-          if (TEST_OPT_DEBUG)
-          {
-            PrintS("--- chain criterion func chainCritRing type 3\n");
-            PrintS("strat->L[j].lcm:");
-            wrp(jt->lcm);
-            PrintS("  strat->L[i].lcm:");
-            wrp(it->lcm);
-            PrintLn();
-          }
-#endif
-          auto lt = it + 1;
-          if (isInPairsetL(lt,jt->p1,it->p1,strat)
-          && (pNext(lt->p) == strat->tail)
-          && (!pLmEqual(it->p,lt->p))
-          && pDivisibleBy(p,lt->lcm))
-          {
-            /*
-            *"NOT equal(...)" because in case of "equal" the element L[l]
-            *is "older" and has to be from theoretical point of view behind
-            *L[i], but we do not want to reorder L
-            */
-            it->p2 = strat->tail;
-            /*
-            *L[l] will be canceled, we cannot cancel L[i] later on,
-            *so we mark it with "tail"
-            */
-            strat->L.erase(lt);
-          }
-          else
-          {
-            i_deleted = true;
-            it = strat->L.erase(it);
-          }
+        if (TEST_OPT_DEBUG)
+        {
+          PrintS("--- chain criterion func chainCritRing type 3\n");
+          PrintS("strat->L[j].lcm:");
+          wrp((*jt)->lcm);
+          PrintS("  strat->L[i].lcm:");
+          wrp((*it)->lcm);
+          PrintLn();
         }
-        if (!i_deleted)
-          ++it;
+#endif
+        auto lt = *it + 1;
+        if (isInPairsetL(lt,(*jt)->p1,(*it)->p1,strat)
+        && (pNext(lt->p) == strat->tail)
+        && (!pLmEqual((*it)->p,lt->p))
+        && pDivisibleBy(p,lt->lcm))
+        {
+          /*
+          *"NOT equal(...)" because in case of "equal" the element lt
+          *is "older" and has to be from theoretical point of view behind
+          *it, but we do not want to reorder L
+          */
+          strat->L.erase(lt);
+        }
+        else
+        {
+          strat->L.erase(*it);
+        }
+        it = iterators.erase(it);
       }
+      else
+        ++it;
     }
-    else if (jt->p2 == strat->tail)
-    {
-      /*now L[j] cannot be canceled any more and the tail can be removed*/
-      jt->p2 = p;
-    }
-    ++jt;
   }
 }
 
