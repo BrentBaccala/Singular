@@ -3095,16 +3095,30 @@ void kMergeBintoL(kStrategy strat)
   }
 }
 
+/* merge set B into L, and return a vector of iterators pointing to the new
+ * elements in L, guaranteed to be in the same order they appear in L
+ */
+
 std::vector<LSet::iterator> kMergeBintoL_and_return_iterators(kStrategy strat)
 {
   std::vector<LSet::iterator> iterators(strat->B.size());
+  int s = strat->B.size();
   int i = 0;
   while (!strat->B.empty()) {
     auto Lobj = strat->B.top();
     strat->B.pop();
     iterators[i++] = strat->L.push(Lobj);
   }
-  return iterators;
+  std::vector<LSet::iterator> newiterators(s);
+  i = 0;
+  for (auto& Lq: strat->L) {
+    for (auto& Bq: iterators) {
+      if (&(*Bq) == &Lq) {
+        newiterators[i++] = Bq;
+      }
+    }
+  }
+  return newiterators;
 }
 
 /*2
