@@ -30,6 +30,7 @@
 
 #include <stdlib.h>
 #include <string.h>
+#include <algorithm>
 
 #ifdef KDEBUG
 #undef KDEBUG
@@ -3161,28 +3162,27 @@ void kMergeBintoL(kStrategy strat)
 
 /* merge set B into L, and return a vector of iterators pointing to the new
  * elements in L, guaranteed to be in the same order they appear in L
+ *
+ * The ordering is done to mimic previous versions of Singular so as
+ * to ensure that regression tests pass.  I know of no other reason to
+ * sort these iterators.
  */
 
 std::vector<LSet::iterator> kMergeBintoL_and_return_iterators(kStrategy strat)
 {
   std::vector<LSet::iterator> iterators(strat->B.size());
-  int s = strat->B.size();
   int i = 0;
   while (!strat->B.empty()) {
     auto Lobj = strat->B.top();
     strat->B.pop();
     iterators[i++] = strat->L.push(Lobj);
   }
-  std::vector<LSet::iterator> newiterators(s);
-  i = 0;
-  for (auto& Lq: strat->L) {
-    for (auto& Bq: iterators) {
-      if (&(*Bq) == &Lq) {
-        newiterators[i++] = Bq;
-      }
-    }
-  }
-  return newiterators;
+  // Sort iterators to match the ordering of their objects in L
+  std::sort(iterators.begin(), iterators.end(),
+    [&strat](LSet::iterator a, LSet::iterator b) {
+      return strat->L.key_comp()(*a, *b);
+    });
+  return iterators;
 }
 
 /*2
