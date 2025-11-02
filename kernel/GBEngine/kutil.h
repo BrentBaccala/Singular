@@ -12,6 +12,8 @@
 
 #include "writable_set.h"
 #include <vector>
+#include <unordered_map>
+#include <utility>
 
 #include "omalloc/omalloc.h"
 #ifdef HAVE_OMALLOC
@@ -289,9 +291,30 @@ public:
   KINLINE bool operator() (const LObject &lhs, const LObject &rhs) const;
 };
 
+// Hash function for (poly, poly) pairs used in LSet pair index
+struct PolyPairHash {
+  std::size_t operator()(const std::pair<poly, poly>& p) const {
+    // Combine the two pointer hashes
+    std::size_t h1 = std::hash<poly>{}(p.first);
+    std::size_t h2 = std::hash<poly>{}(p.second);
+    // Simple combination: XOR and shift
+    return h1 ^ (h2 << 1);
+  }
+};
+
 class LSet : public writable_set<LObject, CompareLObject> {
 private:
   unsigned seq = 0;   // increments by one on every insertion; used to determine ordering
+
+  // Index mapping canonicalized (p1,p2) pairs to iterators for fast lookup
+  // Pairs are canonicalized such that first <= second (by pointer comparison)
+  std::unordered_multimap<std::pair<poly, poly>, iterator, PolyPairHash> pair_index;
+
+  // Helper to canonicalize a (p1,p2) pair
+  static std::pair<poly, poly> canonicalize_pair(poly p1, poly p2) {
+    return (p1 <= p2) ? std::make_pair(p1, p2) : std::make_pair(p2, p1);
+  }
+
 public:
   using writable_set<LObject, CompareLObject>::iterator;
   using writable_set<LObject, CompareLObject>::begin;
@@ -302,13 +325,18 @@ public:
   using writable_set<LObject, CompareLObject>::empty;
   using writable_set<LObject, CompareLObject>::size;
   using writable_set<LObject, CompareLObject>::size_type;
-  using writable_set<LObject, CompareLObject>::reorder;
+  void reorder();
   KINLINE iterator push(LObject& lobject);
   KINLINE bool would_be_top(LObject& lobject);
   KINLINE void pop(void);
   KINLINE void pop_and_erase(void);
   KINLINE const LObject& top(void);
+  KINLINE iterator insert(LObject& lobject);
   iterator erase(iterator it);
+
+  // Fast lookup: find an iterator >= it where (p1,p2) or (p2,p1) matches
+  // Returns true if found, and updates it to point to the match
+  bool find_pair(poly p1, poly p2, iterator& it);
 };
 
 class skStrategy

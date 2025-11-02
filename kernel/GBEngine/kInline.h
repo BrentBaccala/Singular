@@ -1012,6 +1012,20 @@ KINLINE LSet::iterator LSet::push(LObject& lobject) {
   return insert(lobject);
 }
 
+KINLINE LSet::iterator LSet::insert(LObject& lobject) {
+  // Insert into the base writable_set
+  iterator it = writable_set<LObject, CompareLObject>::insert(lobject);
+
+  // Add to pair_index if both p1 and p2 are non-null
+  if (it->p1 != NULL && it->p2 != NULL)
+  {
+    auto key = canonicalize_pair(it->p1, it->p2);
+    pair_index.insert(std::make_pair(key, it));
+  }
+
+  return it;
+}
+
 KINLINE bool LSet::would_be_top(LObject& lobject) {
   /* Would lobject be the top object in the queue if it were pushed?
    * Yes if either the queue is empty or lobject is less than the first object.
@@ -1032,8 +1046,27 @@ KINLINE void LSet::pop(void) {
   /* We don't call our erase() method because it would deallocate
    * stuff in the LObject and we don't want that done here because we
    * copied top() (typically to strat->P) before we called pop().
+   * But we still need to remove from pair_index.
    */
-  writable_set<LObject, CompareLObject>::erase(begin());
+  iterator it = begin();
+  const LObject& Lp = *it;
+
+  // Remove from pair_index before erasing from the set
+  if (Lp.p1 != NULL && Lp.p2 != NULL)
+  {
+    auto key = canonicalize_pair(Lp.p1, Lp.p2);
+    auto range = pair_index.equal_range(key);
+    for (auto pit = range.first; pit != range.second; ++pit)
+    {
+      if (pit->second == it)
+      {
+        pair_index.erase(pit);
+        break;
+      }
+    }
+  }
+
+  writable_set<LObject, CompareLObject>::erase(it);
 }
 
 KINLINE void LSet::pop_and_erase(void) {

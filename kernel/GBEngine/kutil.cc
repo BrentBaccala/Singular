@@ -677,12 +677,11 @@ void initPairtest(kStrategy strat)
 */
 BOOLEAN isInPairsetL(LSet::iterator &it,poly p1,poly p2,kStrategy strat)
 {
-  for (; it != strat->L.end(); it++) {
-    if (((p1 == it->p1) && (p2 == it->p2))
-    ||  ((p1 == it->p2) && (p2 == it->p1)))
-      return TRUE;
-  }
-  return FALSE;
+  // Use the fast hash-based lookup
+  if (it != strat->L.end())
+    return strat->L.find_pair(p1, p2, it);
+  else
+    return FALSE;
 }
 
 int kFindInT(poly p, TSet T, int tlength)
@@ -1229,7 +1228,72 @@ LSet::iterator LSet::erase(LSet::iterator it) {
     strat->P.p1=NULL;
   }
   #endif
+
+  // Remove from pair_index before erasing from the set
+  if (Lp.p1 != NULL && Lp.p2 != NULL)
+  {
+    auto key = canonicalize_pair(Lp.p1, Lp.p2);
+    auto range = pair_index.equal_range(key);
+    for (auto pit = range.first; pit != range.second; ++pit)
+    {
+      if (pit->second == it)
+      {
+        pair_index.erase(pit);
+        break;
+      }
+    }
+  }
+
   return writable_set<LObject, CompareLObject>::erase(it);
+}
+
+/*2
+* Reorder L and rebuild pair_index with new iterators
+*/
+void LSet::reorder()
+{
+  // Call base class reorder - this invalidates all iterators
+  writable_set<LObject, CompareLObject>::reorder();
+
+  // Rebuild pair_index with new iterators
+  pair_index.clear();
+  for (iterator it = begin(); it != end(); ++it)
+  {
+    if (it->p1 != NULL && it->p2 != NULL)
+    {
+      auto key = canonicalize_pair(it->p1, it->p2);
+      pair_index.insert(std::make_pair(key, it));
+    }
+  }
+}
+
+/*2
+* Fast lookup for (p1,p2) pair in L starting from iterator it
+* Returns true if found, with it updated to point to the match
+* The pair can match in either order: (p1,p2) or (p2,p1)
+*/
+bool LSet::find_pair(poly p1, poly p2, iterator& it)
+{
+  if (p1 == NULL || p2 == NULL)
+    return FALSE;
+
+  auto key = canonicalize_pair(p1, p2);
+  auto range = pair_index.equal_range(key);
+
+  // Search through all iterators with this key
+  for (auto pit = range.first; pit != range.second; ++pit)
+  {
+    iterator candidate = pit->second;
+    // Check if candidate is at or after it in the ordering
+    // candidate >= it means NOT (candidate < it)
+    if (candidate == it || !key_comp()(*candidate, *it))
+    {
+      it = candidate;
+      return TRUE;
+    }
+  }
+
+  return FALSE;
 }
 
 /*2
