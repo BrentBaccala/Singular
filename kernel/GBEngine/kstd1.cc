@@ -2158,9 +2158,6 @@ poly kNF1 (ideal F,ideal Q,poly q, kStrategy strat, int lazyReduce)
     h.SetpFDeg();
     enterT(&h,strat);
   }
-#ifdef KDEBUG
-//  kDebugPrint(strat);
-#endif
   /*- compute------------------------------------------- -*/
   p = pCopy(q);
   deleteHC(&p,&o,&j,strat);

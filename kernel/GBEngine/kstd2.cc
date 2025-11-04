@@ -2636,9 +2636,7 @@ ideal bba (ideal F, ideal Q,intvec *w,bigintmat *hilb,kStrategy strat)
     kStratInitChangeTailRing(strat);
 #endif
 
-#ifdef KDEBUG
-  //kDebugPrint(strat);
-#endif
+  if (BVERBOSE(23)) kDebugPrint(strat);
   /* compute------------------------------------------------------- */
   while (! strat->L.empty())
   {
@@ -3140,9 +3138,7 @@ ideal sba (ideal F0, ideal Q,intvec *w,bigintmat *hilb,kStrategy strat)
     strat->sbaEnterS = -1;
   }
   kTest_TS(strat);
-#ifdef KDEBUG
-  //kDebugPrint(strat);
-#endif
+  if (BVERBOSE(23)) kDebugPrint(strat);
   /* compute------------------------------------------------------- */
   while (! strat->L.empty())
   {
@@ -4588,9 +4584,7 @@ ideal bbaShift(ideal F, ideal Q,intvec *w,bigintmat *hilb,kStrategy strat)
   strat->tailRing=currRing;
 #endif
 
-#ifdef KDEBUG
-  //kDebugPrint(strat);
-#endif
+  if (BVERBOSE(23)) kDebugPrint(strat);
   /* compute------------------------------------------------------- */
   while (! strat->L.empty())
   {
