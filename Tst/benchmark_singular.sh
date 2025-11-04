@@ -8,6 +8,10 @@ KATSURA_N=5
 GB_ALGORITHM="std"
 V2_NAME="V2-build"
 WARMUP_RUN=0
+SKIP_V1=0
+SHOW_INPUT=0
+SHOW_OUTPUT=0
+USE_PROT=0
 NEWELLP1_FILE=~/Downloads/newellp1
 TEMP_DIR=$(mktemp -d)
 
@@ -42,6 +46,10 @@ OPTIONS:
                             Options: std, modstd, groebner, slimgb, hilb, fglm
   --v2-name NAME            Name for V2 version in output (default: V2-build)
   --warmup                  Perform an untimed warmup run before timed runs
+  --skip-v1                 Only run Singular-build, skip Singular-spielwiese
+  --show-input              Display the input file content before each test
+  --show-output             Display the output from each run
+  --prot                    Enable option(prot) for protocol output during computation
   -h, --help                Show this help message
   -a, --all                 Run all available tests (default if no tests specified)
 
@@ -69,6 +77,10 @@ EXAMPLES:
   $0 --algorithm slimgb --cyclic-n 7 --cyclic-qq-dp
   $0 --v2-name V2-pr1301 --cyclic
   $0 --warmup --cyclic-qq-dp
+  $0 --skip-v1 --v2-name V2-pr1301 --cyclic
+  $0 --show-input --cyclic-qq-dp
+  $0 --show-output --cyclic-qq-dp
+  $0 --prot --show-output --cyclic-qq-dp
 
 EOF
     exit 0
@@ -101,6 +113,12 @@ while [[ $# -gt 0 ]]; do
                     exit 1
                     ;;
             esac
+            # Map modstd to modStd for Singular
+            if [ "$GB_ALGORITHM" == "modstd" ]; then
+                GB_ALGORITHM_CALL="modStd"
+            else
+                GB_ALGORITHM_CALL="$GB_ALGORITHM"
+            fi
             shift 2
             ;;
         --v2-name)
@@ -109,6 +127,22 @@ while [[ $# -gt 0 ]]; do
             ;;
         --warmup)
             WARMUP_RUN=1
+            shift
+            ;;
+        --skip-v1)
+            SKIP_V1=1
+            shift
+            ;;
+        --show-input)
+            SHOW_INPUT=1
+            shift
+            ;;
+        --show-output)
+            SHOW_OUTPUT=1
+            shift
+            ;;
+        --prot)
+            USE_PROT=1
             shift
             ;;
         -h|--help)
@@ -214,8 +248,15 @@ echo "Number of runs per test: $NUM_RUNS"
 echo "Cyclic n: $CYCLIC_N"
 echo "Katsura n: $KATSURA_N"
 echo "Algorithm: $GB_ALGORITHM"
+if [ "$GB_ALGORITHM" == "modstd" ]; then
+    echo "  (calling as: modStd)"
+fi
 echo "V2 name: $V2_NAME"
 echo "Warmup run: $([ $WARMUP_RUN -eq 1 ] && echo 'enabled' || echo 'disabled')"
+echo "Skip V1: $([ $SKIP_V1 -eq 1 ] && echo 'yes' || echo 'no')"
+echo "Show input: $([ $SHOW_INPUT -eq 1 ] && echo 'yes' || echo 'no')"
+echo "Show output: $([ $SHOW_OUTPUT -eq 1 ] && echo 'yes' || echo 'no')"
+echo "Protocol output: $([ $USE_PROT -eq 1 ] && echo 'enabled' || echo 'disabled')"
 echo "Temporary directory: $TEMP_DIR"
 echo ""
 
@@ -251,80 +292,96 @@ create_test_file() {
         cyclic_qq_dp)
             cat > "$filename" << EOF
 LIB "polylib.lib";
+LIB "modstd.lib";
 ring r = 0,($cyclic_vars),dp;
 ideal i = cyclic($CYCLIC_N);
+$([ $USE_PROT -eq 1 ] && echo "option(prot);")
 option(redSB);
-ideal j = $GB_ALGORITHM(i);
+ideal j = $GB_ALGORITHM_CALL(i);
 quit;
 EOF
             ;;
         cyclic_zz_dp)
             cat > "$filename" << EOF
 LIB "polylib.lib";
+LIB "modstd.lib";
 ring r = 32003,($cyclic_vars),dp;
 ideal i = cyclic($CYCLIC_N);
+$([ $USE_PROT -eq 1 ] && echo "option(prot);")
 option(redSB);
-ideal j = $GB_ALGORITHM(i);
+ideal j = $GB_ALGORITHM_CALL(i);
 quit;
 EOF
             ;;
         cyclic_qq_lp)
             cat > "$filename" << EOF
 LIB "polylib.lib";
+LIB "modstd.lib";
 ring r = 0,($cyclic_vars),lp;
 ideal i = cyclic($CYCLIC_N);
+$([ $USE_PROT -eq 1 ] && echo "option(prot);")
 option(redSB);
-ideal j = $GB_ALGORITHM(i);
+ideal j = $GB_ALGORITHM_CALL(i);
 quit;
 EOF
             ;;
         cyclic_zz_lp)
             cat > "$filename" << EOF
 LIB "polylib.lib";
+LIB "modstd.lib";
 ring r = 32003,($cyclic_vars),lp;
 ideal i = cyclic($CYCLIC_N);
+$([ $USE_PROT -eq 1 ] && echo "option(prot);")
 option(redSB);
-ideal j = $GB_ALGORITHM(i);
+ideal j = $GB_ALGORITHM_CALL(i);
 quit;
 EOF
             ;;
         cyclic_hom_qq_dp)
             cat > "$filename" << EOF
 LIB "polylib.lib";
+LIB "modstd.lib";
 ring r = 0,($cyclic_vars,h),dp;
 ideal i = homog(cyclic($CYCLIC_N),h);
+$([ $USE_PROT -eq 1 ] && echo "option(prot);")
 option(redSB);
-ideal j = $GB_ALGORITHM(i);
+ideal j = $GB_ALGORITHM_CALL(i);
 quit;
 EOF
             ;;
         cyclic_hom_zz_dp)
             cat > "$filename" << EOF
 LIB "polylib.lib";
+LIB "modstd.lib";
 ring r = 32003,($cyclic_vars,h),dp;
 ideal i = homog(cyclic($CYCLIC_N),h);
+$([ $USE_PROT -eq 1 ] && echo "option(prot);")
 option(redSB);
-ideal j = $GB_ALGORITHM(i);
+ideal j = $GB_ALGORITHM_CALL(i);
 quit;
 EOF
             ;;
         katsura_qq_dp)
             cat > "$filename" << EOF
 LIB "polylib.lib";
+LIB "modstd.lib";
 ring r = 0,($katsura_vars),dp;
 ideal i = katsura($KATSURA_N);
+$([ $USE_PROT -eq 1 ] && echo "option(prot);")
 option(redSB);
-ideal j = $GB_ALGORITHM(i);
+ideal j = $GB_ALGORITHM_CALL(i);
 quit;
 EOF
             ;;
         katsura_zz_dp)
             cat > "$filename" << EOF
 LIB "polylib.lib";
+LIB "modstd.lib";
 ring r = 32003,($katsura_vars),dp;
 ideal i = katsura($KATSURA_N);
+$([ $USE_PROT -eq 1 ] && echo "option(prot);")
 option(redSB);
-ideal j = $GB_ALGORITHM(i);
+ideal j = $GB_ALGORITHM_CALL(i);
 quit;
 EOF
             ;;
@@ -345,11 +402,28 @@ run_benchmark() {
     echo -e "${BLUE}Testing $version_name - $test_name${NC}"
     echo "----------------------------------------"
     
+    # Show input file if requested
+    if [ $SHOW_INPUT -eq 1 ]; then
+        echo -e "${YELLOW}Input file ($input_file):${NC}"
+        echo "- - - - - - - - - - - - - - - - - - - -"
+        cat "$input_file"
+        echo "- - - - - - - - - - - - - - - - - - - -"
+        echo ""
+    fi
+    
     # Perform warmup run if requested
     if [ $WARMUP_RUN -eq 1 ]; then
         echo -n "Warmup run... "
-        LD_LIBRARY_PATH="$ld_library_path" SINGULARPATH="$singular_path" "$executable" < "$input_file" > /dev/null 2>&1
-        echo "done"
+        if [ $SHOW_OUTPUT -eq 1 ]; then
+            echo ""
+            echo -e "${YELLOW}Warmup output:${NC}"
+            echo "- - - - - - - - - - - - - - - - - - - -"
+            LD_LIBRARY_PATH="$ld_library_path" SINGULARPATH="$singular_path" "$executable" < "$input_file" 2>&1
+            echo "- - - - - - - - - - - - - - - - - - - -"
+        else
+            LD_LIBRARY_PATH="$ld_library_path" SINGULARPATH="$singular_path" "$executable" < "$input_file" > /dev/null 2>&1
+            echo "done"
+        fi
     fi
     
     local times=()
@@ -360,7 +434,13 @@ run_benchmark() {
         
         # Run with time measurement
         local start=$(date +%s.%N)
-        LD_LIBRARY_PATH="$ld_library_path" SINGULARPATH="$singular_path" "$executable" < "$input_file" > /dev/null 2>&1
+        if [ $SHOW_OUTPUT -eq 1 ]; then
+            # Save output to temp file for timing purposes
+            local output_file="$TEMP_DIR/output_${version_name}_${test_name}_run${i}.txt"
+            LD_LIBRARY_PATH="$ld_library_path" SINGULARPATH="$singular_path" "$executable" < "$input_file" | tee "$output_file" 2>&1
+        else
+            LD_LIBRARY_PATH="$ld_library_path" SINGULARPATH="$singular_path" "$executable" < "$input_file" > /dev/null 2>&1
+        fi
         local end=$(date +%s.%N)
         
         local runtime=$(echo "$end - $start" | bc)
@@ -368,6 +448,15 @@ run_benchmark() {
         total=$(echo "$total + $runtime" | bc)
         
         echo "${runtime}s"
+        
+        # Show output if requested
+        if [ $SHOW_OUTPUT -eq 1 ]; then
+            echo -e "${YELLOW}Output from run $i:${NC}"
+            echo "- - - - - - - - - - - - - - - - - - - -"
+            cat "$output_file"
+            echo "- - - - - - - - - - - - - - - - - - - -"
+            echo ""
+        fi
     done
     
     # Calculate statistics
@@ -470,13 +559,18 @@ echo -e "${YELLOW}Tests to run: ${#TESTS_TO_RUN[@]}${NC}"
 echo ""
 
 # Run all benchmarks for Version 1
-echo -e "${YELLOW}=== Running benchmarks for Version 1 (spielwiese) ===${NC}"
-echo ""
+if [ $SKIP_V1 -eq 0 ]; then
+    echo -e "${YELLOW}=== Running benchmarks for Version 1 (spielwiese) ===${NC}"
+    echo ""
 
-for test_spec in "${TESTS_TO_RUN[@]}"; do
-    IFS=':' read -r test_name test_file <<< "$test_spec"
-    run_benchmark "V1-spielwiese" "$LD_PATH_V1" "$SING_PATH_V1" "$EXEC_V1" "$test_name" "$test_file"
-done
+    for test_spec in "${TESTS_TO_RUN[@]}"; do
+        IFS=':' read -r test_name test_file <<< "$test_spec"
+        run_benchmark "V1-spielwiese" "$LD_PATH_V1" "$SING_PATH_V1" "$EXEC_V1" "$test_name" "$test_file"
+    done
+else
+    echo -e "${YELLOW}=== Skipping Version 1 (spielwiese) ===${NC}"
+    echo ""
+fi
 
 # Run all benchmarks for Version 2
 echo -e "${YELLOW}=== Running benchmarks for $V2_NAME ===${NC}"
@@ -492,11 +586,6 @@ echo "================================"
 echo -e "${YELLOW}SUMMARY OF ALL BENCHMARKS${NC}"
 echo "================================"
 echo ""
-
-# Print comparison table (text format)
-echo -e "${BLUE}Average Times Comparison:${NC}"
-printf "%-25s %-25s %-25s\n" "Test" "V1-spielwiese" "$V2_NAME"
-printf "%-25s %-25s %-25s\n" "----" "-------------" "--------"
 
 # Parse results and create comparison
 declare -A v1_times
@@ -516,74 +605,118 @@ while IFS='|' read -r version test avg stddev min max total; do
     fi
 done < "$TEMP_DIR/results.txt"
 
-# Print comparison in text format
-for test in "${!v1_times[@]}"; do
-    v1="${v1_times[$test]}"
-    v2="${v2_times[$test]}"
-    v1_sd="${v1_stddev[$test]}"
-    v2_sd="${v2_stddev[$test]}"
+# Print comparison table (text format)
+if [ $SKIP_V1 -eq 1 ]; then
+    # Only V2 results
+    echo -e "${BLUE}Results for $V2_NAME:${NC}"
+    printf "%-30s %-20s\n" "Test" "Time"
+    printf "%-30s %-20s\n" "----" "----"
     
-    printf "%-25s %-25s %-25s" "$test" "${v1}s (±${v1_sd})" "${v2}s (±${v2_sd})"
+    for test in "${!v2_times[@]}"; do
+        v2="${v2_times[$test]}"
+        v2_sd="${v2_stddev[$test]}"
+        printf "%-30s %-20s\n" "$test" "${v2}s (±${v2_sd})"
+    done
+else
+    # Comparison table
+    echo -e "${BLUE}Average Times Comparison:${NC}"
+    printf "%-30s %-25s %-25s\n" "Test" "V1-spielwiese" "$V2_NAME"
+    printf "%-30s %-25s %-25s\n" "----" "-------------" "--------"
     
-    # Calculate and show speedup
-    if [ -n "$v1" ] && [ -n "$v2" ]; then
-        speedup=$(echo "scale=2; $v1 / $v2" | bc)
-        if (( $(echo "$speedup > 1.05" | bc -l) )); then
-            echo -e " ${GREEN}(V2 ${speedup}x faster)${NC}"
-        elif (( $(echo "$speedup < 0.95" | bc -l) )); then
-            speedup=$(echo "scale=2; $v2 / $v1" | bc)
-            echo -e " ${RED}(V1 ${speedup}x faster)${NC}"
+    for test in "${!v1_times[@]}"; do
+        v1="${v1_times[$test]}"
+        v2="${v2_times[$test]}"
+        v1_sd="${v1_stddev[$test]}"
+        v2_sd="${v2_stddev[$test]}"
+        
+        printf "%-30s %-25s %-25s" "$test" "${v1}s (±${v1_sd})" "${v2}s (±${v2_sd})"
+        
+        # Calculate and show speedup
+        if [ -n "$v1" ] && [ -n "$v2" ]; then
+            speedup=$(echo "scale=2; $v1 / $v2" | bc)
+            if (( $(echo "$speedup > 1.05" | bc -l) )); then
+                echo -e " ${GREEN}(V2 ${speedup}x faster)${NC}"
+            elif (( $(echo "$speedup < 0.95" | bc -l) )); then
+                speedup=$(echo "scale=2; $v2 / $v1" | bc)
+                echo -e " ${RED}(V1 ${speedup}x faster)${NC}"
+            else
+                echo " (similar)"
+            fi
         else
-            echo " (similar)"
+            echo ""
         fi
-    else
-        echo ""
-    fi
-done
+    done
+fi
 
 echo ""
 echo "================================"
 
 # Now create markdown format
 MARKDOWN_FILE="$TEMP_DIR/results.md"
-cat > "$MARKDOWN_FILE" << MDEOF
+
+if [ $SKIP_V1 -eq 1 ]; then
+    # Only V2 markdown
+    cat > "$MARKDOWN_FILE" << MDEOF
+## Results for $V2_NAME
+
+| Test | Time |
+|------|------|
+MDEOF
+
+    # Sort tests for consistent output
+    readarray -t sorted_tests < <(printf '%s\n' "${!v2_times[@]}" | sort)
+    
+    for test in "${sorted_tests[@]}"; do
+        v2="${v2_times[$test]}"
+        v2_sd="${v2_stddev[$test]}"
+        
+        # Format numbers with leading zeros
+        v2_fmt=$(printf "%.4f" "$v2")
+        v2_sd_fmt=$(printf "%.4f" "$v2_sd")
+        
+        echo "| $test | ${v2_fmt}s (±${v2_sd_fmt}) |" >> "$MARKDOWN_FILE"
+    done
+else
+    # Comparison markdown
+    cat > "$MARKDOWN_FILE" << MDEOF
 ## Average Times Comparison
 
 | Test | V1-spielwiese | $V2_NAME | Comparison |
 |------|---------------|----------|------------|
 MDEOF
 
-# Sort tests for consistent output
-readarray -t sorted_tests < <(printf '%s\n' "${!v1_times[@]}" | sort)
-
-for test in "${sorted_tests[@]}"; do
-    v1="${v1_times[$test]}"
-    v2="${v2_times[$test]}"
-    v1_sd="${v1_stddev[$test]}"
-    v2_sd="${v2_stddev[$test]}"
+    # Sort tests for consistent output
+    readarray -t sorted_tests < <(printf '%s\n' "${!v1_times[@]}" | sort)
     
-    # Format numbers with leading zeros
-    v1_fmt=$(printf "%.4f" "$v1")
-    v2_fmt=$(printf "%.4f" "$v2")
-    v1_sd_fmt=$(printf "%.4f" "$v1_sd")
-    v2_sd_fmt=$(printf "%.4f" "$v2_sd")
-    
-    # Calculate comparison
-    comparison=""
-    if [ -n "$v1" ] && [ -n "$v2" ]; then
-        speedup=$(echo "scale=2; $v1 / $v2" | bc)
-        if (( $(echo "$speedup > 1.05" | bc -l) )); then
-            comparison="V2 ${speedup}x faster"
-        elif (( $(echo "$speedup < 0.95" | bc -l) )); then
-            speedup=$(echo "scale=2; $v2 / $v1" | bc)
-            comparison="V1 ${speedup}x faster"
-        else
-            comparison="similar"
+    for test in "${sorted_tests[@]}"; do
+        v1="${v1_times[$test]}"
+        v2="${v2_times[$test]}"
+        v1_sd="${v1_stddev[$test]}"
+        v2_sd="${v2_stddev[$test]}"
+        
+        # Format numbers with leading zeros
+        v1_fmt=$(printf "%.4f" "$v1")
+        v2_fmt=$(printf "%.4f" "$v2")
+        v1_sd_fmt=$(printf "%.4f" "$v1_sd")
+        v2_sd_fmt=$(printf "%.4f" "$v2_sd")
+        
+        # Calculate comparison
+        comparison=""
+        if [ -n "$v1" ] && [ -n "$v2" ]; then
+            speedup=$(echo "scale=2; $v1 / $v2" | bc)
+            if (( $(echo "$speedup > 1.05" | bc -l) )); then
+                comparison="V2 ${speedup}x faster"
+            elif (( $(echo "$speedup < 0.95" | bc -l) )); then
+                speedup=$(echo "scale=2; $v2 / $v1" | bc)
+                comparison="V1 ${speedup}x faster"
+            else
+                comparison="similar"
+            fi
         fi
-    fi
-    
-    echo "| $test | ${v1_fmt}s (±${v1_sd_fmt}) | ${v2_fmt}s (±${v2_sd_fmt}) | $comparison |" >> "$MARKDOWN_FILE"
-done
+        
+        echo "| $test | ${v1_fmt}s (±${v1_sd_fmt}) | ${v2_fmt}s (±${v2_sd_fmt}) | $comparison |" >> "$MARKDOWN_FILE"
+    done
+fi
 
 echo ""
 echo -e "${YELLOW}Markdown Output:${NC}"
