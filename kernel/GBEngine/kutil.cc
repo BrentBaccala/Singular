@@ -31,6 +31,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <algorithm>
+#include <unordered_map>
 
 #ifdef KDEBUG
 #undef KDEBUG
@@ -3377,21 +3378,49 @@ void chainCritNormal (poly p,int ecart,kStrategy strat)
     *and cancel all the other elements of type (r,p) with this lcm
     *except the case the element (s,r) has also the same lcm
     *and is on the worst position with respect to (s,p) and (r,p)
+    *
+    *OPTIMIZATION: Group by lcm first to avoid O(n²) pLmEqual comparisons
+    *when elements have different lcm values (common case).
+    *This reduces tree iterator overhead from O(n²) to O(n + Σg²) where
+    *g is the size of each group sharing the same lcm (typically small).
     */
     auto iterators = kMergeBintoL_and_return_iterators(strat);
-    for (auto jt = iterators.begin(); jt != iterators.end(); jt++)
-    {
-      for (auto it = jt + 1; it != iterators.end(); )
-      {
-        if (pLmEqual((*jt)->lcm,(*it)->lcm))
-        {
-          /* it could be canceled but we search for a better one to cancel*/
+
+    // Group indices by lcm polynomial (using pointer for fast comparison)
+    std::unordered_map<poly, std::vector<size_t>> lcm_groups;
+    lcm_groups.reserve(iterators.size() / 2);  // Heuristic: expect ~50% unique lcm values
+
+    for (size_t i = 0; i < iterators.size(); i++) {
+      lcm_groups[iterators[i]->lcm].push_back(i);
+    }
+
+    // Track which iterator indices to remove (mark for deletion)
+    std::vector<bool> to_remove(iterators.size(), false);
+
+    // Process each group of elements sharing the same lcm
+    for (const auto& [lcm_ptr, group_indices] : lcm_groups) {
+      if (group_indices.size() <= 1) continue;  // No pairs to compare
+
+      // Apply original nested loop logic within this group
+      for (size_t j_pos = 0; j_pos < group_indices.size(); j_pos++) {
+        size_t j_idx = group_indices[j_pos];
+        if (to_remove[j_idx]) continue;
+
+        auto jt = iterators[j_idx];
+
+        for (size_t i_pos = j_pos + 1; i_pos < group_indices.size(); i_pos++) {
+          size_t i_idx = group_indices[i_pos];
+          if (to_remove[i_idx]) continue;
+
+          auto it = iterators[i_idx];
+
+          // No need for pLmEqual check - all elements in group have equal lcm
           strat->c3++;
-          auto lt = *it + 1;
-          if (isInPairsetL(lt,(*jt)->p1,(*it)->p1,strat)
-          && (pNext(lt->p) == strat->tail)
-          && (!pLmEqual((*it)->p,lt->p))
-          && pDivisibleBy(p,lt->lcm))
+          auto lt = it + 1;
+          if (isInPairsetL(lt, jt->p1, it->p1, strat)
+              && (pNext(lt->p) == strat->tail)
+              && (!pLmEqual(it->p, lt->p))
+              && pDivisibleBy(p, lt->lcm))
           {
             /*
             *"NOT equal(...)" because in case of "equal" the element lt
@@ -3402,12 +3431,18 @@ void chainCritNormal (poly p,int ecart,kStrategy strat)
           }
           else
           {
-            strat->L.erase(*it);
+            strat->L.erase(it);
           }
-          it = iterators.erase(it);
+          to_remove[i_idx] = true;
         }
-        else
-          ++it;
+      }
+    }
+
+    // Remove marked elements from iterators vector (batch erase from end)
+    // Iterate backwards to maintain valid indices during erasure
+    for (ssize_t i = iterators.size() - 1; i >= 0; i--) {
+      if (to_remove[i]) {
+        iterators.erase(iterators.begin() + i);
       }
     }
   }
