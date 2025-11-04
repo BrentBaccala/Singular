@@ -28,54 +28,77 @@ BOOLEAN pCompareChain (poly p,poly p1,poly p2,poly lcm, const ring R)
   long p2_exp[N+1];
   long lcm_exp[N+1];
 
-  // Fetch each exponent exactly once - O(N) instead of O(N²) or O(N³)
+  // Early termination optimization: Track which variables differ
+  bool p_diff[N+1];   // Where p != lcm
+  bool p1_diff[N+1];  // Where p1 != lcm
+  bool p2_diff[N+1];  // Where p2 != lcm
+
+  int p_diff_count = 0;
+  int p1_diff_count = 0;
+  int p2_diff_count = 0;
+
+  // Fetch each exponent exactly once and compute difference indicators
   for (int i = 1; i <= N; i++) {
     p_exp[i] = p_GetExp(p, i, R);
     p1_exp[i] = p_GetExp(p1, i, R);
     p2_exp[i] = p_GetExp(p2, i, R);
     lcm_exp[i] = p_GetExp(lcm, i, R);
+
+    p_diff[i] = (p_exp[i] != lcm_exp[i]);
+    p1_diff[i] = (p1_exp[i] != lcm_exp[i]);
+    p2_diff[i] = (p2_exp[i] != lcm_exp[i]);
+
+    if (p_diff[i]) p_diff_count++;
+    if (p1_diff[i]) p1_diff_count++;
+    if (p2_diff[i]) p2_diff_count++;
   }
 
-  // Original logic, now using cached values (simple array lookups)
+  // Early termination checks based on difference patterns
+  // Chain criterion needs at least 2 variables where p differs from lcm
+  if (p_diff_count <= 1) return FALSE;
+
+  // If p1 or p2 equals lcm everywhere, chain criterion cannot apply
+  if (p1_diff_count == 0 || p2_diff_count == 0) return FALSE;
+
+  // Original divisibility check
   for (j=N; j; j--)
     if (p_exp[j] > lcm_exp[j]) return FALSE;
   if (pGetComp(p) != pGetComp(lcm)) return FALSE;
 
+  // Main chain criterion loop - use pre-computed difference arrays
   for (j=N; j; j--)
   {
-    if (p1_exp[j] != lcm_exp[j])
+    if (p1_diff[j])  // p1 differs from lcm at position j
     {
-      if (p_exp[j] != lcm_exp[j])
+      if (p_diff[j])  // p also differs at j
       {
+        // Search for k where both p and p2 differ from lcm
         for (k=N; k>j; k--)
         {
-          if ((p_exp[k] != lcm_exp[k])
-          && (p2_exp[k] != lcm_exp[k]))
+          if (p_diff[k] && p2_diff[k])
             return TRUE;
         }
         for (k=j-1; k; k--)
         {
-          if ((p_exp[k] != lcm_exp[k])
-          && (p2_exp[k] != lcm_exp[k]))
+          if (p_diff[k] && p2_diff[k])
             return TRUE;
         }
         return FALSE;
       }
     }
-    else if (p2_exp[j] != lcm_exp[j])
+    else if (p2_diff[j])  // p2 differs from lcm at position j (but not p1)
     {
-      if (p_exp[j] != lcm_exp[j])
+      if (p_diff[j])  // p also differs at j
       {
+        // Search for k where both p and p1 differ from lcm
         for (k=N; k>j; k--)
         {
-          if ((p_exp[k] != lcm_exp[k])
-          && (p1_exp[k] != lcm_exp[k]))
+          if (p_diff[k] && p1_diff[k])
             return TRUE;
         }
         for (k=j-1; k!=0 ; k--)
         {
-          if ((p_exp[k] != lcm_exp[k])
-          && (p1_exp[k] != lcm_exp[k]))
+          if (p_diff[k] && p1_diff[k])
             return TRUE;
         }
         return FALSE;
