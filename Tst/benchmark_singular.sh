@@ -6,13 +6,14 @@ NUM_RUNS=5
 CYCLIC_N=5
 KATSURA_N=5
 GB_ALGORITHM="std"
+GB_ALGORITHM_CALL="std"
 V2_NAME="V2-build"
 WARMUP_RUN=0
 SKIP_V1=0
 SHOW_INPUT=0
 SHOW_OUTPUT=0
 USE_PROT=0
-NEWELLP1_FILE=~/Downloads/newellp1
+SHOW_STRATEGY=0
 TEMP_DIR=$(mktemp -d)
 
 # Test flags (all enabled by default)
@@ -43,26 +44,27 @@ OPTIONS:
   --cyclic-n N              Number of variables for cyclic tests (default: 5)
   --katsura-n N             Number of variables for katsura tests (default: 5)
   --algorithm ALG           Groebner basis algorithm to use (default: std)
-                            Options: std, modstd, groebner, slimgb, hilb, fglm
+                            Options: std, modstd, groebner, slimgb, sba, hilb, fglm
   --v2-name NAME            Name for V2 version in output (default: V2-build)
   --warmup                  Perform an untimed warmup run before timed runs
   --skip-v1                 Only run Singular-build, skip Singular-spielwiese
   --show-input              Display the input file content before each test
-  --show-output             Display the output from each run
+  --show-output             Display the output from each run (shows live output)
   --prot                    Enable option(prot) for protocol output during computation
+  --show-strategy           Enable option bit 23 to display strategy information
   -h, --help                Show this help message
   -a, --all                 Run all available tests (default if no tests specified)
 
 TESTS (can specify multiple):
-  --newellp1               Run newellp1 test
-  --cyclic-qq-dp           Run cyclic(5) with QQ coefficients and dp ordering
-  --cyclic-zz-dp           Run cyclic(5) with ZZ/32003 and dp ordering
-  --cyclic-qq-lp           Run cyclic(5) with QQ and lp ordering
-  --cyclic-zz-lp           Run cyclic(5) with ZZ/32003 and lp ordering
-  --cyclic-hom-qq          Run homogenized cyclic(5) with QQ and dp
-  --cyclic-hom-zz          Run homogenized cyclic(5) with ZZ/32003 and dp
-  --katsura-qq             Run katsura(5) with QQ and dp
-  --katsura-zz             Run katsura(5) with ZZ/32003 and dp
+  --newellp1               Run newellp1 test (embedded in script)
+  --cyclic-qq-dp           Run cyclic(n) with QQ coefficients and dp ordering
+  --cyclic-zz-dp           Run cyclic(n) with ZZ/32003 and dp ordering
+  --cyclic-qq-lp           Run cyclic(n) with QQ and lp ordering
+  --cyclic-zz-lp           Run cyclic(n) with ZZ/32003 and lp ordering
+  --cyclic-hom-qq          Run homogenized cyclic(n) with QQ and dp
+  --cyclic-hom-zz          Run homogenized cyclic(n) with ZZ/32003 and dp
+  --katsura-qq             Run katsura(n) with QQ and dp
+  --katsura-zz             Run katsura(n) with ZZ/32003 and dp
   --cyclic                 Run all cyclic tests
   --katsura                Run all katsura tests
 
@@ -81,6 +83,8 @@ EXAMPLES:
   $0 --show-input --cyclic-qq-dp
   $0 --show-output --cyclic-qq-dp
   $0 --prot --show-output --cyclic-qq-dp
+  $0 --show-strategy --show-output --cyclic-qq-dp
+  $0 --algorithm sba --cyclic-qq-dp
 
 EOF
     exit 0
@@ -105,11 +109,11 @@ while [[ $# -gt 0 ]]; do
         --algorithm)
             GB_ALGORITHM="$2"
             case $GB_ALGORITHM in
-                std|modstd|groebner|slimgb|hilb|fglm)
+                std|modstd|groebner|slimgb|sba|hilb|fglm)
                     ;;
                 *)
                     echo "Error: Unknown algorithm '$GB_ALGORITHM'"
-                    echo "Valid options: std, modstd, groebner, slimgb, hilb, fglm"
+                    echo "Valid options: std, modstd, groebner, slimgb, sba, hilb, fglm"
                     exit 1
                     ;;
             esac
@@ -143,6 +147,10 @@ while [[ $# -gt 0 ]]; do
             ;;
         --prot)
             USE_PROT=1
+            shift
+            ;;
+        --show-strategy)
+            SHOW_STRATEGY=1
             shift
             ;;
         -h|--help)
@@ -257,6 +265,7 @@ echo "Skip V1: $([ $SKIP_V1 -eq 1 ] && echo 'yes' || echo 'no')"
 echo "Show input: $([ $SHOW_INPUT -eq 1 ] && echo 'yes' || echo 'no')"
 echo "Show output: $([ $SHOW_OUTPUT -eq 1 ] && echo 'yes' || echo 'no')"
 echo "Protocol output: $([ $USE_PROT -eq 1 ] && echo 'enabled' || echo 'disabled')"
+echo "Show strategy: $([ $SHOW_STRATEGY -eq 1 ] && echo 'enabled' || echo 'disabled')"
 echo "Temporary directory: $TEMP_DIR"
 echo ""
 
@@ -267,6 +276,33 @@ trap "rm -rf $TEMP_DIR" EXIT
 create_test_file() {
     local test_name=$1
     local filename="$TEMP_DIR/${test_name}.sing"
+    
+    # Handle newellp1 specially
+    if [ "$test_name" == "newellp1" ]; then
+        cat > "$filename" << 'EOF'
+ring R=QQ, (x,y,z,u,v),M(0,0,0,1,1, 1,1,1,0,0, 1,1,0,0,0, 1,0,0,0,0, 0,0,0,1,0);
+ideal I=  -x + 7/5 - 231/125 * v^2 + 39/80 * u^2 - 1/5 * u^3 + 99/400 * u * v^2 - 1287/2000 * u^2 * v^2 + 33/125 * u^3 * v^2 - 3/16 * u + 56/125 * v^3 - 3/50 * u * v^3 + 39/250 * u^2 * v^3 - 8/125 * u^3 * v^3,
+-y + 63/125 * v^2 - 294/125 * v + 56/125 * v^3 - 819/1000 * u^2 * v + 42/125 * u^3 * v - 3/50 * u * v^3 + 351/2000 * u^2 * v^2 + 39/250 * u^2 * v^3 - 9/125 * u^3 * v^2 - 8/125 * u^3 * v^3,
+-z + 12/5 - 63/160 * u^2 + 63/160 * u;
+EOF
+        # Add optional settings
+        [ $SHOW_STRATEGY -eq 1 ] && cat >> "$filename" << 'EOF'
+intvec options = option(get);
+options[2] = options[2] + 2^23;
+option(set, options);
+EOF
+        [ $USE_PROT -eq 1 ] && echo "option(prot);" >> "$filename"
+        
+        # Add computation
+        cat >> "$filename" << EOF
+int t=timer;
+ideal J=$GB_ALGORITHM_CALL(I);
+timer-t;
+quit;
+EOF
+        echo "$filename"
+        return
+    fi
     
     # Generate variable list for cyclic
     local cyclic_vars=""
@@ -295,6 +331,9 @@ LIB "polylib.lib";
 LIB "modstd.lib";
 ring r = 0,($cyclic_vars),dp;
 ideal i = cyclic($CYCLIC_N);
+$([ $SHOW_STRATEGY -eq 1 ] && echo 'intvec options = option(get);
+options[2] = options[2] + 2^23;
+option(set, options);')
 $([ $USE_PROT -eq 1 ] && echo "option(prot);")
 option(redSB);
 ideal j = $GB_ALGORITHM_CALL(i);
@@ -307,6 +346,9 @@ LIB "polylib.lib";
 LIB "modstd.lib";
 ring r = 32003,($cyclic_vars),dp;
 ideal i = cyclic($CYCLIC_N);
+$([ $SHOW_STRATEGY -eq 1 ] && echo 'intvec options = option(get);
+options[2] = options[2] + 2^23;
+option(set, options);')
 $([ $USE_PROT -eq 1 ] && echo "option(prot);")
 option(redSB);
 ideal j = $GB_ALGORITHM_CALL(i);
@@ -319,6 +361,9 @@ LIB "polylib.lib";
 LIB "modstd.lib";
 ring r = 0,($cyclic_vars),lp;
 ideal i = cyclic($CYCLIC_N);
+$([ $SHOW_STRATEGY -eq 1 ] && echo 'intvec options = option(get);
+options[2] = options[2] + 2^23;
+option(set, options);')
 $([ $USE_PROT -eq 1 ] && echo "option(prot);")
 option(redSB);
 ideal j = $GB_ALGORITHM_CALL(i);
@@ -331,6 +376,9 @@ LIB "polylib.lib";
 LIB "modstd.lib";
 ring r = 32003,($cyclic_vars),lp;
 ideal i = cyclic($CYCLIC_N);
+$([ $SHOW_STRATEGY -eq 1 ] && echo 'intvec options = option(get);
+options[2] = options[2] + 2^23;
+option(set, options);')
 $([ $USE_PROT -eq 1 ] && echo "option(prot);")
 option(redSB);
 ideal j = $GB_ALGORITHM_CALL(i);
@@ -343,6 +391,9 @@ LIB "polylib.lib";
 LIB "modstd.lib";
 ring r = 0,($cyclic_vars,h),dp;
 ideal i = homog(cyclic($CYCLIC_N),h);
+$([ $SHOW_STRATEGY -eq 1 ] && echo 'intvec options = option(get);
+options[2] = options[2] + 2^23;
+option(set, options);')
 $([ $USE_PROT -eq 1 ] && echo "option(prot);")
 option(redSB);
 ideal j = $GB_ALGORITHM_CALL(i);
@@ -355,6 +406,9 @@ LIB "polylib.lib";
 LIB "modstd.lib";
 ring r = 32003,($cyclic_vars,h),dp;
 ideal i = homog(cyclic($CYCLIC_N),h);
+$([ $SHOW_STRATEGY -eq 1 ] && echo 'intvec options = option(get);
+options[2] = options[2] + 2^23;
+option(set, options);')
 $([ $USE_PROT -eq 1 ] && echo "option(prot);")
 option(redSB);
 ideal j = $GB_ALGORITHM_CALL(i);
@@ -367,6 +421,9 @@ LIB "polylib.lib";
 LIB "modstd.lib";
 ring r = 0,($katsura_vars),dp;
 ideal i = katsura($KATSURA_N);
+$([ $SHOW_STRATEGY -eq 1 ] && echo 'intvec options = option(get);
+options[2] = options[2] + 2^23;
+option(set, options);')
 $([ $USE_PROT -eq 1 ] && echo "option(prot);")
 option(redSB);
 ideal j = $GB_ALGORITHM_CALL(i);
@@ -379,6 +436,9 @@ LIB "polylib.lib";
 LIB "modstd.lib";
 ring r = 32003,($katsura_vars),dp;
 ideal i = katsura($KATSURA_N);
+$([ $SHOW_STRATEGY -eq 1 ] && echo 'intvec options = option(get);
+options[2] = options[2] + 2^23;
+option(set, options);')
 $([ $USE_PROT -eq 1 ] && echo "option(prot);")
 option(redSB);
 ideal j = $GB_ALGORITHM_CALL(i);
@@ -448,15 +508,6 @@ run_benchmark() {
         total=$(echo "$total + $runtime" | bc)
         
         echo "${runtime}s"
-        
-        # Show output if requested
-        if [ $SHOW_OUTPUT -eq 1 ]; then
-            echo -e "${YELLOW}Output from run $i:${NC}"
-            echo "- - - - - - - - - - - - - - - - - - - -"
-            cat "$output_file"
-            echo "- - - - - - - - - - - - - - - - - - - -"
-            echo ""
-        fi
     done
     
     # Calculate statistics
@@ -513,8 +564,8 @@ echo "Version|Test|Average|StdDev|Min|Max|Total" > "$TEMP_DIR/results.txt"
 # Build list of tests to run
 declare -a TESTS_TO_RUN
 
-if [ $RUN_NEWELLP1 -eq 1 ] && [ -f "$NEWELLP1_FILE" ]; then
-    TESTS_TO_RUN+=("newellp1:$NEWELLP1_FILE")
+if [ $RUN_NEWELLP1 -eq 1 ]; then
+    TESTS_TO_RUN+=("newellp1:$(create_test_file newellp1)")
 fi
 
 if [ $RUN_CYCLIC_QQ_DP -eq 1 ]; then
