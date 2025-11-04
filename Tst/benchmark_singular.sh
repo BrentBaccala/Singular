@@ -5,8 +5,7 @@
 NUM_RUNS=5
 CYCLIC_N=5
 KATSURA_N=5
-GB_ALGORITHM="std"
-GB_ALGORITHM_CALL="std"
+GB_ALGORITHMS=("std")
 V2_NAME="V2-build"
 WARMUP_RUN=0
 SKIP_V1=0
@@ -43,8 +42,9 @@ OPTIONS:
   -n, --num-runs N          Number of runs per test (default: 5)
   --cyclic-n N              Number of variables for cyclic tests (default: 5)
   --katsura-n N             Number of variables for katsura tests (default: 5)
-  --algorithm ALG           Groebner basis algorithm to use (default: std)
+  --algorithm ALG[,ALG2,...]  Groebner basis algorithm(s) to use (default: std)
                             Options: std, modstd, groebner, slimgb, sba, hilb, fglm
+                            Can specify multiple separated by commas
   --v2-name NAME            Name for V2 version in output (default: V2-build)
   --warmup                  Perform an untimed warmup run before timed runs
   --skip-v1                 Only run Singular-build, skip Singular-spielwiese
@@ -85,6 +85,8 @@ EXAMPLES:
   $0 --prot --show-output --cyclic-qq-dp
   $0 --show-strategy --show-output --cyclic-qq-dp
   $0 --algorithm sba --cyclic-qq-dp
+  $0 --algorithm std,modstd,sba --cyclic-qq-dp
+  $0 --algorithm std,slimgb --show-output --cyclic-n 6 --cyclic
 
 EOF
     exit 0
@@ -107,22 +109,19 @@ while [[ $# -gt 0 ]]; do
             shift 2
             ;;
         --algorithm)
-            GB_ALGORITHM="$2"
-            case $GB_ALGORITHM in
-                std|modstd|groebner|slimgb|sba|hilb|fglm)
-                    ;;
-                *)
-                    echo "Error: Unknown algorithm '$GB_ALGORITHM'"
-                    echo "Valid options: std, modstd, groebner, slimgb, sba, hilb, fglm"
-                    exit 1
-                    ;;
-            esac
-            # Map modstd to modStd for Singular
-            if [ "$GB_ALGORITHM" == "modstd" ]; then
-                GB_ALGORITHM_CALL="modStd"
-            else
-                GB_ALGORITHM_CALL="$GB_ALGORITHM"
-            fi
+            IFS=',' read -ra GB_ALGORITHMS <<< "$2"
+            # Validate each algorithm
+            for alg in "${GB_ALGORITHMS[@]}"; do
+                case $alg in
+                    std|modstd|groebner|slimgb|sba|hilb|fglm)
+                        ;;
+                    *)
+                        echo "Error: Unknown algorithm '$alg'"
+                        echo "Valid options: std, modstd, groebner, slimgb, sba, hilb, fglm"
+                        exit 1
+                        ;;
+                esac
+            done
             shift 2
             ;;
         --v2-name)
@@ -255,10 +254,7 @@ echo "================================"
 echo "Number of runs per test: $NUM_RUNS"
 echo "Cyclic n: $CYCLIC_N"
 echo "Katsura n: $KATSURA_N"
-echo "Algorithm: $GB_ALGORITHM"
-if [ "$GB_ALGORITHM" == "modstd" ]; then
-    echo "  (calling as: modStd)"
-fi
+echo "Algorithms: ${GB_ALGORITHMS[*]}"
 echo "V2 name: $V2_NAME"
 echo "Warmup run: $([ $WARMUP_RUN -eq 1 ] && echo 'enabled' || echo 'disabled')"
 echo "Skip V1: $([ $SKIP_V1 -eq 1 ] && echo 'yes' || echo 'no')"
@@ -272,14 +268,27 @@ echo ""
 # Cleanup on exit
 trap "rm -rf $TEMP_DIR" EXIT
 
+# Function to map algorithm name to Singular function call
+get_algorithm_call() {
+    local alg=$1
+    if [ "$alg" == "modstd" ]; then
+        echo "modStd"
+    else
+        echo "$alg"
+    fi
+}
+
 # Function to create test input files
 create_test_file() {
     local test_name=$1
-    local filename="$TEMP_DIR/${test_name}.sing"
+    local algorithm=$2
+    local filename="$TEMP_DIR/${test_name}_${algorithm}.sing"
+    local GB_ALGORITHM_CALL=$(get_algorithm_call "$algorithm")
     
     # Handle newellp1 specially
     if [ "$test_name" == "newellp1" ]; then
         cat > "$filename" << 'EOF'
+LIB "modstd.lib";
 ring R=QQ, (x,y,z,u,v),M(0,0,0,1,1, 1,1,1,0,0, 1,1,0,0,0, 1,0,0,0,0, 0,0,0,1,0);
 ideal I=  -x + 7/5 - 231/125 * v^2 + 39/80 * u^2 - 1/5 * u^3 + 99/400 * u * v^2 - 1287/2000 * u^2 * v^2 + 33/125 * u^3 * v^2 - 3/16 * u + 56/125 * v^3 - 3/50 * u * v^3 + 39/250 * u^2 * v^3 - 8/125 * u^3 * v^3,
 -y + 63/125 * v^2 - 294/125 * v + 56/125 * v^3 - 819/1000 * u^2 * v + 42/125 * u^3 * v - 3/50 * u * v^3 + 351/2000 * u^2 * v^2 + 39/250 * u^2 * v^3 - 9/125 * u^3 * v^2 - 8/125 * u^3 * v^3,
@@ -478,7 +487,7 @@ run_benchmark() {
             echo ""
             echo -e "${YELLOW}Warmup output:${NC}"
             echo "- - - - - - - - - - - - - - - - - - - -"
-            LD_LIBRARY_PATH="$ld_library_path" SINGULARPATH="$singular_path" "$executable" < "$input_file" 2>&1
+            LD_LIBRARY_PATH="$ld_library_path" SINGULARPATH="$singular_path" "$executable" < "$input_file" 2>&1 | tee "$TEMP_DIR/warmup_output.txt"
             echo "- - - - - - - - - - - - - - - - - - - -"
         else
             LD_LIBRARY_PATH="$ld_library_path" SINGULARPATH="$singular_path" "$executable" < "$input_file" > /dev/null 2>&1
@@ -495,9 +504,13 @@ run_benchmark() {
         # Run with time measurement
         local start=$(date +%s.%N)
         if [ $SHOW_OUTPUT -eq 1 ]; then
-            # Save output to temp file for timing purposes
+            # Save output to temp file and display with tee
             local output_file="$TEMP_DIR/output_${version_name}_${test_name}_run${i}.txt"
-            LD_LIBRARY_PATH="$ld_library_path" SINGULARPATH="$singular_path" "$executable" < "$input_file" | tee "$output_file" 2>&1
+            echo ""
+            echo -e "${YELLOW}Output from run $i:${NC}"
+            echo "- - - - - - - - - - - - - - - - - - - -"
+            LD_LIBRARY_PATH="$ld_library_path" SINGULARPATH="$singular_path" "$executable" < "$input_file" 2>&1 | tee "$output_file"
+            echo "- - - - - - - - - - - - - - - - - - - -"
         else
             LD_LIBRARY_PATH="$ld_library_path" SINGULARPATH="$singular_path" "$executable" < "$input_file" > /dev/null 2>&1
         fi
@@ -507,7 +520,8 @@ run_benchmark() {
         times+=($runtime)
         total=$(echo "$total + $runtime" | bc)
         
-        echo "${runtime}s"
+        echo "Time: ${runtime}s"
+        echo ""
     done
     
     # Calculate statistics
@@ -564,41 +578,44 @@ echo "Version|Test|Average|StdDev|Min|Max|Total" > "$TEMP_DIR/results.txt"
 # Build list of tests to run
 declare -a TESTS_TO_RUN
 
-if [ $RUN_NEWELLP1 -eq 1 ]; then
-    TESTS_TO_RUN+=("newellp1:$(create_test_file newellp1)")
-fi
+# For each algorithm, create test files
+for algorithm in "${GB_ALGORITHMS[@]}"; do
+    if [ $RUN_NEWELLP1 -eq 1 ]; then
+        TESTS_TO_RUN+=("newellp1-${algorithm}:$(create_test_file newellp1 $algorithm)")
+    fi
 
-if [ $RUN_CYCLIC_QQ_DP -eq 1 ]; then
-    TESTS_TO_RUN+=("cyclic${CYCLIC_N}-QQ-dp:$(create_test_file cyclic_qq_dp)")
-fi
+    if [ $RUN_CYCLIC_QQ_DP -eq 1 ]; then
+        TESTS_TO_RUN+=("cyclic${CYCLIC_N}-QQ-dp-${algorithm}:$(create_test_file cyclic_qq_dp $algorithm)")
+    fi
 
-if [ $RUN_CYCLIC_ZZ_DP -eq 1 ]; then
-    TESTS_TO_RUN+=("cyclic${CYCLIC_N}-ZZ-dp:$(create_test_file cyclic_zz_dp)")
-fi
+    if [ $RUN_CYCLIC_ZZ_DP -eq 1 ]; then
+        TESTS_TO_RUN+=("cyclic${CYCLIC_N}-ZZ-dp-${algorithm}:$(create_test_file cyclic_zz_dp $algorithm)")
+    fi
 
-if [ $RUN_CYCLIC_QQ_LP -eq 1 ]; then
-    TESTS_TO_RUN+=("cyclic${CYCLIC_N}-QQ-lp:$(create_test_file cyclic_qq_lp)")
-fi
+    if [ $RUN_CYCLIC_QQ_LP -eq 1 ]; then
+        TESTS_TO_RUN+=("cyclic${CYCLIC_N}-QQ-lp-${algorithm}:$(create_test_file cyclic_qq_lp $algorithm)")
+    fi
 
-if [ $RUN_CYCLIC_ZZ_LP -eq 1 ]; then
-    TESTS_TO_RUN+=("cyclic${CYCLIC_N}-ZZ-lp:$(create_test_file cyclic_zz_lp)")
-fi
+    if [ $RUN_CYCLIC_ZZ_LP -eq 1 ]; then
+        TESTS_TO_RUN+=("cyclic${CYCLIC_N}-ZZ-lp-${algorithm}:$(create_test_file cyclic_zz_lp $algorithm)")
+    fi
 
-if [ $RUN_CYCLIC_HOM_QQ -eq 1 ]; then
-    TESTS_TO_RUN+=("cyclic${CYCLIC_N}-hom-QQ-dp:$(create_test_file cyclic_hom_qq_dp)")
-fi
+    if [ $RUN_CYCLIC_HOM_QQ -eq 1 ]; then
+        TESTS_TO_RUN+=("cyclic${CYCLIC_N}-hom-QQ-dp-${algorithm}:$(create_test_file cyclic_hom_qq_dp $algorithm)")
+    fi
 
-if [ $RUN_CYCLIC_HOM_ZZ -eq 1 ]; then
-    TESTS_TO_RUN+=("cyclic${CYCLIC_N}-hom-ZZ-dp:$(create_test_file cyclic_hom_zz_dp)")
-fi
+    if [ $RUN_CYCLIC_HOM_ZZ -eq 1 ]; then
+        TESTS_TO_RUN+=("cyclic${CYCLIC_N}-hom-ZZ-dp-${algorithm}:$(create_test_file cyclic_hom_zz_dp $algorithm)")
+    fi
 
-if [ $RUN_KATSURA_QQ -eq 1 ]; then
-    TESTS_TO_RUN+=("katsura${KATSURA_N}-QQ-dp:$(create_test_file katsura_qq_dp)")
-fi
+    if [ $RUN_KATSURA_QQ -eq 1 ]; then
+        TESTS_TO_RUN+=("katsura${KATSURA_N}-QQ-dp-${algorithm}:$(create_test_file katsura_qq_dp $algorithm)")
+    fi
 
-if [ $RUN_KATSURA_ZZ -eq 1 ]; then
-    TESTS_TO_RUN+=("katsura${KATSURA_N}-ZZ-dp:$(create_test_file katsura_zz_dp)")
-fi
+    if [ $RUN_KATSURA_ZZ -eq 1 ]; then
+        TESTS_TO_RUN+=("katsura${KATSURA_N}-ZZ-dp-${algorithm}:$(create_test_file katsura_zz_dp $algorithm)")
+    fi
+done
 
 if [ ${#TESTS_TO_RUN[@]} -eq 0 ]; then
     echo -e "${RED}No tests selected to run!${NC}"
