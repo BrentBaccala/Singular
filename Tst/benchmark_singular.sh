@@ -611,7 +611,6 @@ run_benchmark() {
         total=$(echo "$total + $runtime" | bc)
         
         echo "Time: ${runtime}s"
-        echo ""
     done
     
     # Calculate statistics
