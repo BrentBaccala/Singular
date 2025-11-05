@@ -273,7 +273,7 @@ for exec_path in "${SINGULAR_EXECS[@]}"; do
     # Determine name for this Singular version
     if [ "$exec_path" == "Singular" ]; then
         # Using Singular from PATH
-        name="Singular-PATH"
+        name="Singular"
         ld_path=""
         sing_path=""
     else
@@ -281,8 +281,8 @@ for exec_path in "${SINGULAR_EXECS[@]}"; do
         # Check if it's in a .libs directory (built but not installed)
         if [[ "$exec_path" == *"/.libs/"* ]]; then
             # It's a built-but-not-installed version
-            # Go up to find the build directory
-            build_dir=$(dirname $(dirname "$exec_path"))
+            # Go up from .libs/Singular to the Singular directory, then up to the build directory
+            build_dir=$(dirname $(dirname $(dirname "$exec_path")))
             name=$(basename "$build_dir")
             
             # Find all .libs directories
@@ -621,14 +621,16 @@ run_benchmark() {
     local variance=$(echo "scale=6; $sum_sq_diff / $NUM_RUNS" | bc)
     local stddev=$(echo "scale=4; sqrt($variance)" | bc)
     
-    echo ""
-    echo -e "${GREEN}Results:${NC}"
-    echo "  Average: ${avg}s"
-    echo "  Std Dev: ${stddev}s"
-    echo "  Min:     ${min}s"
-    echo "  Max:     ${max}s"
-    echo "  Total:   ${total}s"
-    echo ""
+    if [ $NUM_RUNS -gt 1 ]; then
+        echo ""
+        echo -e "${GREEN}Results:${NC}"
+        echo "  Average: ${avg}s"
+        echo "  Std Dev: ${stddev}s"
+        echo "  Min:     ${min}s"
+        echo "  Max:     ${max}s"
+        echo "  Total:   ${total}s"
+        echo ""
+    fi
     
     # Store results for summary
     echo "$version_name|$test_name|$avg|$stddev|$min|$max|$total" >> "$TEMP_DIR/results.txt"
@@ -739,7 +741,11 @@ if [ ${#SINGULAR_EXECS[@]} -eq 1 ]; then
         key="${SINGULAR_NAMES[0]}|$test"
         time="${version_times[$key]}"
         stddev="${version_stddev[$key]}"
-        printf "%-40s %-20s\n" "$test" "${time}s (±${stddev})"
+        if [ $NUM_RUNS -gt 1 ]; then
+            printf "%-40s %-20s\n" "$test" "${time}s (±${stddev})"
+        else
+            printf "%-40s %-20s\n" "$test" "${time}s"
+        fi
     done
 else
     # Multiple versions - comparison table
@@ -766,7 +772,11 @@ else
             key="$name|$test"
             time="${version_times[$key]}"
             stddev="${version_stddev[$key]}"
-            printf " %-25s" "${time}s (±${stddev})"
+            if [ $NUM_RUNS -gt 1 ]; then
+                printf " %-25s" "${time}s (±${stddev})"
+            else
+                printf " %-25s" "${time}s"
+            fi
             test_times+=("$time")
         done
         
@@ -822,7 +832,11 @@ MDEOF
         time_fmt=$(printf "%.4f" "$time")
         stddev_fmt=$(printf "%.4f" "$stddev")
         
-        echo "| $test | ${time_fmt}s (±${stddev_fmt}) |" >> "$MARKDOWN_FILE"
+        if [ $NUM_RUNS -gt 1 ]; then
+            echo "| $test | ${time_fmt}s (±${stddev_fmt}) |" >> "$MARKDOWN_FILE"
+        else
+            echo "| $test | ${time_fmt}s |" >> "$MARKDOWN_FILE"
+        fi
     done
 else
     # Comparison markdown
@@ -848,7 +862,11 @@ MDEOF
             time_fmt=$(printf "%.4f" "$time")
             stddev_fmt=$(printf "%.4f" "$stddev")
             
-            echo -n " ${time_fmt}s (±${stddev_fmt}) |" >> "$MARKDOWN_FILE"
+            if [ $NUM_RUNS -gt 1 ]; then
+                echo -n " ${time_fmt}s (±${stddev_fmt}) |" >> "$MARKDOWN_FILE"
+            else
+                echo -n " ${time_fmt}s |" >> "$MARKDOWN_FILE"
+            fi
         done
         echo "" >> "$MARKDOWN_FILE"
     done
