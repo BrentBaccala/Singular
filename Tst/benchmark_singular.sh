@@ -6,16 +6,20 @@ NUM_RUNS=5
 CYCLIC_N=5
 KATSURA_N=5
 GB_ALGORITHMS=("std")
-V2_NAME="V2-build"
 WARMUP_RUN=0
-SKIP_V1=0
 SHOW_INPUT=0
 SHOW_OUTPUT=0
 USE_PROT=0
 SHOW_STRATEGY=0
 TEMP_DIR=$(mktemp -d)
 
-# Test flags (all enabled by default)
+# Arrays to store Singular executables and their info
+declare -a SINGULAR_EXECS
+declare -a SINGULAR_NAMES
+declare -a SINGULAR_LD_PATHS
+declare -a SINGULAR_PATHS
+
+# Test flags (all disabled by default)
 RUN_NEWELLP1=0
 RUN_CYCLIC_QQ_DP=0
 RUN_CYCLIC_ZZ_DP=0
@@ -43,11 +47,12 @@ OPTIONS:
   --cyclic-n N              Number of variables for cyclic tests (default: 5)
   --katsura-n N             Number of variables for katsura tests (default: 5)
   --algorithm ALG[,ALG2,...]  Groebner basis algorithm(s) to use (default: std)
-                            Options: std, modstd, groebner, slimgb, sba, hilb, fglm
+                            Options: std, modstd, groebner, slimgb, sba, all
+                            'all' runs: std, modstd, groebner, slimgb, sba
                             Can specify multiple separated by commas
-  --v2-name NAME            Name for V2 version in output (default: V2-build)
+  -s, --singular PATH       Path to Singular executable (can be specified multiple times)
+                            If not specified, uses 'Singular' from PATH
   --warmup                  Perform an untimed warmup run before timed runs
-  --skip-v1                 Only run Singular-build, skip Singular-spielwiese
   --show-input              Display the input file content before each test
   --show-output             Display the output from each run (shows live output)
   --prot                    Enable option(prot) for protocol output during computation
@@ -77,16 +82,14 @@ EXAMPLES:
   $0 --cyclic-n 7 --katsura-n 6 --all
   $0 --algorithm modstd --cyclic
   $0 --algorithm slimgb --cyclic-n 7 --cyclic-qq-dp
-  $0 --v2-name V2-pr1301 --cyclic
   $0 --warmup --cyclic-qq-dp
-  $0 --skip-v1 --v2-name V2-pr1301 --cyclic
-  $0 --show-input --cyclic-qq-dp
   $0 --show-output --cyclic-qq-dp
   $0 --prot --show-output --cyclic-qq-dp
   $0 --show-strategy --show-output --cyclic-qq-dp
-  $0 --algorithm sba --cyclic-qq-dp
   $0 --algorithm std,modstd,sba --cyclic-qq-dp
-  $0 --algorithm std,slimgb --show-output --cyclic-n 6 --cyclic
+  $0 --algorithm all --cyclic-qq-dp
+  $0 -s ~/src/Singular-build/Singular/.libs/Singular --cyclic
+  $0 -s ~/build1/Singular -s ~/build2/Singular --algorithm std,sba --cyclic
 
 EOF
     exit 0
@@ -109,31 +112,37 @@ while [[ $# -gt 0 ]]; do
             shift 2
             ;;
         --algorithm)
-            IFS=',' read -ra GB_ALGORITHMS <<< "$2"
-            # Validate each algorithm
-            for alg in "${GB_ALGORITHMS[@]}"; do
-                case $alg in
-                    std|modstd|groebner|slimgb|sba|hilb|fglm)
-                        ;;
-                    *)
-                        echo "Error: Unknown algorithm '$alg'"
-                        echo "Valid options: std, modstd, groebner, slimgb, sba, hilb, fglm"
-                        exit 1
-                        ;;
-                esac
-            done
+            # Handle 'all' keyword
+            if [ "$2" == "all" ]; then
+                GB_ALGORITHMS=("std" "modstd" "groebner" "slimgb" "sba")
+            else
+                IFS=',' read -ra GB_ALGORITHMS <<< "$2"
+                # Validate each algorithm
+                for alg in "${GB_ALGORITHMS[@]}"; do
+                    case $alg in
+                        std|modstd|groebner|slimgb|sba)
+                            ;;
+                        all)
+                            # Expand 'all' in a comma-separated list
+                            echo "Error: 'all' should be used alone, not in a comma-separated list"
+                            exit 1
+                            ;;
+                        *)
+                            echo "Error: Unknown algorithm '$alg'"
+                            echo "Valid options: std, modstd, groebner, slimgb, sba, all"
+                            exit 1
+                            ;;
+                    esac
+                done
+            fi
             shift 2
             ;;
-        --v2-name)
-            V2_NAME="$2"
+        -s|--singular)
+            SINGULAR_EXECS+=("$2")
             shift 2
             ;;
         --warmup)
             WARMUP_RUN=1
-            shift
-            ;;
-        --skip-v1)
-            SKIP_V1=1
             shift
             ;;
         --show-input)
@@ -249,15 +258,62 @@ if [ $TESTS_SPECIFIED -eq 0 ]; then
     RUN_KATSURA_ZZ=1
 fi
 
+# If no Singular executables specified, use default from PATH
+if [ ${#SINGULAR_EXECS[@]} -eq 0 ]; then
+    SINGULAR_EXECS=("Singular")
+fi
+
+# Process each Singular executable to determine paths and names
+for exec_path in "${SINGULAR_EXECS[@]}"; do
+    # Get absolute path if it exists
+    if [ -f "$exec_path" ]; then
+        exec_path=$(realpath "$exec_path")
+    fi
+    
+    # Determine name for this Singular version
+    if [ "$exec_path" == "Singular" ]; then
+        # Using Singular from PATH
+        name="Singular-PATH"
+        ld_path=""
+        sing_path=""
+    else
+        # Extract a meaningful name from the path
+        # Check if it's in a .libs directory (built but not installed)
+        if [[ "$exec_path" == *"/.libs/"* ]]; then
+            # It's a built-but-not-installed version
+            # Go up to find the build directory
+            build_dir=$(dirname $(dirname "$exec_path"))
+            name=$(basename "$build_dir")
+            
+            # Find all .libs directories
+            ld_path=$(find "$build_dir" -name .libs -type d 2>/dev/null | tr '\n' ':' | sed 's/:$//')
+            
+            # Find dyn_modules/.libs
+            sing_path=$(find "$build_dir" -path "*/Singular/dyn_modules/*/.libs" -type d 2>/dev/null | tr '\n' ':' | sed 's/:$//')
+        else
+            # Assume it's an installed version or custom location
+            name=$(basename $(dirname "$exec_path"))
+            ld_path=""
+            sing_path=""
+        fi
+    fi
+    
+    SINGULAR_NAMES+=("$name")
+    SINGULAR_LD_PATHS+=("$ld_path")
+    SINGULAR_PATHS+=("$sing_path")
+done
+
 echo "Comprehensive Singular Benchmark"
 echo "================================"
 echo "Number of runs per test: $NUM_RUNS"
 echo "Cyclic n: $CYCLIC_N"
 echo "Katsura n: $KATSURA_N"
 echo "Algorithms: ${GB_ALGORITHMS[*]}"
-echo "V2 name: $V2_NAME"
+echo "Singular versions: ${#SINGULAR_EXECS[@]}"
+for i in "${!SINGULAR_EXECS[@]}"; do
+    echo "  [$((i+1))] ${SINGULAR_NAMES[$i]}: ${SINGULAR_EXECS[$i]}"
+done
 echo "Warmup run: $([ $WARMUP_RUN -eq 1 ] && echo 'enabled' || echo 'disabled')"
-echo "Skip V1: $([ $SKIP_V1 -eq 1 ] && echo 'yes' || echo 'no')"
 echo "Show input: $([ $SHOW_INPUT -eq 1 ] && echo 'yes' || echo 'no')"
 echo "Show output: $([ $SHOW_OUTPUT -eq 1 ] && echo 'yes' || echo 'no')"
 echo "Protocol output: $([ $USE_PROT -eq 1 ] && echo 'enabled' || echo 'disabled')"
@@ -487,10 +543,18 @@ run_benchmark() {
             echo ""
             echo -e "${YELLOW}Warmup output:${NC}"
             echo "- - - - - - - - - - - - - - - - - - - -"
-            LD_LIBRARY_PATH="$ld_library_path" SINGULARPATH="$singular_path" "$executable" < "$input_file" 2>&1 | tee "$TEMP_DIR/warmup_output.txt"
+            if [ -n "$ld_library_path" ]; then
+                LD_LIBRARY_PATH="$ld_library_path" SINGULARPATH="$singular_path" "$executable" < "$input_file" 2>&1 | tee "$TEMP_DIR/warmup_output.txt"
+            else
+                "$executable" < "$input_file" 2>&1 | tee "$TEMP_DIR/warmup_output.txt"
+            fi
             echo "- - - - - - - - - - - - - - - - - - - -"
         else
-            LD_LIBRARY_PATH="$ld_library_path" SINGULARPATH="$singular_path" "$executable" < "$input_file" > /dev/null 2>&1
+            if [ -n "$ld_library_path" ]; then
+                LD_LIBRARY_PATH="$ld_library_path" SINGULARPATH="$singular_path" "$executable" < "$input_file" > /dev/null 2>&1
+            else
+                "$executable" < "$input_file" > /dev/null 2>&1
+            fi
             echo "done"
         fi
     fi
@@ -509,10 +573,18 @@ run_benchmark() {
             echo ""
             echo -e "${YELLOW}Output from run $i:${NC}"
             echo "- - - - - - - - - - - - - - - - - - - -"
-            LD_LIBRARY_PATH="$ld_library_path" SINGULARPATH="$singular_path" "$executable" < "$input_file" 2>&1 | tee "$output_file"
+            if [ -n "$ld_library_path" ]; then
+                LD_LIBRARY_PATH="$ld_library_path" SINGULARPATH="$singular_path" "$executable" < "$input_file" 2>&1 | tee "$output_file"
+            else
+                "$executable" < "$input_file" 2>&1 | tee "$output_file"
+            fi
             echo "- - - - - - - - - - - - - - - - - - - -"
         else
-            LD_LIBRARY_PATH="$ld_library_path" SINGULARPATH="$singular_path" "$executable" < "$input_file" > /dev/null 2>&1
+            if [ -n "$ld_library_path" ]; then
+                LD_LIBRARY_PATH="$ld_library_path" SINGULARPATH="$singular_path" "$executable" < "$input_file" > /dev/null 2>&1
+            else
+                "$executable" < "$input_file" > /dev/null 2>&1
+            fi
         fi
         local end=$(date +%s.%N)
         
@@ -561,16 +633,6 @@ run_benchmark() {
     # Store results for summary
     echo "$version_name|$test_name|$avg|$stddev|$min|$max|$total" >> "$TEMP_DIR/results.txt"
 }
-
-# Version 1: Singular-spielwiese
-LD_PATH_V1=$(find ~/src/Singular-spielwiese/ -name .libs | tr '\n' ' ' | sed 's/[[:space:]]/:/g')
-SING_PATH_V1=$(echo ~/src/Singular-spielwiese/Singular/dyn_modules/*/.libs | sed 's/ /:/g')
-EXEC_V1=~/src/Singular-spielwiese/Singular/.libs/Singular
-
-# Version 2: Singular-build
-LD_PATH_V2=$(find ~/src/Singular-build -name .libs | tr '\n' ' ' | sed 's/[[:space:]]/:/g')
-SING_PATH_V2=$(echo ~/src/Singular-build/Singular/dyn_modules/*/.libs | sed 's/ /:/g')
-EXEC_V2=~/src/Singular-build/Singular/.libs/Singular
 
 # Initialize results file
 echo "Version|Test|Average|StdDev|Min|Max|Total" > "$TEMP_DIR/results.txt"
@@ -626,27 +688,20 @@ fi
 echo -e "${YELLOW}Tests to run: ${#TESTS_TO_RUN[@]}${NC}"
 echo ""
 
-# Run all benchmarks for Version 1
-if [ $SKIP_V1 -eq 0 ]; then
-    echo -e "${YELLOW}=== Running benchmarks for Version 1 (spielwiese) ===${NC}"
+# Run all benchmarks for each Singular version
+for idx in "${!SINGULAR_EXECS[@]}"; do
+    version_name="${SINGULAR_NAMES[$idx]}"
+    executable="${SINGULAR_EXECS[$idx]}"
+    ld_path="${SINGULAR_LD_PATHS[$idx]}"
+    sing_path="${SINGULAR_PATHS[$idx]}"
+    
+    echo -e "${YELLOW}=== Running benchmarks for $version_name ===${NC}"
     echo ""
 
     for test_spec in "${TESTS_TO_RUN[@]}"; do
         IFS=':' read -r test_name test_file <<< "$test_spec"
-        run_benchmark "V1-spielwiese" "$LD_PATH_V1" "$SING_PATH_V1" "$EXEC_V1" "$test_name" "$test_file"
+        run_benchmark "$version_name" "$ld_path" "$sing_path" "$executable" "$test_name" "$test_file"
     done
-else
-    echo -e "${YELLOW}=== Skipping Version 1 (spielwiese) ===${NC}"
-    echo ""
-fi
-
-# Run all benchmarks for Version 2
-echo -e "${YELLOW}=== Running benchmarks for $V2_NAME ===${NC}"
-echo ""
-
-for test_spec in "${TESTS_TO_RUN[@]}"; do
-    IFS=':' read -r test_name test_file <<< "$test_spec"
-    run_benchmark "$V2_NAME" "$LD_PATH_V2" "$SING_PATH_V2" "$EXEC_V2" "$test_name" "$test_file"
 done
 
 # Print summary
@@ -656,63 +711,87 @@ echo "================================"
 echo ""
 
 # Parse results and create comparison
-declare -A v1_times
-declare -A v2_times
-declare -A v1_stddev
-declare -A v2_stddev
+declare -A version_times
+declare -A version_stddev
 
 while IFS='|' read -r version test avg stddev min max total; do
     if [ "$version" != "Version" ]; then
-        if [ "$version" == "V1-spielwiese" ]; then
-            v1_times["$test"]="$avg"
-            v1_stddev["$test"]="$stddev"
-        elif [ "$version" == "$V2_NAME" ]; then
-            v2_times["$test"]="$avg"
-            v2_stddev["$test"]="$stddev"
-        fi
+        version_times["$version|$test"]="$avg"
+        version_stddev["$version|$test"]="$stddev"
     fi
 done < "$TEMP_DIR/results.txt"
 
+# Get unique test names
+declare -A test_set
+for key in "${!version_times[@]}"; do
+    test=$(echo "$key" | cut -d'|' -f2)
+    test_set["$test"]=1
+done
+
 # Print comparison table (text format)
-if [ $SKIP_V1 -eq 1 ]; then
-    # Only V2 results
-    echo -e "${BLUE}Results for $V2_NAME:${NC}"
-    printf "%-30s %-20s\n" "Test" "Time"
-    printf "%-30s %-20s\n" "----" "----"
+if [ ${#SINGULAR_EXECS[@]} -eq 1 ]; then
+    # Only one version - simple results table
+    echo -e "${BLUE}Results for ${SINGULAR_NAMES[0]}:${NC}"
+    printf "%-40s %-20s\n" "Test" "Time"
+    printf "%-40s %-20s\n" "----" "----"
     
-    for test in "${!v2_times[@]}"; do
-        v2="${v2_times[$test]}"
-        v2_sd="${v2_stddev[$test]}"
-        printf "%-30s %-20s\n" "$test" "${v2}s (±${v2_sd})"
+    for test in "${!test_set[@]}"; do
+        key="${SINGULAR_NAMES[0]}|$test"
+        time="${version_times[$key]}"
+        stddev="${version_stddev[$key]}"
+        printf "%-40s %-20s\n" "$test" "${time}s (±${stddev})"
     done
 else
-    # Comparison table
+    # Multiple versions - comparison table
     echo -e "${BLUE}Average Times Comparison:${NC}"
-    printf "%-30s %-25s %-25s\n" "Test" "V1-spielwiese" "$V2_NAME"
-    printf "%-30s %-25s %-25s\n" "----" "-------------" "--------"
     
-    for test in "${!v1_times[@]}"; do
-        v1="${v1_times[$test]}"
-        v2="${v2_times[$test]}"
-        v1_sd="${v1_stddev[$test]}"
-        v2_sd="${v2_stddev[$test]}"
+    # Dynamic header based on number of versions
+    printf "%-40s" "Test"
+    for name in "${SINGULAR_NAMES[@]}"; do
+        printf " %-25s" "$name"
+    done
+    echo ""
+    
+    printf "%-40s" "----"
+    for name in "${SINGULAR_NAMES[@]}"; do
+        printf " %-25s" "--------"
+    done
+    echo ""
+    
+    for test in "${!test_set[@]}"; do
+        printf "%-40s" "$test"
         
-        printf "%-30s %-25s %-25s" "$test" "${v1}s (±${v1_sd})" "${v2}s (±${v2_sd})"
+        declare -a test_times
+        for name in "${SINGULAR_NAMES[@]}"; do
+            key="$name|$test"
+            time="${version_times[$key]}"
+            stddev="${version_stddev[$key]}"
+            printf " %-25s" "${time}s (±${stddev})"
+            test_times+=("$time")
+        done
         
-        # Calculate and show speedup
-        if [ -n "$v1" ] && [ -n "$v2" ]; then
-            speedup=$(echo "scale=2; $v1 / $v2" | bc)
-            if (( $(echo "$speedup > 1.05" | bc -l) )); then
-                echo -e " ${GREEN}(V2 ${speedup}x faster)${NC}"
-            elif (( $(echo "$speedup < 0.95" | bc -l) )); then
-                speedup=$(echo "scale=2; $v2 / $v1" | bc)
-                echo -e " ${RED}(V1 ${speedup}x faster)${NC}"
+        # Find best time and show comparison if multiple versions
+        if [ ${#SINGULAR_NAMES[@]} -eq 2 ]; then
+            t1="${test_times[0]}"
+            t2="${test_times[1]}"
+            if [ -n "$t1" ] && [ -n "$t2" ]; then
+                speedup=$(echo "scale=2; $t1 / $t2" | bc)
+                if (( $(echo "$speedup > 1.05" | bc -l) )); then
+                    echo -e " ${GREEN}(${SINGULAR_NAMES[1]} ${speedup}x faster)${NC}"
+                elif (( $(echo "$speedup < 0.95" | bc -l) )); then
+                    speedup=$(echo "scale=2; $t2 / $t1" | bc)
+                    echo -e " ${RED}(${SINGULAR_NAMES[0]} ${speedup}x faster)${NC}"
+                else
+                    echo " (similar)"
+                fi
             else
-                echo " (similar)"
+                echo ""
             fi
         else
             echo ""
         fi
+        
+        unset test_times
     done
 fi
 
@@ -722,67 +801,56 @@ echo "================================"
 # Now create markdown format
 MARKDOWN_FILE="$TEMP_DIR/results.md"
 
-if [ $SKIP_V1 -eq 1 ]; then
-    # Only V2 markdown
+if [ ${#SINGULAR_EXECS[@]} -eq 1 ]; then
+    # Only one version markdown
     cat > "$MARKDOWN_FILE" << MDEOF
-## Results for $V2_NAME
+## Results for ${SINGULAR_NAMES[0]}
 
 | Test | Time |
 |------|------|
 MDEOF
 
     # Sort tests for consistent output
-    readarray -t sorted_tests < <(printf '%s\n' "${!v2_times[@]}" | sort)
+    readarray -t sorted_tests < <(printf '%s\n' "${!test_set[@]}" | sort)
     
     for test in "${sorted_tests[@]}"; do
-        v2="${v2_times[$test]}"
-        v2_sd="${v2_stddev[$test]}"
+        key="${SINGULAR_NAMES[0]}|$test"
+        time="${version_times[$key]}"
+        stddev="${version_stddev[$key]}"
         
         # Format numbers with leading zeros
-        v2_fmt=$(printf "%.4f" "$v2")
-        v2_sd_fmt=$(printf "%.4f" "$v2_sd")
+        time_fmt=$(printf "%.4f" "$time")
+        stddev_fmt=$(printf "%.4f" "$stddev")
         
-        echo "| $test | ${v2_fmt}s (±${v2_sd_fmt}) |" >> "$MARKDOWN_FILE"
+        echo "| $test | ${time_fmt}s (±${stddev_fmt}) |" >> "$MARKDOWN_FILE"
     done
 else
     # Comparison markdown
     cat > "$MARKDOWN_FILE" << MDEOF
 ## Average Times Comparison
 
-| Test | V1-spielwiese | $V2_NAME | Comparison |
-|------|---------------|----------|------------|
+| Test |$(for name in "${SINGULAR_NAMES[@]}"; do echo -n " $name |"; done)
+|------|$(for name in "${SINGULAR_NAMES[@]}"; do echo -n "----------|"; done)
 MDEOF
 
     # Sort tests for consistent output
-    readarray -t sorted_tests < <(printf '%s\n' "${!v1_times[@]}" | sort)
+    readarray -t sorted_tests < <(printf '%s\n' "${!test_set[@]}" | sort)
     
     for test in "${sorted_tests[@]}"; do
-        v1="${v1_times[$test]}"
-        v2="${v2_times[$test]}"
-        v1_sd="${v1_stddev[$test]}"
-        v2_sd="${v2_stddev[$test]}"
+        echo -n "| $test |" >> "$MARKDOWN_FILE"
         
-        # Format numbers with leading zeros
-        v1_fmt=$(printf "%.4f" "$v1")
-        v2_fmt=$(printf "%.4f" "$v2")
-        v1_sd_fmt=$(printf "%.4f" "$v1_sd")
-        v2_sd_fmt=$(printf "%.4f" "$v2_sd")
-        
-        # Calculate comparison
-        comparison=""
-        if [ -n "$v1" ] && [ -n "$v2" ]; then
-            speedup=$(echo "scale=2; $v1 / $v2" | bc)
-            if (( $(echo "$speedup > 1.05" | bc -l) )); then
-                comparison="V2 ${speedup}x faster"
-            elif (( $(echo "$speedup < 0.95" | bc -l) )); then
-                speedup=$(echo "scale=2; $v2 / $v1" | bc)
-                comparison="V1 ${speedup}x faster"
-            else
-                comparison="similar"
-            fi
-        fi
-        
-        echo "| $test | ${v1_fmt}s (±${v1_sd_fmt}) | ${v2_fmt}s (±${v2_sd_fmt}) | $comparison |" >> "$MARKDOWN_FILE"
+        for name in "${SINGULAR_NAMES[@]}"; do
+            key="$name|$test"
+            time="${version_times[$key]}"
+            stddev="${version_stddev[$key]}"
+            
+            # Format numbers with leading zeros
+            time_fmt=$(printf "%.4f" "$time")
+            stddev_fmt=$(printf "%.4f" "$stddev")
+            
+            echo -n " ${time_fmt}s (±${stddev_fmt}) |" >> "$MARKDOWN_FILE"
+        done
+        echo "" >> "$MARKDOWN_FILE"
     done
 fi
 
