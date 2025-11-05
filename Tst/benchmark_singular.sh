@@ -138,7 +138,25 @@ while [[ $# -gt 0 ]]; do
             shift 2
             ;;
         -s|--singular)
-            SINGULAR_EXECS+=("$2")
+            # Check if it's a directory or file
+            if [ -d "$2" ]; then
+                # It's a directory - look for Singular executable
+                if [ -f "$2/Singular/.libs/Singular" ]; then
+                    SINGULAR_EXECS+=("$2/Singular/.libs/Singular")
+                elif [ -f "$2/Singular" ]; then
+                    SINGULAR_EXECS+=("$2/Singular")
+                else
+                    echo "Error: Could not find Singular executable in directory: $2"
+                    echo "Looked for: $2/Singular/.libs/Singular or $2/Singular"
+                    exit 1
+                fi
+            elif [ -f "$2" ]; then
+                # It's a file
+                SINGULAR_EXECS+=("$2")
+            else
+                echo "Error: Path does not exist: $2"
+                exit 1
+            fi
             shift 2
             ;;
         --warmup)
