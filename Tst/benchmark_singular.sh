@@ -11,6 +11,7 @@ SHOW_INPUT=0
 SHOW_OUTPUT=0
 USE_PROT=0
 SHOW_STRATEGY=0
+USE_PERF=0
 TEMP_DIR=$(mktemp -d)
 
 # Arrays to store Singular executables and their info
@@ -57,6 +58,7 @@ OPTIONS:
   --show-output             Display the output from each run (shows live output)
   --prot                    Enable option(prot) for protocol output during computation
   --show-strategy           Enable option bit 23 to display strategy information
+  --perf                    Run with 'perf record' and show performance report
   -h, --help                Show this help message
   -a, --all                 Run all available tests (default if no tests specified)
 
@@ -90,6 +92,7 @@ EXAMPLES:
   $0 --algorithm all --cyclic-qq-dp
   $0 -s ~/src/Singular-build/Singular/.libs/Singular --cyclic
   $0 -s ~/build1/Singular -s ~/build2/Singular --algorithm std,sba --cyclic
+  $0 --perf -s ~/src/Singular-build --cyclic-qq-dp -n 1
 
 EOF
     exit 0
@@ -177,6 +180,15 @@ while [[ $# -gt 0 ]]; do
             ;;
         --show-strategy)
             SHOW_STRATEGY=1
+            shift
+            ;;
+        --perf)
+            USE_PERF=1
+            # Check if perf is available
+            if ! command -v perf &> /dev/null; then
+                echo "Error: 'perf' command not found. Please install linux-tools or perf."
+                exit 1
+            fi
             shift
             ;;
         -h|--help)
@@ -336,6 +348,7 @@ echo "Show input: $([ $SHOW_INPUT -eq 1 ] && echo 'yes' || echo 'no')"
 echo "Show output: $([ $SHOW_OUTPUT -eq 1 ] && echo 'yes' || echo 'no')"
 echo "Protocol output: $([ $USE_PROT -eq 1 ] && echo 'enabled' || echo 'disabled')"
 echo "Show strategy: $([ $SHOW_STRATEGY -eq 1 ] && echo 'enabled' || echo 'disabled')"
+echo "Perf profiling: $([ $USE_PERF -eq 1 ] && echo 'enabled' || echo 'disabled')"
 echo "Temporary directory: $TEMP_DIR"
 echo ""
 
@@ -583,6 +596,13 @@ run_benchmark() {
     for i in $(seq 1 $NUM_RUNS); do
         echo -n "Run $i/$NUM_RUNS... "
         
+        # Prepare perf command prefix if needed
+        local perf_prefix=""
+        local perf_data="$TEMP_DIR/perf_${version_name}_${test_name}_run${i}.data"
+        if [ $USE_PERF -eq 1 ]; then
+            perf_prefix="perf record -g -o $perf_data --"
+        fi
+        
         # Run with time measurement
         local start=$(date +%s.%N)
         if [ $SHOW_OUTPUT -eq 1 ]; then
@@ -592,16 +612,16 @@ run_benchmark() {
             echo -e "${YELLOW}Output from run $i:${NC}"
             echo "- - - - - - - - - - - - - - - - - - - -"
             if [ -n "$ld_library_path" ]; then
-                LD_LIBRARY_PATH="$ld_library_path" SINGULARPATH="$singular_path" "$executable" < "$input_file" 2>&1 | tee "$output_file"
+                LD_LIBRARY_PATH="$ld_library_path" SINGULARPATH="$singular_path" $perf_prefix "$executable" < "$input_file" 2>&1 | tee "$output_file"
             else
-                "$executable" < "$input_file" 2>&1 | tee "$output_file"
+                $perf_prefix "$executable" < "$input_file" 2>&1 | tee "$output_file"
             fi
             echo "- - - - - - - - - - - - - - - - - - - -"
         else
             if [ -n "$ld_library_path" ]; then
-                LD_LIBRARY_PATH="$ld_library_path" SINGULARPATH="$singular_path" "$executable" < "$input_file" > /dev/null 2>&1
+                LD_LIBRARY_PATH="$ld_library_path" SINGULARPATH="$singular_path" $perf_prefix "$executable" < "$input_file" > /dev/null 2>&1
             else
-                "$executable" < "$input_file" > /dev/null 2>&1
+                $perf_prefix "$executable" < "$input_file" > /dev/null 2>&1
             fi
         fi
         local end=$(date +%s.%N)
@@ -611,6 +631,16 @@ run_benchmark() {
         total=$(echo "$total + $runtime" | bc)
         
         echo "Time: ${runtime}s"
+        
+        # Show perf report if requested
+        if [ $USE_PERF -eq 1 ] && [ -f "$perf_data" ]; then
+            echo ""
+            echo -e "${YELLOW}Perf report (top 20 functions by overhead):${NC}"
+            echo "- - - - - - - - - - - - - - - - - - - -"
+            perf report -i "$perf_data" --stdio -n --percent-limit 1 | head -50
+            echo "- - - - - - - - - - - - - - - - - - - -"
+            echo ""
+        fi
     done
     
     # Calculate statistics
