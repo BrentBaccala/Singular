@@ -815,8 +815,9 @@ void rKillModified_Wp_Ring(ring r);
 
 ring rModifyRing_Simple(ring r, BOOLEAN omit_degree, BOOLEAN omit_comp, unsigned long exp_limit, BOOLEAN &simple);
 
-#ifdef RDEBUG
+// Always available for debugging
 void rDebugPrint(const ring r);
+#ifdef RDEBUG
 // void pDebugPrint(poly p);
 void p_DebugPrint(poly p, const ring r);
 #endif

@@ -10936,9 +10936,14 @@ void kDebugPrint(kStrategy strat)
        assume( TEST_OPT_WEIGHTM );
     }
 
-#ifndef SING_NDEBUG
-    rDebugPrint(currRing);
-#endif
+  // Always print ring structure when debugging strategy
+  printf("\n=== Ring Structure (currRing) ===\n");
+  rDebugPrint(currRing);
+  if (strat->tailRing != currRing)
+  {
+    printf("\n=== Ring Structure (tailRing) ===\n");
+    rDebugPrint(strat->tailRing);
+  }
 }
 
 //LObject pCopyp2L(poly p, kStrategy strat)

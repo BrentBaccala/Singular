@@ -4210,7 +4210,6 @@ static unsigned long rGetDivMask(int bits)
   return divmask;
 }
 
-#ifdef RDEBUG
 void rDebugPrint(const ring r)
 {
   if (r==NULL)
@@ -4374,7 +4373,8 @@ void rDebugPrint(const ring r)
       Print("  [%d]: %d ", j, r->NegWeightL_Offset[j]);
   PrintLn();
 
-  // p_Procs stuff
+#ifdef RDEBUG
+  // p_Procs stuff (only available in debug builds)
   p_Procs_s proc_names;
   const char* field;
   const char* length;
@@ -4388,6 +4388,7 @@ void rDebugPrint(const ring r)
   {
     Print(" %s,\n", ((char**) &proc_names)[i]);
   }
+#endif
 
   {
       PrintLn();
@@ -4416,6 +4417,7 @@ void rDebugPrint(const ring r)
   else Print("%p\n",r->p_Setm);
 }
 
+#ifdef RDEBUG
 void p_DebugPrint(poly p, const ring r)
 {
   int i,j;
