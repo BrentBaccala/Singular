@@ -132,6 +132,25 @@ SING_CHECK_P_PROCS
 SING_CHECK_ARITH_RINGS
 SING_CHECK_PLURAL
 
+# SIMD optimization support
+AC_ARG_ENABLE(avx2, AS_HELP_STRING([--enable-avx2], [Enable AVX2 SIMD optimizations for polynomial operations]),
+[if test "x$enableval" = "xyes"; then
+ENABLE_AVX2=yes
+fi], ENABLE_AVX2=no)
+
+if test x"${ENABLE_AVX2}" = xyes; then
+  AC_DEFINE([HAVE_AVX2],1,[Define for AVX2 SIMD support (256-bit vectors)])
+fi
+
+AC_ARG_ENABLE(avx512, AS_HELP_STRING([--enable-avx512], [Enable AVX-512 SIMD optimizations for polynomial operations]),
+[if test "x$enableval" = "xyes"; then
+ENABLE_AVX512=yes
+fi], ENABLE_AVX512=no)
+
+if test x"${ENABLE_AVX512}" = xyes; then
+  AC_DEFINE([HAVE_AVX512],1,[Define for AVX-512 SIMD support (512-bit vectors)])
+fi
+
 # AC_SUBST(PREFIX)
 # AC_DEFINE_UNQUOTED(INSTALL_PREFIX,"$PREFIX",Prefix)
 

@@ -7,8 +7,38 @@
 * ABSTRACT
 */
 
+#include "misc/auxiliary.h" // for config (HAVE_AVX2, HAVE_AVX512)
 #include "reporter/reporter.h" // for assume etc.
 #include "coeffs/coeffs.h" // ring,number
+
+/***************************************************************
+ *
+ * SIMD alignment configuration
+ *
+ ***************************************************************/
+
+#ifdef HAVE_AVX512
+  #define SIMD_VECTOR_SIZE 64  // 64 bytes = 8 longs
+  #define SIMD_VECTOR_LONGS 8
+#elif defined(HAVE_AVX2)
+  #define SIMD_VECTOR_SIZE 32  // 32 bytes = 4 longs
+  #define SIMD_VECTOR_LONGS 4
+#else
+  #define SIMD_VECTOR_SIZE 16  // 16 bytes (SSE/default)
+  #define SIMD_VECTOR_LONGS 1
+#endif
+
+// Calculate padding needed to align exp field
+// POLYSIZE_BASE is sizeof(poly) + sizeof(number) = 16 bytes on 64-bit
+#define POLYSIZE_BASE (sizeof(poly) + sizeof(number))
+
+#ifdef HAVE_AVX512
+  #define POLYSIZE_PADDING 48  // 64 - 16 = 48 bytes padding
+#elif defined(HAVE_AVX2)
+  #define POLYSIZE_PADDING 16  // 32 - 16 = 16 bytes padding
+#else
+  #define POLYSIZE_PADDING 0   // No padding needed for 16-byte default
+#endif
 
 /***************************************************************
  *
@@ -23,7 +53,10 @@ struct  spolyrec
 {
   poly      next;           // next needs to be the first field
   number    coef;           // and coef the second --- do not change this !!!
-  unsigned long exp[1];     // make sure that exp is aligned
+#if POLYSIZE_PADDING > 0
+  char      _padding[POLYSIZE_PADDING];  // Padding for SIMD alignment
+#endif
+  unsigned long exp[1];     // aligned on SIMD_VECTOR_SIZE boundary
 };
 
 /***************************************************************
@@ -230,7 +263,7 @@ while (0)
  *
  ***************************************************************/
 
-#define POLYSIZE (sizeof(poly) + sizeof(number))
+#define POLYSIZE (POLYSIZE_BASE + POLYSIZE_PADDING)
 #define POLYSIZEW (POLYSIZE / sizeof(long))
 #if SIZEOF_LONG == 8
 #define POLY_NEGWEIGHT_OFFSET (((long)0x80000000) << 32)

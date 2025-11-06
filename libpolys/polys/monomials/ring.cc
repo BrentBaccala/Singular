@@ -3862,7 +3862,9 @@ BOOLEAN rComplete(ring r, int force)
   // finished with constructing the monomial, computing sizes:
 
   r->ExpL_Size=j;
-  r->PolyBin = omGetSpecBin(POLYSIZE + (r->ExpL_Size)*sizeof(long));
+  auto binsize = POLYSIZE + (r->ExpL_Size)*sizeof(long);
+  binsize = (binsize + SIMD_VECTOR_SIZE - 1) & ~(SIMD_VECTOR_SIZE - 1);
+  r->PolyBin=omGetSpecBin(binsize);
   assume(r->PolyBin != NULL);
 
   // ----------------------------
@@ -4651,7 +4653,9 @@ ring rAssure_TDeg(ring r, int &pos)
   int j;
 
   res->ExpL_Size=r->ExpL_Size+1; // one word more in each monom
-  res->PolyBin=omGetSpecBin(POLYSIZE + (res->ExpL_Size)*sizeof(long));
+  auto binsize = POLYSIZE + (res->ExpL_Size)*sizeof(long);
+  binsize = (binsize + SIMD_VECTOR_SIZE - 1) & ~(SIMD_VECTOR_SIZE - 1);
+  res->PolyBin=omGetSpecBin(binsize);
   omFree((ADDRESS)res->ordsgn);
   res->ordsgn=(long *)omAlloc0(res->ExpL_Size*sizeof(long));
   for(j=0;j<r->CmpL_Size;j++)
