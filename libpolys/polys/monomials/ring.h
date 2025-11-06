@@ -352,6 +352,11 @@ struct ip_sring
      VarL_Offset[i] gets i-th long var in exp vector */
   int*      VarL_Offset;
 
+  /* SIMD optimization: bit-level mask for variable fields in exp[]
+     VarL_Bitmask[i] has bits set corresponding to variable exponent fields in exp[i]
+     Can be AND'ed with exp[] to extract only variable exponents */
+  unsigned long* VarL_Bitmask;
+
   /* mask for getting single exponents, also maxExp */
   unsigned long bitmask;
   /* wanted maxExp */

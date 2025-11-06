@@ -14,10 +14,101 @@
          * LE(p, j)  != LE(lcm, j)
          * LE(p2, j) != LE(lcm, j)   ==> LCM(p2, p) != lcm
 */
+#if 0
+BOOLEAN pCompareChain_16bit (poly p,poly p1,poly p2,poly lcm, const ring R)
+{
+  int k, j;
+  const int N = R->N;
+
+  if (lcm==NULL) return FALSE;
+
+  if (pGetComp(p) != pGetComp(lcm)) return FALSE;
+
+  unsigned short * p_exp = p->exp;
+  unsigned short * p1_exp = p1->exp;
+  unsigned short * p2_exp = p2->exp;
+  unsigned short * lcm_exp = lcm->exp;
+
+  // Early termination optimization: Track which variables differ
+  bool p_diff[4 * R->ExpL_Size];   // Where p != lcm
+  bool p1_diff[4 * R->ExpL_Size];  // Where p1 != lcm
+  bool p2_diff[4 * R->ExpL_Size];  // Where p2 != lcm
+
+  int p_diff_count = 0;
+  int p1_diff_count = 0;
+  int p2_diff_count = 0;
+
+  for (int i = 0; i < 4 * R->ExpL_Size; i++) {
+    // Original divisibility check
+    if (p_exp[i] > lcm_exp[i]) return FALSE;
+
+    // Compute difference indicators
+    p_diff[i] = (p_exp[i] != lcm_exp[i]);
+    p1_diff[i] = (p1_exp[i] != lcm_exp[i]);
+    p2_diff[i] = (p2_exp[i] != lcm_exp[i]);
+
+    if (p_diff[i]) p_diff_count++;
+    if (p1_diff[i]) p1_diff_count++;
+    if (p2_diff[i]) p2_diff_count++;
+  }
+
+  // Early termination checks based on difference patterns
+  // Chain criterion needs at least 2 variables where p differs from lcm
+  if (p_diff_count <= 1) return FALSE;
+
+  // If p1 or p2 equals lcm everywhere, chain criterion cannot apply
+  if (p1_diff_count == 0 || p2_diff_count == 0) return FALSE;
+
+  // Main chain criterion loop - use pre-computed difference arrays
+  for (j=N; j; j--)
+  {
+    if (p1_diff[j])  // p1 differs from lcm at position j
+    {
+      if (p_diff[j])  // p also differs at j
+      {
+        // Search for k where both p and p2 differ from lcm
+        for (k=N; k>j; k--)
+        {
+          if (p_diff[k] && p2_diff[k])
+            return TRUE;
+        }
+        for (k=j-1; k; k--)
+        {
+          if (p_diff[k] && p2_diff[k])
+            return TRUE;
+        }
+        return FALSE;
+      }
+    }
+    else if (p2_diff[j])  // p2 differs from lcm at position j (but not p1)
+    {
+      if (p_diff[j])  // p also differs at j
+      {
+        // Search for k where both p and p1 differ from lcm
+        for (k=N; k>j; k--)
+        {
+          if (p_diff[k] && p1_diff[k])
+            return TRUE;
+        }
+        for (k=j-1; k!=0 ; k--)
+        {
+          if (p_diff[k] && p1_diff[k])
+            return TRUE;
+        }
+        return FALSE;
+      }
+    }
+  }
+  return FALSE;
+}
+#endif
+
 BOOLEAN pCompareChain (poly p,poly p1,poly p2,poly lcm, const ring R)
 {
   int k, j;
   const int N = R->N;
+
+  // if (R->BitsPerExp == 16) return pCompareChain_16bit(p, p1, p2, lcm, R);
 
   if (lcm==NULL) return FALSE;
 

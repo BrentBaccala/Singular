@@ -3861,6 +3861,16 @@ BOOLEAN rComplete(ring r, int force)
   // ----------------------------
   // finished with constructing the monomial, computing sizes:
 
+  // Pad ExpL_Size to multiple of SIMD_VECTOR_LONGS for SIMD operations
+#if SIMD_VECTOR_LONGS > 1
+  {
+    int remainder = j % SIMD_VECTOR_LONGS;
+    if (remainder != 0) {
+      j += (SIMD_VECTOR_LONGS - remainder);
+    }
+  }
+#endif
+
   r->ExpL_Size=j;
   auto binsize = POLYSIZE + (r->ExpL_Size)*sizeof(long);
   binsize = (binsize + SIMD_VECTOR_SIZE - 1) & ~(SIMD_VECTOR_SIZE - 1);
@@ -3923,6 +3933,24 @@ BOOLEAN rComplete(ring r, int force)
   // ----------------------------
   // set VarL_*
   rSetVarL(r);
+
+  // ----------------------------
+  // build VarL_Bitmask for SIMD operations
+  r->VarL_Bitmask = (unsigned long*)omAlloc0(r->ExpL_Size * sizeof(unsigned long));
+
+  // Create mask with BitsPerExp bits set (e.g., 0xFFFF for 16-bit)
+  unsigned long field_mask = (1UL << r->BitsPerExp) - 1;
+
+  // Set bits for each variable position
+  for (int v = 1; v <= r->N; v++) {
+    if (r->VarOffset[v] != -1) {
+      int pos = (r->VarOffset[v] & 0xffffff);      // exp[] index
+      int bitpos = (r->VarOffset[v] >> 24) & 0x3f; // bit offset
+
+      // Set BitsPerExp consecutive bits at bitpos
+      r->VarL_Bitmask[pos] |= (field_mask << bitpos);
+    }
+  }
 
   //  ----------------------------
   // right-adjust VarOffset
@@ -4109,6 +4137,12 @@ void rUnComplete(ring r)
     }
     omfreeSize(r->VarL_Offset, r->VarL_Size*sizeof(int));
     r->VarL_Offset=NULL;
+
+    if (r->VarL_Bitmask != NULL)
+    {
+      omFreeSize((ADDRESS)r->VarL_Bitmask, r->ExpL_Size*sizeof(unsigned long));
+      r->VarL_Bitmask=NULL;
+    }
   }
   if (r->NegWeightL_Offset!=NULL)
   {
