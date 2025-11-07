@@ -3861,21 +3861,25 @@ BOOLEAN rComplete(ring r, int force)
   // ----------------------------
   // finished with constructing the monomial, computing sizes:
 
-  // Pad ExpL_Size to multiple of SIMD_VECTOR_LONGS for SIMD operations
+  r->ExpL_Size=j;  // Keep actual size, don't pad
+
+  // Calculate padded size for allocation only (don't modify ExpL_Size)
+  int padded_exp_size = j;
 #if SIMD_VECTOR_LONGS > 1
   {
-    int remainder = j % SIMD_VECTOR_LONGS;
+    int remainder = padded_exp_size % SIMD_VECTOR_LONGS;
     if (remainder != 0) {
-      j += (SIMD_VECTOR_LONGS - remainder);
+      padded_exp_size += (SIMD_VECTOR_LONGS - remainder);
     }
   }
 #endif
 
-  r->ExpL_Size=j;
-  auto binsize = POLYSIZE + (r->ExpL_Size)*sizeof(long);
-  binsize = (binsize + SIMD_VECTOR_SIZE - 1) & ~(SIMD_VECTOR_SIZE - 1);
+  auto binsize = POLYSIZE + padded_exp_size * sizeof(long);
   r->PolyBin=omGetSpecBin(binsize);
   assume(r->PolyBin != NULL);
+
+  // Store number of SIMD blocks allocated for exp array
+  r->Exp_SIMD_Size = (padded_exp_size * sizeof(long)) / SIMD_VECTOR_SIZE;
 
   // ----------------------------
   // indices and ordsgn vector for comparison
@@ -3935,8 +3939,8 @@ BOOLEAN rComplete(ring r, int force)
   rSetVarL(r);
 
   // ----------------------------
-  // build VarL_Bitmask for SIMD operations
-  r->VarL_Bitmask = (unsigned long*)omAlloc0(r->ExpL_Size * sizeof(unsigned long));
+  // build VarL_Bitmask for SIMD operations (size matches padded exp allocation)
+  r->VarL_Bitmask = (unsigned long*)omAlloc0(r->Exp_SIMD_Size * SIMD_VECTOR_SIZE);
 
   // Create mask with BitsPerExp bits set (e.g., 0xFFFF for 16-bit)
   unsigned long field_mask = (1UL << r->BitsPerExp) - 1;
@@ -4140,7 +4144,7 @@ void rUnComplete(ring r)
 
     if (r->VarL_Bitmask != NULL)
     {
-      omFreeSize((ADDRESS)r->VarL_Bitmask, r->ExpL_Size*sizeof(unsigned long));
+      omFreeSize((ADDRESS)r->VarL_Bitmask, r->Exp_SIMD_Size * SIMD_VECTOR_SIZE);
       r->VarL_Bitmask=NULL;
     }
   }
@@ -4687,9 +4691,24 @@ ring rAssure_TDeg(ring r, int &pos)
   int j;
 
   res->ExpL_Size=r->ExpL_Size+1; // one word more in each monom
-  auto binsize = POLYSIZE + (res->ExpL_Size)*sizeof(long);
-  binsize = (binsize + SIMD_VECTOR_SIZE - 1) & ~(SIMD_VECTOR_SIZE - 1);
+
+  // Calculate padded size for allocation only (don't modify ExpL_Size)
+  int padded_exp_size = res->ExpL_Size;
+#if SIMD_VECTOR_LONGS > 1
+  {
+    int remainder = padded_exp_size % SIMD_VECTOR_LONGS;
+    if (remainder != 0) {
+      padded_exp_size += (SIMD_VECTOR_LONGS - remainder);
+    }
+  }
+#endif
+
+  auto binsize = POLYSIZE + padded_exp_size * sizeof(long);
   res->PolyBin=omGetSpecBin(binsize);
+
+  // Store number of SIMD blocks allocated for exp array
+  res->Exp_SIMD_Size = (padded_exp_size * sizeof(long)) / SIMD_VECTOR_SIZE;
+
   omFree((ADDRESS)res->ordsgn);
   res->ordsgn=(long *)omAlloc0(res->ExpL_Size*sizeof(long));
   for(j=0;j<r->CmpL_Size;j++)

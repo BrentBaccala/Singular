@@ -331,7 +331,8 @@ struct ip_sring
 
   // what follows below here should be set by rComplete, _only_
   // contains component, but no weight fields in E */
-  short      ExpL_Size; // size of exponent vector in long
+  short      ExpL_Size; // size of exponent vector in long (actual size, not padded)
+  short      Exp_SIMD_Size; // number of SIMD blocks allocated for exp (padded size)
   short      CmpL_Size; // portions which need to be compared
   /* number of long vars in exp vector:
      long vars are those longs in the exponent vector which are
