@@ -5,6 +5,7 @@
 NUM_RUNS=5
 CYCLIC_N=5
 KATSURA_N=5
+CHARACTERISTIC=32003
 GB_ALGORITHMS=("std")
 WARMUP_RUN=0
 SHOW_INPUT=0
@@ -23,13 +24,13 @@ declare -a SINGULAR_PATHS
 # Test flags (all disabled by default)
 RUN_NEWELLP1=0
 RUN_CYCLIC_QQ_DP=0
-RUN_CYCLIC_ZZ_DP=0
+RUN_CYCLIC_FP_DP=0
 RUN_CYCLIC_QQ_LP=0
-RUN_CYCLIC_ZZ_LP=0
+RUN_CYCLIC_FP_LP=0
 RUN_CYCLIC_HOM_QQ=0
-RUN_CYCLIC_HOM_ZZ=0
+RUN_CYCLIC_HOM_FP=0
 RUN_KATSURA_QQ=0
-RUN_KATSURA_ZZ=0
+RUN_KATSURA_FP=0
 
 # Colors for output
 RED='\033[0;31m'
@@ -47,6 +48,7 @@ OPTIONS:
   -n, --num-runs N          Number of runs per test (default: 5)
   --cyclic-n N              Number of variables for cyclic tests (default: 5)
   --katsura-n N             Number of variables for katsura tests (default: 5)
+  --char, --characteristic N  Prime characteristic for finite field tests (default: 32003)
   --algorithm ALG[,ALG2,...]  Groebner basis algorithm(s) to use (default: std)
                             Options: std, modstd, groebner, slimgb, sba, mathicgb, all
                             'all' runs: std, slimgb, sba, and modstd (char 0) or mathicgb (char p)
@@ -66,13 +68,13 @@ OPTIONS:
 TESTS (can specify multiple):
   --newellp1               Run newellp1 test (embedded in script)
   --cyclic-qq-dp           Run cyclic(n) with QQ coefficients and dp ordering
-  --cyclic-zz-dp           Run cyclic(n) with ZZ/32003 and dp ordering
+  --cyclic-fp-dp           Run cyclic(n) with Fp coefficients and dp ordering
   --cyclic-qq-lp           Run cyclic(n) with QQ and lp ordering
-  --cyclic-zz-lp           Run cyclic(n) with ZZ/32003 and lp ordering
+  --cyclic-fp-lp           Run cyclic(n) with Fp and lp ordering
   --cyclic-hom-qq          Run homogenized cyclic(n) with QQ and dp
-  --cyclic-hom-zz          Run homogenized cyclic(n) with ZZ/32003 and dp
+  --cyclic-hom-fp          Run homogenized cyclic(n) with Fp and dp
   --katsura-qq             Run katsura(n) with QQ and dp
-  --katsura-zz             Run katsura(n) with ZZ/32003 and dp
+  --katsura-fp             Run katsura(n) with Fp and dp
   --cyclic                 Run all cyclic tests
   --katsura                Run all katsura tests
 
@@ -94,6 +96,7 @@ EXAMPLES:
   $0 -s ~/src/Singular-build/Singular/.libs/Singular --cyclic
   $0 -s ~/build1/Singular -s ~/build2/Singular --algorithm std,sba --cyclic
   $0 --perf -s ~/src/Singular-build --cyclic-qq-dp -n 1
+  $0 --char 97 --cyclic-fp-dp --algorithm all
 
 EOF
     exit 0
@@ -113,6 +116,10 @@ while [[ $# -gt 0 ]]; do
             ;;
         --katsura-n)
             KATSURA_N="$2"
+            shift 2
+            ;;
+        --char|--characteristic)
+            CHARACTERISTIC="$2"
             shift 2
             ;;
         --algorithm)
@@ -177,13 +184,13 @@ while [[ $# -gt 0 ]]; do
         -a|--all)
             RUN_NEWELLP1=1
             RUN_CYCLIC_QQ_DP=1
-            RUN_CYCLIC_ZZ_DP=1
+            RUN_CYCLIC_FP_DP=1
             RUN_CYCLIC_QQ_LP=1
-            RUN_CYCLIC_ZZ_LP=1
+            RUN_CYCLIC_FP_LP=1
             RUN_CYCLIC_HOM_QQ=1
-            RUN_CYCLIC_HOM_ZZ=1
+            RUN_CYCLIC_HOM_FP=1
             RUN_KATSURA_QQ=1
-            RUN_KATSURA_ZZ=1
+            RUN_KATSURA_FP=1
             TESTS_SPECIFIED=1
             shift
             ;;
@@ -197,8 +204,8 @@ while [[ $# -gt 0 ]]; do
             TESTS_SPECIFIED=1
             shift
             ;;
-        --cyclic-zz-dp)
-            RUN_CYCLIC_ZZ_DP=1
+        --cyclic-fp-dp)
+            RUN_CYCLIC_FP_DP=1
             TESTS_SPECIFIED=1
             shift
             ;;
@@ -207,8 +214,8 @@ while [[ $# -gt 0 ]]; do
             TESTS_SPECIFIED=1
             shift
             ;;
-        --cyclic-zz-lp)
-            RUN_CYCLIC_ZZ_LP=1
+        --cyclic-fp-lp)
+            RUN_CYCLIC_FP_LP=1
             TESTS_SPECIFIED=1
             shift
             ;;
@@ -217,8 +224,8 @@ while [[ $# -gt 0 ]]; do
             TESTS_SPECIFIED=1
             shift
             ;;
-        --cyclic-hom-zz)
-            RUN_CYCLIC_HOM_ZZ=1
+        --cyclic-hom-fp)
+            RUN_CYCLIC_HOM_FP=1
             TESTS_SPECIFIED=1
             shift
             ;;
@@ -227,24 +234,24 @@ while [[ $# -gt 0 ]]; do
             TESTS_SPECIFIED=1
             shift
             ;;
-        --katsura-zz)
-            RUN_KATSURA_ZZ=1
+        --katsura-fp)
+            RUN_KATSURA_FP=1
             TESTS_SPECIFIED=1
             shift
             ;;
         --cyclic)
             RUN_CYCLIC_QQ_DP=1
-            RUN_CYCLIC_ZZ_DP=1
+            RUN_CYCLIC_FP_DP=1
             RUN_CYCLIC_QQ_LP=1
-            RUN_CYCLIC_ZZ_LP=1
+            RUN_CYCLIC_FP_LP=1
             RUN_CYCLIC_HOM_QQ=1
-            RUN_CYCLIC_HOM_ZZ=1
+            RUN_CYCLIC_HOM_FP=1
             TESTS_SPECIFIED=1
             shift
             ;;
         --katsura)
             RUN_KATSURA_QQ=1
-            RUN_KATSURA_ZZ=1
+            RUN_KATSURA_FP=1
             TESTS_SPECIFIED=1
             shift
             ;;
@@ -259,13 +266,13 @@ done
 if [ $TESTS_SPECIFIED -eq 0 ]; then
     RUN_NEWELLP1=1
     RUN_CYCLIC_QQ_DP=1
-    RUN_CYCLIC_ZZ_DP=1
+    RUN_CYCLIC_FP_DP=1
     RUN_CYCLIC_QQ_LP=1
-    RUN_CYCLIC_ZZ_LP=1
+    RUN_CYCLIC_FP_LP=1
     RUN_CYCLIC_HOM_QQ=1
-    RUN_CYCLIC_HOM_ZZ=1
+    RUN_CYCLIC_HOM_FP=1
     RUN_KATSURA_QQ=1
-    RUN_KATSURA_ZZ=1
+    RUN_KATSURA_FP=1
 fi
 
 # If no Singular executables specified, use default from PATH
@@ -318,6 +325,7 @@ echo "================================"
 echo "Number of runs per test: $NUM_RUNS"
 echo "Cyclic n: $CYCLIC_N"
 echo "Katsura n: $KATSURA_N"
+echo "Characteristic (Fp): $CHARACTERISTIC"
 echo "Algorithms: $RAW_ALGORITHMS"
 echo "Singular versions: ${#SINGULAR_EXECS[@]}"
 for i in "${!SINGULAR_EXECS[@]}"; do
@@ -335,7 +343,7 @@ echo ""
 # Cleanup on exit
 trap "rm -rf $TEMP_DIR" EXIT
 
-# Function to determine if a test uses characteristic 0 (QQ) or prime characteristic (ZZ)
+# Function to determine if a test uses characteristic 0 (QQ) or prime characteristic (Fp)
 test_is_char_zero() {
     local test_name=$1
     [[ "$test_name" =~ -QQ- ]] || [[ "$test_name" == newellp1* ]]
@@ -354,7 +362,7 @@ validate_algorithm_for_test() {
     fi
     
     if [ "$algorithm" == "mathicgb" ] && [ $is_char_zero -eq 1 ]; then
-        echo "Error: mathicgb only works in prime characteristic (ZZ rings)"
+        echo "Error: mathicgb only works in prime characteristic (Fp rings)"
         echo "Cannot use mathicgb with test: $test_name"
         exit 1
     fi
@@ -479,11 +487,11 @@ ideal j = $GB_ALGORITHM_CALL(i);
 quit;
 EOF
             ;;
-        cyclic_zz_dp)
+        cyclic_fp_dp)
             cat > "$filename" << EOF
 LIB "polylib.lib";
 LIB "modstd.lib";
-ring r = 32003,($cyclic_vars),dp;
+ring r = $CHARACTERISTIC,($cyclic_vars),dp;
 ideal i = cyclic($CYCLIC_N);
 $([ $SHOW_STRATEGY -eq 1 ] && echo 'intvec options = option(get);
 options[2] = options[2] + 2^23;
@@ -509,11 +517,11 @@ ideal j = $GB_ALGORITHM_CALL(i);
 quit;
 EOF
             ;;
-        cyclic_zz_lp)
+        cyclic_fp_lp)
             cat > "$filename" << EOF
 LIB "polylib.lib";
 LIB "modstd.lib";
-ring r = 32003,($cyclic_vars),lp;
+ring r = $CHARACTERISTIC,($cyclic_vars),lp;
 ideal i = cyclic($CYCLIC_N);
 $([ $SHOW_STRATEGY -eq 1 ] && echo 'intvec options = option(get);
 options[2] = options[2] + 2^23;
@@ -539,11 +547,11 @@ ideal j = $GB_ALGORITHM_CALL(i);
 quit;
 EOF
             ;;
-        cyclic_hom_zz_dp)
+        cyclic_hom_fp_dp)
             cat > "$filename" << EOF
 LIB "polylib.lib";
 LIB "modstd.lib";
-ring r = 32003,($cyclic_vars,h),dp;
+ring r = $CHARACTERISTIC,($cyclic_vars,h),dp;
 ideal i = homog(cyclic($CYCLIC_N),h);
 $([ $SHOW_STRATEGY -eq 1 ] && echo 'intvec options = option(get);
 options[2] = options[2] + 2^23;
@@ -569,11 +577,11 @@ ideal j = $GB_ALGORITHM_CALL(i);
 quit;
 EOF
             ;;
-        katsura_zz_dp)
+        katsura_fp_dp)
             cat > "$filename" << EOF
 LIB "polylib.lib";
 LIB "modstd.lib";
-ring r = 32003,($katsura_vars),dp;
+ring r = $CHARACTERISTIC,($katsura_vars),dp;
 ideal i = katsura($KATSURA_N);
 $([ $SHOW_STRATEGY -eq 1 ] && echo 'intvec options = option(get);
 options[2] = options[2] + 2^23;
@@ -743,32 +751,32 @@ if [ $RUN_CYCLIC_QQ_DP -eq 1 ]; then
     BASE_TESTS+=("cyclic${CYCLIC_N}-QQ-dp")
 fi
 
-if [ $RUN_CYCLIC_ZZ_DP -eq 1 ]; then
-    BASE_TESTS+=("cyclic${CYCLIC_N}-ZZ-dp")
+if [ $RUN_CYCLIC_FP_DP -eq 1 ]; then
+    BASE_TESTS+=("cyclic${CYCLIC_N}-F${CHARACTERISTIC}-dp")
 fi
 
 if [ $RUN_CYCLIC_QQ_LP -eq 1 ]; then
     BASE_TESTS+=("cyclic${CYCLIC_N}-QQ-lp")
 fi
 
-if [ $RUN_CYCLIC_ZZ_LP -eq 1 ]; then
-    BASE_TESTS+=("cyclic${CYCLIC_N}-ZZ-lp")
+if [ $RUN_CYCLIC_FP_LP -eq 1 ]; then
+    BASE_TESTS+=("cyclic${CYCLIC_N}-F${CHARACTERISTIC}-lp")
 fi
 
 if [ $RUN_CYCLIC_HOM_QQ -eq 1 ]; then
     BASE_TESTS+=("cyclic${CYCLIC_N}-hom-QQ-dp")
 fi
 
-if [ $RUN_CYCLIC_HOM_ZZ -eq 1 ]; then
-    BASE_TESTS+=("cyclic${CYCLIC_N}-hom-ZZ-dp")
+if [ $RUN_CYCLIC_HOM_FP -eq 1 ]; then
+    BASE_TESTS+=("cyclic${CYCLIC_N}-hom-F${CHARACTERISTIC}-dp")
 fi
 
 if [ $RUN_KATSURA_QQ -eq 1 ]; then
     BASE_TESTS+=("katsura${KATSURA_N}-QQ-dp")
 fi
 
-if [ $RUN_KATSURA_ZZ -eq 1 ]; then
-    BASE_TESTS+=("katsura${KATSURA_N}-ZZ-dp")
+if [ $RUN_KATSURA_FP -eq 1 ]; then
+    BASE_TESTS+=("katsura${KATSURA_N}-F${CHARACTERISTIC}-dp")
 fi
 
 # Now for each base test, get appropriate algorithms and create test files
@@ -776,22 +784,22 @@ for base_test in "${BASE_TESTS[@]}"; do
     # Determine the test type for file creation
     if [[ "$base_test" == newellp1* ]]; then
         test_type="newellp1"
-    elif [[ "$base_test" == cyclic*-QQ-dp ]]; then
+    elif [[ "$base_test" =~ cyclic.*-QQ-dp ]]; then
         test_type="cyclic_qq_dp"
-    elif [[ "$base_test" == cyclic*-ZZ-dp ]]; then
-        test_type="cyclic_zz_dp"
-    elif [[ "$base_test" == cyclic*-QQ-lp ]]; then
+    elif [[ "$base_test" =~ cyclic.*-F.*-dp ]]; then
+        test_type="cyclic_fp_dp"
+    elif [[ "$base_test" =~ cyclic.*-QQ-lp ]]; then
         test_type="cyclic_qq_lp"
-    elif [[ "$base_test" == cyclic*-ZZ-lp ]]; then
-        test_type="cyclic_zz_lp"
-    elif [[ "$base_test" == cyclic*-hom-QQ-dp ]]; then
+    elif [[ "$base_test" =~ cyclic.*-F.*-lp ]]; then
+        test_type="cyclic_fp_lp"
+    elif [[ "$base_test" =~ cyclic.*-hom-QQ-dp ]]; then
         test_type="cyclic_hom_qq_dp"
-    elif [[ "$base_test" == cyclic*-hom-ZZ-dp ]]; then
-        test_type="cyclic_hom_zz_dp"
-    elif [[ "$base_test" == katsura*-QQ-dp ]]; then
+    elif [[ "$base_test" =~ cyclic.*-hom-F.*-dp ]]; then
+        test_type="cyclic_hom_fp_dp"
+    elif [[ "$base_test" =~ katsura.*-QQ-dp ]]; then
         test_type="katsura_qq_dp"
-    elif [[ "$base_test" == katsura*-ZZ-dp ]]; then
-        test_type="katsura_zz_dp"
+    elif [[ "$base_test" =~ katsura.*-F.*-dp ]]; then
+        test_type="katsura_fp_dp"
     fi
     
     # Get appropriate algorithms for this test
