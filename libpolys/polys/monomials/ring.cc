@@ -3938,6 +3938,10 @@ BOOLEAN rComplete(ring r, int force)
   // set VarL_*
   rSetVarL(r);
 
+  //  ----------------------------
+  // right-adjust VarOffset
+  rRightAdjustVarOffset(r);
+
   // ----------------------------
   // build VarL_Bitmask for SIMD operations (size matches padded exp allocation)
   r->VarL_Bitmask = (unsigned long*)omAlloc0(r->Exp_SIMD_Size * SIMD_VECTOR_SIZE);
@@ -3955,10 +3959,6 @@ BOOLEAN rComplete(ring r, int force)
       r->VarL_Bitmask[pos] |= (field_mask << bitpos);
     }
   }
-
-  //  ----------------------------
-  // right-adjust VarOffset
-  rRightAdjustVarOffset(r);
 
   // ----------------------------
   // set NegWeightL*
