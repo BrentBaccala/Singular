@@ -13,7 +13,7 @@ proc mathicgb_prOrder0(def r)
 {
 }
 
-proc mathicgb_setRingGlobal0()
+proc mathicgb_setRingGlobal()
 {
 }
 
