@@ -48,8 +48,8 @@ OPTIONS:
   --cyclic-n N              Number of variables for cyclic tests (default: 5)
   --katsura-n N             Number of variables for katsura tests (default: 5)
   --algorithm ALG[,ALG2,...]  Groebner basis algorithm(s) to use (default: std)
-                            Options: std, modstd, groebner, slimgb, sba, all
-                            'all' runs: std, modstd, groebner, slimgb, sba
+                            Options: std, modstd, groebner, slimgb, sba, mathicgb, all
+                            'all' runs: std, modstd, groebner, slimgb, sba, mathicgb
                             Can specify multiple separated by commas
   -s, --singular PATH       Path to Singular executable (can be specified multiple times)
                             If not specified, uses 'Singular' from PATH
@@ -117,13 +117,13 @@ while [[ $# -gt 0 ]]; do
         --algorithm)
             # Handle 'all' keyword
             if [ "$2" == "all" ]; then
-                GB_ALGORITHMS=("std" "modstd" "groebner" "slimgb" "sba")
+                GB_ALGORITHMS=("std" "modstd" "groebner" "slimgb" "sba" "mathicgb")
             else
                 IFS=',' read -ra GB_ALGORITHMS <<< "$2"
                 # Validate each algorithm
                 for alg in "${GB_ALGORITHMS[@]}"; do
                     case $alg in
-                        std|modstd|groebner|slimgb|sba)
+                        std|modstd|groebner|slimgb|sba|mathicgb)
                             ;;
                         all)
                             # Expand 'all' in a comma-separated list
@@ -132,7 +132,7 @@ while [[ $# -gt 0 ]]; do
                             ;;
                         *)
                             echo "Error: Unknown algorithm '$alg'"
-                            echo "Valid options: std, modstd, groebner, slimgb, sba, all"
+                            echo "Valid options: std, modstd, groebner, slimgb, sba, mathicgb, all"
                             exit 1
                             ;;
                     esac
