@@ -50,7 +50,7 @@ proc testGB(ideal i) {
 }
 
 proc test1() {
-  ring r = 32003,(x(1..5)),(a(2,3,4,5,6),rs);
+  ring r = 32003,(x(1..5)),(a(2,3,4,5,6),is);
   mathicgb_prOrder(r); testGB(cyclic(5));
 }
 
@@ -85,15 +85,15 @@ proc test7() {// doesn't match because interred doesn't work here
 }
 
 proc test8() {
-  ring r = 32003,(x(1..5)),rp;
+  ring r = 32003,(x(1..5)),ip;
   mathicgb_prOrder(r); testGB(cyclic(5));
 }
 proc test9() {
-  ring r = 32003,(x(1..5)),rs;
+  ring r = 32003,(x(1..5)),is;
   mathicgb_prOrder(r); testGB(cyclic(5));
 }
 proc test10() {
-  ring r = 32003,(x(1..5)),(a(2,3,4,5,6),rs);
+  ring r = 32003,(x(1..5)),(a(2,3,4,5,6),is);
   mathicgb_prOrder(r); testGB(cyclic(5));
 }
 proc test11() {
@@ -274,13 +274,13 @@ ring rWs=101,(a,b,c),Ws(1,1,1);" Ws(v): -v-graded, lex from left";a2+b2+c2+ab+ac
 ring rwp=101,(a,b,c),wp(1,1,1);" wp(v): v-graded, revlex from right";a2+b2+c2+ab+ac+bc;1+b2+a+a2;
 ring rws=101,(a,b,c),ws(1,1,1);" ws(v): -v-graded, revlex from right";a2+b2+c2+ab+ac+bc;1+b2+a+a2;
 ring rdp=101,(a,b,c),dp;" dp: 1-graded, revlex from right";a2+b2+c2+ab+ac+bc;1+b2+a+a2;
-ring rrs=101,(a,b,c),rs;" rs: -1-graded, revlex from right";a2+b2+c2+ab+ac+bc;1+b2+a+a2;
+ring rrs=101,(a,b,c),is;" is: -1-graded, revlex from right";a2+b2+c2+ab+ac+bc;1+b2+a+a2;
 ring rds=101,(a,b,c),ds;" ds: -1-graded, revlex from right";a2+b2+c2+ab+ac+bc;1+b2+a+a2;
 
 // c2+bc+b2+ac+ab+a2, revlex with a<b<c (from left)
 ring rls=101,(a,b,c),ls;" ls: revlex from left";a2+b2+c2+ab+ac+bc;1+b2+a+a2;
 
 // c2+bc+ac+b2+ab+a2, lex with a<b<c (from right)
-ring rrp=101,(a,b,c),rp;" rp: lex from right";a2+b2+c2+ab+ac+bc;1+b2+a+a2;
+ring rrp=101,(a,b,c),ip;" ip: lex from right";a2+b2+c2+ab+ac+bc;1+b2+a+a2;
 
 
