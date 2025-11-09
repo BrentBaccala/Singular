@@ -27,6 +27,7 @@ BOOLEAN pCompareChain_16bit_AVX2 (poly p,poly p1,poly p2,poly lcm, const ring R)
   __m256i * p2_exp_ptr = (__m256i *) p2->exp;
   __m256i * lcm_exp_ptr = (__m256i *) lcm->exp;
   __m256i * VarL_Bitmask_ptr = (__m256i *) R->VarL_Bitmask;
+  __m256i bias = _mm256_set1_epi16(0x8000);
   int p_diff_count = 0;
   int p1_diff_count = 0;
   int p2_diff_count = 0;
@@ -41,8 +42,12 @@ BOOLEAN pCompareChain_16bit_AVX2 (poly p,poly p1,poly p2,poly lcm, const ring R)
     __m256i VarL_Bitmask = _mm256_loadu_si256 (VarL_Bitmask_ptr + i);
 
     // Basic divisibility check
-    // if (p_exp[i] > lcm_exp[i]) return FALSE;
-    __m256i result = _mm256_cmpgt_epi16(p_exp, lcm_exp);
+    //    if (p_exp[i] > lcm_exp[i]) return FALSE;
+    // AVX2 doesn't have an unsigned 16-bit integer compare, so
+    //    we convert to signed by subtracting 0x8000 from both operands (Claude's suggestion)
+    __m256i p_exp_signed = _mm256_sub_epi16(p_exp, bias);
+    __m256i lcm_exp_signed = _mm256_sub_epi16(lcm_exp, bias);
+    __m256i result = _mm256_cmpgt_epi16(p_exp_signed, lcm_exp_signed);
     result = _mm256_and_si256(result, VarL_Bitmask);
     if (! _mm256_testz_si256(result, result)) return FALSE;
 
