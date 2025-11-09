@@ -5,6 +5,10 @@
 
 #include "kernel/polys.h"
 
+#ifdef HAVE_AVX2
+#include <immintrin.h>
+#endif
+
 /* Returns TRUE if
      * LM(p) | LM(lcm)
      * LC(p) | LC(lcm) only if ring
@@ -14,6 +18,75 @@
          * LE(p, j)  != LE(lcm, j)
          * LE(p2, j) != LE(lcm, j)   ==> LCM(p2, p) != lcm
 */
+
+#ifdef HAVE_AVX2
+BOOLEAN pCompareChain_16bit_AVX2 (poly p,poly p1,poly p2,poly lcm, const ring R)
+{
+  __m256i * p_exp_ptr = (__m256i *) p->exp;
+  __m256i * p1_exp_ptr = (__m256i *) p1->exp;
+  __m256i * p2_exp_ptr = (__m256i *) p2->exp;
+  __m256i * lcm_exp_ptr = (__m256i *) lcm->exp;
+  __m256i * VarL_Bitmask_ptr = (__m256i *) R->VarL_Bitmask;
+  int p_diff_count = 0;
+  int p1_diff_count = 0;
+  int p2_diff_count = 0;
+  int p1_and_p2_common_diff_count = 0;
+
+  for (int i=0; i < R->Exp_SIMD_Size; i++) {
+    // unaligned loads because I haven't been able to get exponent fields aligned on a SIMD_VECTOR_SIZE boundary
+    __m256i p_exp = _mm256_loadu_si256 (p_exp_ptr + i);
+    __m256i p1_exp = _mm256_loadu_si256 (p1_exp_ptr + i);
+    __m256i p2_exp = _mm256_loadu_si256 (p2_exp_ptr + i);
+    __m256i lcm_exp = _mm256_loadu_si256 (lcm_exp_ptr + i);
+    __m256i VarL_Bitmask = _mm256_loadu_si256 (VarL_Bitmask_ptr + i);
+
+    // Basic divisibility check
+    // if (p_exp[i] > lcm_exp[i]) return FALSE;
+    __m256i result = _mm256_cmpgt_epi16(p_exp, lcm_exp);
+    result = _mm256_and_si256(result, VarL_Bitmask);
+    if (! _mm256_testz_si256(result, result)) return FALSE;
+
+    // Compute difference indicators
+    __m256i p_diff = _mm256_cmpeq_epi16(p_exp, lcm_exp);
+    __m256i p1_diff = _mm256_cmpeq_epi16(p1_exp, lcm_exp);
+    __m256i p2_diff = _mm256_cmpeq_epi16(p2_exp, lcm_exp);
+
+    // invert the eq to neq, and mask off the variables
+    p_diff = _mm256_andnot_si256(p_diff, VarL_Bitmask);
+    p1_diff = _mm256_andnot_si256(p1_diff, VarL_Bitmask);
+    p2_diff = _mm256_andnot_si256(p2_diff, VarL_Bitmask);
+
+    p1_diff = _mm256_and_si256(p1_diff, p_diff);
+    p2_diff = _mm256_and_si256(p2_diff, p_diff);
+
+    __m256i p1_and_p2_common_diff = _mm256_and_si256(p1_diff, p2_diff);
+
+    // we count high bits in epi8, but our exponents are epu16, so each TRUE gets counted twice, so we divide by 2
+
+    p_diff_count += _mm_popcnt_u32(_mm256_movemask_epi8(p_diff)) / 2;
+    p1_diff_count += _mm_popcnt_u32(_mm256_movemask_epi8(p1_diff)) / 2;
+    p2_diff_count += _mm_popcnt_u32(_mm256_movemask_epi8(p2_diff)) / 2;
+
+    p1_and_p2_common_diff_count += _mm_popcnt_u32(_mm256_movemask_epi8(p1_and_p2_common_diff)) / 2;
+  }
+
+  // Chain criterion needs at least 2 variables where p differs from lcm
+  if (p_diff_count <= 1) return FALSE;
+
+  // If p1 or p2 equals lcm everywhere, chain criterion cannot apply
+  if (p1_diff_count == 0 || p2_diff_count == 0) return FALSE;
+
+  // If at least one of them differs in two places (and the other differs in at least one place), chain criterion applies
+  if (p1_diff_count > 1 && p2_diff_count > 1) return TRUE;
+
+  // p1 and p2 differ from lcm in only one variable.  If it's the same variable, chain criteron cannot apply
+  if (p1_and_p2_common_diff_count == 1) return FALSE;
+
+  // p1 and p2 differ from lcm in only one variable and it's two different variables, chain criteron applies
+  return TRUE;
+}
+#endif
+
 #if 0
 BOOLEAN pCompareChain_16bit (poly p,poly p1,poly p2,poly lcm, const ring R)
 {
@@ -108,9 +181,12 @@ BOOLEAN pCompareChain (poly p,poly p1,poly p2,poly lcm, const ring R)
   int k, j;
   const int N = R->N;
 
-  // if (R->BitsPerExp == 16) return pCompareChain_16bit(p, p1, p2, lcm, R);
-
   if (lcm==NULL) return FALSE;
+  if (pGetComp(p) != pGetComp(lcm)) return FALSE;
+
+#ifdef HAVE_AVX2
+  if (R->BitsPerExp == 16) return pCompareChain_16bit_AVX2(p, p1, p2, lcm, R);
+#endif
 
   // Optimization: Cache all exponents to eliminate redundant p_GetExp calls
   // Pre-allocate arrays on stack (typically N <= 100, so ~3.2KB max)
@@ -154,7 +230,6 @@ BOOLEAN pCompareChain (poly p,poly p1,poly p2,poly lcm, const ring R)
   // Original divisibility check
   for (j=N; j; j--)
     if (p_exp[j] > lcm_exp[j]) return FALSE;
-  if (pGetComp(p) != pGetComp(lcm)) return FALSE;
 
   // Main chain criterion loop - use pre-computed difference arrays
   for (j=N; j; j--)
