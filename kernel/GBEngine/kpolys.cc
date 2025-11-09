@@ -30,7 +30,7 @@ BOOLEAN pCompareChain_16bit_AVX2 (poly p,poly p1,poly p2,poly lcm, const ring R)
   int p_diff_count = 0;
   int p1_diff_count = 0;
   int p2_diff_count = 0;
-  int p1_and_p2_common_diff_count = 0;
+  BOOLEAN p1_and_p2_common_diff = FALSE;
 
   for (int i=0; i < R->Exp_SIMD_Size; i++) {
     // unaligned loads because I haven't been able to get exponent fields aligned on a SIMD_VECTOR_SIZE boundary
@@ -59,15 +59,14 @@ BOOLEAN pCompareChain_16bit_AVX2 (poly p,poly p1,poly p2,poly lcm, const ring R)
     p1_diff = _mm256_and_si256(p1_diff, p_diff);
     p2_diff = _mm256_and_si256(p2_diff, p_diff);
 
-    __m256i p1_and_p2_common_diff = _mm256_and_si256(p1_diff, p2_diff);
+    __m256i p1_and_p2_common_diff_bits = _mm256_and_si256(p1_diff, p2_diff);
+    if (! _mm256_testz_si256(result, result)) p1_and_p2_common_diff = TRUE;
 
     // we count high bits in epi8, but our exponents are epu16, so each TRUE gets counted twice, so we divide by 2
 
     p_diff_count += _mm_popcnt_u32(_mm256_movemask_epi8(p_diff)) / 2;
     p1_diff_count += _mm_popcnt_u32(_mm256_movemask_epi8(p1_diff)) / 2;
     p2_diff_count += _mm_popcnt_u32(_mm256_movemask_epi8(p2_diff)) / 2;
-
-    p1_and_p2_common_diff_count += _mm_popcnt_u32(_mm256_movemask_epi8(p1_and_p2_common_diff)) / 2;
   }
 
   // Chain criterion needs at least 2 variables where p differs from lcm
@@ -80,7 +79,7 @@ BOOLEAN pCompareChain_16bit_AVX2 (poly p,poly p1,poly p2,poly lcm, const ring R)
   if (p1_diff_count > 1 && p2_diff_count > 1) return TRUE;
 
   // p1 and p2 differ from lcm in only one variable.  If it's the same variable, chain criteron cannot apply
-  if (p1_and_p2_common_diff_count == 1) return FALSE;
+  if (p1_and_p2_common_diff) return FALSE;
 
   // p1 and p2 differ from lcm in only one variable and it's two different variables, chain criteron applies
   return TRUE;
