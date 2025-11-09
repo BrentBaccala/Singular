@@ -49,8 +49,9 @@ OPTIONS:
   --katsura-n N             Number of variables for katsura tests (default: 5)
   --algorithm ALG[,ALG2,...]  Groebner basis algorithm(s) to use (default: std)
                             Options: std, modstd, groebner, slimgb, sba, mathicgb, all
-                            'all' runs: std, modstd, groebner, slimgb, sba, mathicgb
+                            'all' runs: std, slimgb, sba, and modstd (char 0) or mathicgb (char p)
                             Can specify multiple separated by commas
+                            Note: modstd only works in char 0; mathicgb only works in char p
   -s, --singular PATH       Path to Singular executable (can be specified multiple times)
                             If not specified, uses 'Singular' from PATH
   --warmup                  Perform an untimed warmup run before timed runs
@@ -115,29 +116,8 @@ while [[ $# -gt 0 ]]; do
             shift 2
             ;;
         --algorithm)
-            # Handle 'all' keyword
-            if [ "$2" == "all" ]; then
-                GB_ALGORITHMS=("std" "modstd" "groebner" "slimgb" "sba" "mathicgb")
-            else
-                IFS=',' read -ra GB_ALGORITHMS <<< "$2"
-                # Validate each algorithm
-                for alg in "${GB_ALGORITHMS[@]}"; do
-                    case $alg in
-                        std|modstd|groebner|slimgb|sba|mathicgb)
-                            ;;
-                        all)
-                            # Expand 'all' in a comma-separated list
-                            echo "Error: 'all' should be used alone, not in a comma-separated list"
-                            exit 1
-                            ;;
-                        *)
-                            echo "Error: Unknown algorithm '$alg'"
-                            echo "Valid options: std, modstd, groebner, slimgb, sba, mathicgb, all"
-                            exit 1
-                            ;;
-                    esac
-                done
-            fi
+            # Store raw algorithm list for later processing
+            RAW_ALGORITHMS="$2"
             shift 2
             ;;
         -s|--singular)
@@ -338,7 +318,7 @@ echo "================================"
 echo "Number of runs per test: $NUM_RUNS"
 echo "Cyclic n: $CYCLIC_N"
 echo "Katsura n: $KATSURA_N"
-echo "Algorithms: ${GB_ALGORITHMS[*]}"
+echo "Algorithms: $RAW_ALGORITHMS"
 echo "Singular versions: ${#SINGULAR_EXECS[@]}"
 for i in "${!SINGULAR_EXECS[@]}"; do
     echo "  [$((i+1))] ${SINGULAR_NAMES[$i]}: ${SINGULAR_EXECS[$i]}"
@@ -354,6 +334,69 @@ echo ""
 
 # Cleanup on exit
 trap "rm -rf $TEMP_DIR" EXIT
+
+# Function to determine if a test uses characteristic 0 (QQ) or prime characteristic (ZZ)
+test_is_char_zero() {
+    local test_name=$1
+    [[ "$test_name" =~ -QQ- ]] || [[ "$test_name" == newellp1* ]]
+}
+
+# Function to validate algorithm for characteristic
+validate_algorithm_for_test() {
+    local algorithm=$1
+    local test_name=$2
+    local is_char_zero=$(test_is_char_zero "$test_name" && echo 1 || echo 0)
+    
+    if [ "$algorithm" == "modstd" ] && [ $is_char_zero -eq 0 ]; then
+        echo "Error: modstd only works in characteristic 0 (QQ rings)"
+        echo "Cannot use modstd with test: $test_name"
+        exit 1
+    fi
+    
+    if [ "$algorithm" == "mathicgb" ] && [ $is_char_zero -eq 1 ]; then
+        echo "Error: mathicgb only works in prime characteristic (ZZ rings)"
+        echo "Cannot use mathicgb with test: $test_name"
+        exit 1
+    fi
+}
+
+# Function to get algorithms for a test (handles 'all' keyword)
+get_algorithms_for_test() {
+    local test_name=$1
+    local is_char_zero=$(test_is_char_zero "$test_name" && echo 1 || echo 0)
+    
+    if [ "$RAW_ALGORITHMS" == "all" ]; then
+        if [ $is_char_zero -eq 1 ]; then
+            # Char 0: std, modstd, slimgb, sba
+            echo "std modstd slimgb sba"
+        else
+            # Prime char: std, mathicgb, slimgb, sba
+            echo "std mathicgb slimgb sba"
+        fi
+    else
+        # Parse and validate explicitly requested algorithms
+        local result=""
+        IFS=',' read -ra algs <<< "$RAW_ALGORITHMS"
+        for alg in "${algs[@]}"; do
+            case $alg in
+                std|modstd|groebner|slimgb|sba|mathicgb)
+                    validate_algorithm_for_test "$alg" "$test_name"
+                    result="$result $alg"
+                    ;;
+                all)
+                    echo "Error: 'all' should be used alone, not in a comma-separated list"
+                    exit 1
+                    ;;
+                *)
+                    echo "Error: Unknown algorithm '$alg'"
+                    echo "Valid options: std, modstd, groebner, slimgb, sba, mathicgb, all"
+                    exit 1
+                    ;;
+            esac
+        done
+        echo "$result" | sed 's/^ //'
+    fi
+}
 
 # Function to map algorithm name to Singular function call
 get_algorithm_call() {
@@ -689,43 +732,74 @@ echo "Version|Test|Average|StdDev|Min|Max|Total" > "$TEMP_DIR/results.txt"
 # Build list of tests to run
 declare -a TESTS_TO_RUN
 
-# For each algorithm, create test files
-for algorithm in "${GB_ALGORITHMS[@]}"; do
-    if [ $RUN_NEWELLP1 -eq 1 ]; then
-        TESTS_TO_RUN+=("newellp1-${algorithm}:$(create_test_file newellp1 $algorithm)")
-    fi
+# First collect base test names
+declare -a BASE_TESTS
 
-    if [ $RUN_CYCLIC_QQ_DP -eq 1 ]; then
-        TESTS_TO_RUN+=("cyclic${CYCLIC_N}-QQ-dp-${algorithm}:$(create_test_file cyclic_qq_dp $algorithm)")
-    fi
+if [ $RUN_NEWELLP1 -eq 1 ]; then
+    BASE_TESTS+=("newellp1")
+fi
 
-    if [ $RUN_CYCLIC_ZZ_DP -eq 1 ]; then
-        TESTS_TO_RUN+=("cyclic${CYCLIC_N}-ZZ-dp-${algorithm}:$(create_test_file cyclic_zz_dp $algorithm)")
-    fi
+if [ $RUN_CYCLIC_QQ_DP -eq 1 ]; then
+    BASE_TESTS+=("cyclic${CYCLIC_N}-QQ-dp")
+fi
 
-    if [ $RUN_CYCLIC_QQ_LP -eq 1 ]; then
-        TESTS_TO_RUN+=("cyclic${CYCLIC_N}-QQ-lp-${algorithm}:$(create_test_file cyclic_qq_lp $algorithm)")
-    fi
+if [ $RUN_CYCLIC_ZZ_DP -eq 1 ]; then
+    BASE_TESTS+=("cyclic${CYCLIC_N}-ZZ-dp")
+fi
 
-    if [ $RUN_CYCLIC_ZZ_LP -eq 1 ]; then
-        TESTS_TO_RUN+=("cyclic${CYCLIC_N}-ZZ-lp-${algorithm}:$(create_test_file cyclic_zz_lp $algorithm)")
-    fi
+if [ $RUN_CYCLIC_QQ_LP -eq 1 ]; then
+    BASE_TESTS+=("cyclic${CYCLIC_N}-QQ-lp")
+fi
 
-    if [ $RUN_CYCLIC_HOM_QQ -eq 1 ]; then
-        TESTS_TO_RUN+=("cyclic${CYCLIC_N}-hom-QQ-dp-${algorithm}:$(create_test_file cyclic_hom_qq_dp $algorithm)")
-    fi
+if [ $RUN_CYCLIC_ZZ_LP -eq 1 ]; then
+    BASE_TESTS+=("cyclic${CYCLIC_N}-ZZ-lp")
+fi
 
-    if [ $RUN_CYCLIC_HOM_ZZ -eq 1 ]; then
-        TESTS_TO_RUN+=("cyclic${CYCLIC_N}-hom-ZZ-dp-${algorithm}:$(create_test_file cyclic_hom_zz_dp $algorithm)")
-    fi
+if [ $RUN_CYCLIC_HOM_QQ -eq 1 ]; then
+    BASE_TESTS+=("cyclic${CYCLIC_N}-hom-QQ-dp")
+fi
 
-    if [ $RUN_KATSURA_QQ -eq 1 ]; then
-        TESTS_TO_RUN+=("katsura${KATSURA_N}-QQ-dp-${algorithm}:$(create_test_file katsura_qq_dp $algorithm)")
-    fi
+if [ $RUN_CYCLIC_HOM_ZZ -eq 1 ]; then
+    BASE_TESTS+=("cyclic${CYCLIC_N}-hom-ZZ-dp")
+fi
 
-    if [ $RUN_KATSURA_ZZ -eq 1 ]; then
-        TESTS_TO_RUN+=("katsura${KATSURA_N}-ZZ-dp-${algorithm}:$(create_test_file katsura_zz_dp $algorithm)")
+if [ $RUN_KATSURA_QQ -eq 1 ]; then
+    BASE_TESTS+=("katsura${KATSURA_N}-QQ-dp")
+fi
+
+if [ $RUN_KATSURA_ZZ -eq 1 ]; then
+    BASE_TESTS+=("katsura${KATSURA_N}-ZZ-dp")
+fi
+
+# Now for each base test, get appropriate algorithms and create test files
+for base_test in "${BASE_TESTS[@]}"; do
+    # Determine the test type for file creation
+    if [[ "$base_test" == newellp1* ]]; then
+        test_type="newellp1"
+    elif [[ "$base_test" == cyclic*-QQ-dp ]]; then
+        test_type="cyclic_qq_dp"
+    elif [[ "$base_test" == cyclic*-ZZ-dp ]]; then
+        test_type="cyclic_zz_dp"
+    elif [[ "$base_test" == cyclic*-QQ-lp ]]; then
+        test_type="cyclic_qq_lp"
+    elif [[ "$base_test" == cyclic*-ZZ-lp ]]; then
+        test_type="cyclic_zz_lp"
+    elif [[ "$base_test" == cyclic*-hom-QQ-dp ]]; then
+        test_type="cyclic_hom_qq_dp"
+    elif [[ "$base_test" == cyclic*-hom-ZZ-dp ]]; then
+        test_type="cyclic_hom_zz_dp"
+    elif [[ "$base_test" == katsura*-QQ-dp ]]; then
+        test_type="katsura_qq_dp"
+    elif [[ "$base_test" == katsura*-ZZ-dp ]]; then
+        test_type="katsura_zz_dp"
     fi
+    
+    # Get appropriate algorithms for this test
+    algorithms=$(get_algorithms_for_test "$base_test")
+    
+    for algorithm in $algorithms; do
+        TESTS_TO_RUN+=("${base_test}-${algorithm}:$(create_test_file $test_type $algorithm)")
+    done
 done
 
 if [ ${#TESTS_TO_RUN[@]} -eq 0 ]; then
