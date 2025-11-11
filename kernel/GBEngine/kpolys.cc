@@ -9,6 +9,11 @@
 #include <immintrin.h>
 #endif
 
+#ifdef HAVE_SSE4
+#include <smmintrin.h>  // SSE4.1
+#include <nmmintrin.h>  // SSE4.2 (for popcnt)
+#endif
+
 /* Returns TRUE if
      * LM(p) | LM(lcm)
      * LC(p) | LC(lcm) only if ring
@@ -72,6 +77,81 @@ BOOLEAN pCompareChain_16bit_AVX2 (poly p,poly p1,poly p2,poly lcm, const ring R)
     p_diff_count += _mm_popcnt_u32(_mm256_movemask_epi8(p_diff)) / 2;
     p1_diff_count += _mm_popcnt_u32(_mm256_movemask_epi8(p1_diff)) / 2;
     p2_diff_count += _mm_popcnt_u32(_mm256_movemask_epi8(p2_diff)) / 2;
+  }
+
+  // Chain criterion needs at least 2 variables where p differs from lcm
+  if (p_diff_count <= 1) return FALSE;
+
+  // If p1 or p2 equals lcm everywhere, chain criterion cannot apply
+  if (p1_diff_count == 0 || p2_diff_count == 0) return FALSE;
+
+  // If at least one of them differs in two places (and the other differs in at least one place), chain criterion applies
+  if (p1_diff_count > 1 && p2_diff_count > 1) return TRUE;
+
+  // p1 and p2 differ from lcm in only one variable.  If it's the same variable, chain criteron cannot apply
+  if (p1_and_p2_common_diff) return FALSE;
+
+  // p1 and p2 differ from lcm in only one variable and it's two different variables, chain criteron applies
+  return TRUE;
+}
+#endif
+
+#ifdef HAVE_SSE4
+BOOLEAN pCompareChain_16bit_SSE4 (poly p,poly p1,poly p2,poly lcm, const ring R)
+{
+  __m128i * p_exp_ptr = (__m128i *) p->exp;
+  __m128i * p1_exp_ptr = (__m128i *) p1->exp;
+  __m128i * p2_exp_ptr = (__m128i *) p2->exp;
+  __m128i * lcm_exp_ptr = (__m128i *) lcm->exp;
+  __m128i * VarL_Bitmask_ptr = (__m128i *) R->VarL_Bitmask;
+  __m128i bias = _mm_set1_epi16(0x8000);
+  int p_diff_count = 0;
+  int p1_diff_count = 0;
+  int p2_diff_count = 0;
+  BOOLEAN p1_and_p2_common_diff = FALSE;
+
+  // SSE4 processes 16 bytes (8 shorts) per iteration vs AVX2's 32 bytes (16 shorts)
+  // So we need twice as many iterations
+  int simd_blocks = R->Exp_SIMD_Size * 2;  // Convert 32-byte blocks to 16-byte blocks
+
+  for (int i=0; i < simd_blocks; i++) {
+    // unaligned loads because I haven't been able to get exponent fields aligned on a SIMD_VECTOR_SIZE boundary
+    __m128i p_exp = _mm_loadu_si128 (p_exp_ptr + i);
+    __m128i p1_exp = _mm_loadu_si128 (p1_exp_ptr + i);
+    __m128i p2_exp = _mm_loadu_si128 (p2_exp_ptr + i);
+    __m128i lcm_exp = _mm_loadu_si128 (lcm_exp_ptr + i);
+    __m128i VarL_Bitmask = _mm_loadu_si128 (VarL_Bitmask_ptr + i);
+
+    // Basic divisibility check
+    //    if (p_exp[i] > lcm_exp[i]) return FALSE;
+    // SSE4 doesn't have an unsigned 16-bit integer compare, so
+    //    we convert to signed by subtracting 0x8000 from both operands
+    __m128i p_exp_signed = _mm_sub_epi16(p_exp, bias);
+    __m128i lcm_exp_signed = _mm_sub_epi16(lcm_exp, bias);
+    __m128i result = _mm_cmpgt_epi16(p_exp_signed, lcm_exp_signed);
+    result = _mm_and_si128(result, VarL_Bitmask);
+    if (! _mm_testz_si128(result, result)) return FALSE;
+
+    // Compute difference indicators
+    __m128i p_diff = _mm_cmpeq_epi16(p_exp, lcm_exp);
+    __m128i p1_diff = _mm_cmpeq_epi16(p1_exp, lcm_exp);
+    __m128i p2_diff = _mm_cmpeq_epi16(p2_exp, lcm_exp);
+
+    // invert the eq to neq, and mask off the variables
+    p_diff = _mm_andnot_si128(p_diff, VarL_Bitmask);
+    p1_diff = _mm_andnot_si128(p1_diff, VarL_Bitmask);
+    p2_diff = _mm_andnot_si128(p2_diff, VarL_Bitmask);
+
+    p1_diff = _mm_and_si128(p1_diff, p_diff);
+    p2_diff = _mm_and_si128(p2_diff, p_diff);
+
+    __m128i p1_and_p2_common_diff_bits = _mm_and_si128(p1_diff, p2_diff);
+    if (! _mm_testz_si128(p1_and_p2_common_diff_bits, p1_and_p2_common_diff_bits)) p1_and_p2_common_diff = TRUE;
+
+    // we count high bits in epi8, but our exponents are epu16, so each TRUE gets counted twice, so we divide by 2
+    p_diff_count += _mm_popcnt_u32(_mm_movemask_epi8(p_diff)) / 2;
+    p1_diff_count += _mm_popcnt_u32(_mm_movemask_epi8(p1_diff)) / 2;
+    p2_diff_count += _mm_popcnt_u32(_mm_movemask_epi8(p2_diff)) / 2;
   }
 
   // Chain criterion needs at least 2 variables where p differs from lcm
@@ -190,6 +270,8 @@ BOOLEAN pCompareChain (poly p,poly p1,poly p2,poly lcm, const ring R)
 
 #ifdef HAVE_AVX2
   if (R->BitsPerExp == 16) return pCompareChain_16bit_AVX2(p, p1, p2, lcm, R);
+#elif defined(HAVE_SSE4)
+  if (R->BitsPerExp == 16) return pCompareChain_16bit_SSE4(p, p1, p2, lcm, R);
 #endif
 
   // Optimization: Cache all exponents to eliminate redundant p_GetExp calls

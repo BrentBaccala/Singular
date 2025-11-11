@@ -23,8 +23,11 @@
 #elif defined(HAVE_AVX2)
   #define SIMD_VECTOR_SIZE 32  // 32 bytes = 4 longs
   #define SIMD_VECTOR_LONGS 4
+#elif defined(HAVE_SSE4)
+  #define SIMD_VECTOR_SIZE 16  // 16 bytes = 2 longs
+  #define SIMD_VECTOR_LONGS 2
 #else
-  #define SIMD_VECTOR_SIZE 16  // 16 bytes (SSE/default)
+  #define SIMD_VECTOR_SIZE  8  // 8 bytes (default)
   #define SIMD_VECTOR_LONGS 1
 #endif
 
@@ -37,7 +40,7 @@
 #elif defined(HAVE_AVX2)
   #define POLYSIZE_PADDING 16  // 32 - 16 = 16 bytes padding
 #else
-  #define POLYSIZE_PADDING 0   // No padding needed for 16-byte default
+  #define POLYSIZE_PADDING 0   // No padding needed for 8 or 16 byte alignment
 #endif
 
 /***************************************************************

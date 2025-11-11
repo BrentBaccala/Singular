@@ -133,6 +133,15 @@ SING_CHECK_ARITH_RINGS
 SING_CHECK_PLURAL
 
 # SIMD optimization support
+AC_ARG_ENABLE(sse4, AS_HELP_STRING([--enable-sse4], [Enable SSE4 SIMD optimizations for polynomial operations]),
+[if test "x$enableval" = "xyes"; then
+ENABLE_SSE4=yes
+fi], ENABLE_SSE4=no)
+
+if test x"${ENABLE_SSE4}" = xyes; then
+  AC_DEFINE([HAVE_SSE4],1,[Define for SSE4 SIMD support (128-bit vectors)])
+fi
+
 AC_ARG_ENABLE(avx2, AS_HELP_STRING([--enable-avx2], [Enable AVX2 SIMD optimizations for polynomial operations]),
 [if test "x$enableval" = "xyes"; then
 ENABLE_AVX2=yes
