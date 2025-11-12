@@ -356,14 +356,14 @@ validate_algorithm_for_test() {
     local is_char_zero=$(test_is_char_zero "$test_name" && echo 1 || echo 0)
     
     if [ "$algorithm" == "modstd" ] && [ $is_char_zero -eq 0 ]; then
-        echo "Error: modstd only works in characteristic 0 (QQ rings)"
-        echo "Cannot use modstd with test: $test_name"
+        echo "Error: modstd only works in characteristic 0 (QQ rings)" >&2
+        echo "Cannot use modstd with test: $test_name" >&2
         exit 1
     fi
     
     if [ "$algorithm" == "mathicgb" ] && [ $is_char_zero -eq 1 ]; then
-        echo "Error: mathicgb only works in prime characteristic (Fp rings)"
-        echo "Cannot use mathicgb with test: $test_name"
+        echo "Error: mathicgb only works in prime characteristic (Fp rings)" >&2
+        echo "Cannot use mathicgb with test: $test_name" >&2
         exit 1
     fi
 }
@@ -372,6 +372,10 @@ validate_algorithm_for_test() {
 get_algorithms_for_test() {
     local test_name=$1
     local is_char_zero=$(test_is_char_zero "$test_name" && echo 1 || echo 0)
+    
+    if [ -z "$RAW_ALGORITHMS" ]; then
+        RAW_ALGORITHMS="std"
+    fi
     
     if [ "$RAW_ALGORITHMS" == "all" ]; then
         if [ $is_char_zero -eq 1 ]; then
@@ -383,26 +387,26 @@ get_algorithms_for_test() {
         fi
     else
         # Parse and validate explicitly requested algorithms
-        local result=""
         IFS=',' read -ra algs <<< "$RAW_ALGORITHMS"
+        local valid_algs=()
         for alg in "${algs[@]}"; do
             case $alg in
                 std|modstd|groebner|slimgb|sba|mathicgb)
                     validate_algorithm_for_test "$alg" "$test_name"
-                    result="$result $alg"
+                    valid_algs+=("$alg")
                     ;;
                 all)
-                    echo "Error: 'all' should be used alone, not in a comma-separated list"
+                    echo "Error: 'all' should be used alone, not in a comma-separated list" >&2
                     exit 1
                     ;;
                 *)
-                    echo "Error: Unknown algorithm '$alg'"
-                    echo "Valid options: std, modstd, groebner, slimgb, sba, mathicgb, all"
+                    echo "Error: Unknown algorithm '$alg'" >&2
+                    echo "Valid options: std, modstd, groebner, slimgb, sba, mathicgb, all" >&2
                     exit 1
                     ;;
             esac
         done
-        echo "$result" | sed 's/^ //'
+        echo "${valid_algs[@]}"
     fi
 }
 
