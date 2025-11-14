@@ -647,6 +647,7 @@ run_benchmark() {
     
     local times=()
     local total=0
+    local had_error=0
     
     for i in $(seq 1 $NUM_RUNS); do
         echo -n "Run $i/$NUM_RUNS... "
@@ -660,9 +661,9 @@ run_benchmark() {
         
         # Run with time measurement
         local start=$(date +%s.%N)
+        local output_file="$TEMP_DIR/output_${version_name}_${test_name}_run${i}.txt"
+        
         if [ $SHOW_OUTPUT -eq 1 ]; then
-            # Save output to temp file and display with tee
-            local output_file="$TEMP_DIR/output_${version_name}_${test_name}_run${i}.txt"
             echo ""
             echo -e "${YELLOW}Output from run $i:${NC}"
             echo "- - - - - - - - - - - - - - - - - - - -"
@@ -674,21 +675,31 @@ run_benchmark() {
             echo "- - - - - - - - - - - - - - - - - - - -"
         else
             if [ -n "$ld_library_path" ]; then
-                LD_LIBRARY_PATH="$ld_library_path" SINGULARPATH="$singular_path" $perf_prefix "$executable" < "$input_file" > /dev/null 2>&1
+                LD_LIBRARY_PATH="$ld_library_path" SINGULARPATH="$singular_path" $perf_prefix "$executable" < "$input_file" > "$output_file" 2>&1
             else
-                $perf_prefix "$executable" < "$input_file" > /dev/null 2>&1
+                $perf_prefix "$executable" < "$input_file" > "$output_file" 2>&1
             fi
         fi
         local end=$(date +%s.%N)
         
-        local runtime=$(echo "$end - $start" | bc)
-        times+=($runtime)
-        total=$(echo "$total + $runtime" | bc)
-        
-        echo "Time: ${runtime}s"
+        # Check for errors in output
+        if grep -q "? error occurred" "$output_file" 2>/dev/null; then
+            had_error=1
+            echo -e "${RED}ERROR${NC}"
+            if [ $SHOW_OUTPUT -eq 0 ]; then
+                echo -e "${RED}Singular error:${NC}"
+                # Show context around the error (lines starting with ?)
+                grep "^   ?" "$output_file"
+            fi
+        else
+            local runtime=$(echo "$end - $start" | bc)
+            times+=($runtime)
+            total=$(echo "$total + $runtime" | bc)
+            echo "Time: ${runtime}s"
+        fi
         
         # Show perf report if requested
-        if [ $USE_PERF -eq 1 ] && [ -f "$perf_data" ]; then
+        if [ $USE_PERF -eq 1 ] && [ -f "$perf_data" ] && [ $had_error -eq 0 ]; then
             echo ""
             echo -e "${YELLOW}Perf report (top 20 functions by overhead):${NC}"
             echo "- - - - - - - - - - - - - - - - - - - -"
@@ -697,6 +708,16 @@ run_benchmark() {
             echo ""
         fi
     done
+    
+    # Only calculate statistics if we have successful runs
+    if [ $had_error -eq 1 ]; then
+        echo ""
+        echo -e "${RED}Test FAILED - skipping statistics${NC}"
+        echo ""
+        # Store failure marker
+        echo "$version_name|$test_name|FAILED|0|0|0|0" >> "$TEMP_DIR/results.txt"
+        return
+    fi
     
     # Calculate statistics
     local avg=$(echo "scale=4; $total / $NUM_RUNS" | bc)
@@ -848,17 +869,26 @@ echo ""
 # Parse results and create comparison
 declare -A version_times
 declare -A version_stddev
+declare -A version_failed
 
 while IFS='|' read -r version test avg stddev min max total; do
     if [ "$version" != "Version" ]; then
-        version_times["$version|$test"]="$avg"
-        version_stddev["$version|$test"]="$stddev"
+        if [ "$avg" == "FAILED" ]; then
+            version_failed["$version|$test"]=1
+        else
+            version_times["$version|$test"]="$avg"
+            version_stddev["$version|$test"]="$stddev"
+        fi
     fi
 done < "$TEMP_DIR/results.txt"
 
 # Get unique test names
 declare -A test_set
 for key in "${!version_times[@]}"; do
+    test=$(echo "$key" | cut -d'|' -f2)
+    test_set["$test"]=1
+done
+for key in "${!version_failed[@]}"; do
     test=$(echo "$key" | cut -d'|' -f2)
     test_set["$test"]=1
 done
@@ -872,12 +902,16 @@ if [ ${#SINGULAR_EXECS[@]} -eq 1 ]; then
     
     for test in "${!test_set[@]}"; do
         key="${SINGULAR_NAMES[0]}|$test"
-        time="${version_times[$key]}"
-        stddev="${version_stddev[$key]}"
-        if [ $NUM_RUNS -gt 1 ]; then
-            printf "%-40s %-20s\n" "$test" "${time}s (±${stddev})"
+        if [ "${version_failed[$key]}" == "1" ]; then
+            printf "%-40s %-20s\n" "$test" "FAILED"
         else
-            printf "%-40s %-20s\n" "$test" "${time}s"
+            time="${version_times[$key]}"
+            stddev="${version_stddev[$key]}"
+            if [ $NUM_RUNS -gt 1 ]; then
+                printf "%-40s %-20s\n" "$test" "${time}s (±${stddev})"
+            else
+                printf "%-40s %-20s\n" "$test" "${time}s"
+            fi
         fi
     done
 else
@@ -901,31 +935,44 @@ else
         printf "%-40s" "$test"
         
         declare -a test_times
+        declare -a test_failed
         for name in "${SINGULAR_NAMES[@]}"; do
             key="$name|$test"
-            time="${version_times[$key]}"
-            stddev="${version_stddev[$key]}"
-            if [ $NUM_RUNS -gt 1 ]; then
-                printf " %-25s" "${time}s (±${stddev})"
+            if [ "${version_failed[$key]}" == "1" ]; then
+                printf " %-25s" "FAILED"
+                test_failed+=(1)
+                test_times+=(0)
             else
-                printf " %-25s" "${time}s"
+                time="${version_times[$key]}"
+                stddev="${version_stddev[$key]}"
+                if [ $NUM_RUNS -gt 1 ]; then
+                    printf " %-25s" "${time}s (±${stddev})"
+                else
+                    printf " %-25s" "${time}s"
+                fi
+                test_failed+=(0)
+                test_times+=("$time")
             fi
-            test_times+=("$time")
         done
         
         # Find best time and show comparison if multiple versions
         if [ ${#SINGULAR_NAMES[@]} -eq 2 ]; then
-            t1="${test_times[0]}"
-            t2="${test_times[1]}"
-            if [ -n "$t1" ] && [ -n "$t2" ]; then
-                speedup=$(echo "scale=2; $t1 / $t2" | bc)
-                if (( $(echo "$speedup > 1.05" | bc -l) )); then
-                    echo -e " ${GREEN}(${SINGULAR_NAMES[1]} ${speedup}x faster)${NC}"
-                elif (( $(echo "$speedup < 0.95" | bc -l) )); then
-                    speedup=$(echo "scale=2; $t2 / $t1" | bc)
-                    echo -e " ${RED}(${SINGULAR_NAMES[0]} ${speedup}x faster)${NC}"
+            # Only compare if both succeeded
+            if [ "${test_failed[0]}" == "0" ] && [ "${test_failed[1]}" == "0" ]; then
+                t1="${test_times[0]}"
+                t2="${test_times[1]}"
+                if [ -n "$t1" ] && [ -n "$t2" ]; then
+                    speedup=$(echo "scale=2; $t1 / $t2" | bc)
+                    if (( $(echo "$speedup > 1.05" | bc -l) )); then
+                        echo -e " ${GREEN}(${SINGULAR_NAMES[1]} ${speedup}x faster)${NC}"
+                    elif (( $(echo "$speedup < 0.95" | bc -l) )); then
+                        speedup=$(echo "scale=2; $t2 / $t1" | bc)
+                        echo -e " ${RED}(${SINGULAR_NAMES[0]} ${speedup}x faster)${NC}"
+                    else
+                        echo " (similar)"
+                    fi
                 else
-                    echo " (similar)"
+                    echo ""
                 fi
             else
                 echo ""
@@ -935,6 +982,7 @@ else
         fi
         
         unset test_times
+        unset test_failed
     done
 fi
 
@@ -958,17 +1006,22 @@ MDEOF
     
     for test in "${sorted_tests[@]}"; do
         key="${SINGULAR_NAMES[0]}|$test"
-        time="${version_times[$key]}"
-        stddev="${version_stddev[$key]}"
         
-        # Format numbers with leading zeros
-        time_fmt=$(printf "%.4f" "$time")
-        stddev_fmt=$(printf "%.4f" "$stddev")
-        
-        if [ $NUM_RUNS -gt 1 ]; then
-            echo "| $test | ${time_fmt}s (±${stddev_fmt}) |" >> "$MARKDOWN_FILE"
+        if [ "${version_failed[$key]}" == "1" ]; then
+            echo "| $test | FAILED |" >> "$MARKDOWN_FILE"
         else
-            echo "| $test | ${time_fmt}s |" >> "$MARKDOWN_FILE"
+            time="${version_times[$key]}"
+            stddev="${version_stddev[$key]}"
+            
+            # Format numbers with leading zeros
+            time_fmt=$(printf "%.4f" "$time")
+            stddev_fmt=$(printf "%.4f" "$stddev")
+            
+            if [ $NUM_RUNS -gt 1 ]; then
+                echo "| $test | ${time_fmt}s (±${stddev_fmt}) |" >> "$MARKDOWN_FILE"
+            else
+                echo "| $test | ${time_fmt}s |" >> "$MARKDOWN_FILE"
+            fi
         fi
     done
 else
@@ -988,17 +1041,22 @@ MDEOF
         
         for name in "${SINGULAR_NAMES[@]}"; do
             key="$name|$test"
-            time="${version_times[$key]}"
-            stddev="${version_stddev[$key]}"
             
-            # Format numbers with leading zeros
-            time_fmt=$(printf "%.4f" "$time")
-            stddev_fmt=$(printf "%.4f" "$stddev")
-            
-            if [ $NUM_RUNS -gt 1 ]; then
-                echo -n " ${time_fmt}s (±${stddev_fmt}) |" >> "$MARKDOWN_FILE"
+            if [ "${version_failed[$key]}" == "1" ]; then
+                echo -n " FAILED |" >> "$MARKDOWN_FILE"
             else
-                echo -n " ${time_fmt}s |" >> "$MARKDOWN_FILE"
+                time="${version_times[$key]}"
+                stddev="${version_stddev[$key]}"
+                
+                # Format numbers with leading zeros
+                time_fmt=$(printf "%.4f" "$time")
+                stddev_fmt=$(printf "%.4f" "$stddev")
+                
+                if [ $NUM_RUNS -gt 1 ]; then
+                    echo -n " ${time_fmt}s (±${stddev_fmt}) |" >> "$MARKDOWN_FILE"
+                else
+                    echo -n " ${time_fmt}s |" >> "$MARKDOWN_FILE"
+                fi
             fi
         done
         echo "" >> "$MARKDOWN_FILE"
