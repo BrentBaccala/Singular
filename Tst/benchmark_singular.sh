@@ -648,9 +648,19 @@ run_benchmark() {
     local times=()
     local total=0
     local had_error=0
+    local was_interrupted=0
+    
+    # Set up trap for SIGINT (CTRL-C) to mark interruption
+    trap 'was_interrupted=1' INT
     
     for i in $(seq 1 $NUM_RUNS); do
         echo -n "Run $i/$NUM_RUNS... "
+        
+        # Check if we were interrupted
+        if [ $was_interrupted -eq 1 ]; then
+            echo -e "${YELLOW}INTERRUPTED${NC}"
+            break
+        fi
         
         # Prepare perf command prefix if needed
         local perf_prefix=""
@@ -682,6 +692,12 @@ run_benchmark() {
         fi
         local end=$(date +%s.%N)
         
+        # Check if we were interrupted during execution
+        if [ $was_interrupted -eq 1 ]; then
+            echo -e "${YELLOW}INTERRUPTED${NC}"
+            break
+        fi
+        
         # Check for errors in output
         if grep -q "? error occurred" "$output_file" 2>/dev/null; then
             had_error=1
@@ -708,6 +724,19 @@ run_benchmark() {
             echo ""
         fi
     done
+    
+    # Restore default SIGINT handler
+    trap - INT
+    
+    # Handle interruption
+    if [ $was_interrupted -eq 1 ]; then
+        echo ""
+        echo -e "${YELLOW}Test INTERRUPTED by user${NC}"
+        echo ""
+        # Store interruption marker
+        echo "$version_name|$test_name|INTERRUPTED|0|0|0|0" >> "$TEMP_DIR/results.txt"
+        return
+    fi
     
     # Only calculate statistics if we have successful runs
     if [ $had_error -eq 1 ]; then
@@ -870,11 +899,14 @@ echo ""
 declare -A version_times
 declare -A version_stddev
 declare -A version_failed
+declare -A version_interrupted
 
 while IFS='|' read -r version test avg stddev min max total; do
     if [ "$version" != "Version" ]; then
         if [ "$avg" == "FAILED" ]; then
             version_failed["$version|$test"]=1
+        elif [ "$avg" == "INTERRUPTED" ]; then
+            version_interrupted["$version|$test"]=1
         else
             version_times["$version|$test"]="$avg"
             version_stddev["$version|$test"]="$stddev"
