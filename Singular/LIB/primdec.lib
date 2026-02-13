@@ -87,7 +87,7 @@ NOTE:    result is a std basis in the basering
 
   int @k;
   ideal inew=id;
-  if (!attrib(id,"isSB")) { inew=std(id);}
+  if (!attrib(id,"isSB")) { inew=groebner(id);}
   ideal iold;
   intvec op=option(get);
   option(returnSB);
@@ -120,13 +120,13 @@ NOTE:    result is a std basis in the basering
   {
     def @Phelp=changeordTo(basering,"dp");
     setring @Phelp;
-    ideal inew=std(imap(@P,id));
+    ideal inew=groebner(imap(@P,id));
     ideal  @h=imap(@P,h);
   }
   else
   {
     ideal @h=h;
-    ideal inew=std(id);
+    ideal inew=groebner(id);
   }
   ideal fac;
 
@@ -168,7 +168,7 @@ NOTE:    result is a std basis in the basering
   if(ordstr(@P)[1,2]!="dp")
   {
     setring @P;
-    ideal inew=std(imap(@Phelp,inew));
+    ideal inew=groebner(imap(@Phelp,inew));
     poly @f=imap(@Phelp,@f);
   }
   list L =inew,@f^@k;
@@ -371,8 +371,8 @@ example
 
 proc idealsEqual( ideal k, ideal j)
 {
-  if (!attrib(k,"isSB")) { k=std(k);}
-  if (!attrib(j,"isSB")) { j=std(j);}
+  if (!attrib(k,"isSB")) { k=groebner(k);}
+  if (!attrib(j,"isSB")) { j=groebner(j);}
   return(stdIdealsEqual(k,j));
 }
 
@@ -526,7 +526,7 @@ proc gcdTest(ideal act)
   {
     for(j=i+1;j<=ncols(act);j++)
     {
-      if(deg(std(ideal(act[i],act[j]))[1])>0)
+      if(deg(groebner(ideal(act[i],act[j]))[1])>0)
       {
         return(0);
       }
@@ -699,7 +699,7 @@ static proc splitPrimary(list l,ideal ser,int @wr,list sact)
     }
     if((size(l[2*i])==0)&&(specialIdealsEqual(keepprime[i],l[2*i-1])!=1))
     {
-      keepprime[i]=std(keepprime[i]);
+      keepprime[i]=groebner(keepprime[i]);
       if(homog(keepprime[i]))
       {
         l[2*i]=maxideal(1);
@@ -786,12 +786,12 @@ static proc splitCharp(list l)
           keep[size(keep)+1]=std(l[2*i-1],sa[2]);
           if(sa[1][1]==l[2*i-1][1])
           {
-             l[2*i-1]=std(sa[1]);
+             l[2*i-1]=groebner(sa[1]);
              l[2*i]=primaryTest(sa[1],s[1]);
           }
           else
           {
-             l[2*i-1]=std(sa[1]);
+             l[2*i-1]=groebner(sa[1]);
              l[2*i]=primaryTest(sa[1],factorize(sa[1][1],1)[1]);
           }
         }
@@ -804,7 +804,7 @@ static proc splitCharp(list l)
           setring RL;
 
           option(redSB);
-          t=std(t);
+          t=groebner(t);
 
           list sp=zero_decomp(t,0,0);
 
@@ -2173,7 +2173,7 @@ static proc minAssPrimes_i(int patchPrimaryDecomposition, ideal i, list #)
       int di = vdim(i);
       def gnir=changeordTo(P,"lp");
       setring gnir;
-      ideal J = std(imap(P,i));
+      ideal J = groebner(imap(P,i));
       attrib(J, "isSB", 1);
       if(vdim(J) != di)
       {
@@ -2678,7 +2678,7 @@ static proc algeDeco_i(int patchPrimaryDecomposition, ideal i, int w)
    {
       //treats a special case separately which would otherwise take a lot longer in factorization
       option( redSB );
-      ideal J = std(i);
+      ideal J = groebner(i);
       option( set, op );
       if(size(J)==1)
       {
@@ -2712,7 +2712,7 @@ static proc algeDeco_i(int patchPrimaryDecomposition, ideal i, int w)
          }
          ideal K=factorize(J[2],1);
          if(deg(K[1])==0){K=0;}
-         K=K+std(keep);
+         K=K+groebner(keep);
          ideal L;
          list resu;
          for(j=1;j<=size(K);j++)
@@ -3035,7 +3035,7 @@ EXAMPLE: example decomp_i; shows an example
     }
     else
     {
-      ideal @j=std(fetch(@P,i));
+      ideal @j=groebner(fetch(@P,i));
     }
     if(size(@j)==1)
     {
@@ -3119,7 +3119,7 @@ EXAMPLE: example decomp_i; shows an example
       ring @deirf = create_ring(ring_list(gnir)[1],"("+newva,"lp","no_minpoly");
       execute("map @kappa=gnir,"+newma);
       ideal @j= @kappa(@j);
-      @j=std(@j);
+      @j=groebner(@j);
 
       list pr=decomp_i(patchPrimaryDecomposition,@j,#);
       if (size(pr)==0)
@@ -3233,7 +3233,7 @@ EXAMPLE: example decomp_i; shows an example
             sigma=basering,jmap;
             jmap[nn]=2*var(nn)-jmap[nn];
             invsigma=basering,jmap;
-            IItmp=std(sigma(II));
+            IItmp=groebner(sigma(II));
             if (deg(IItmp[1]) == vdim(IItmp))
             {
               II=IItmp;
@@ -3458,7 +3458,7 @@ EXAMPLE: example decomp_i; shows an example
             sigma=basering,jmap;
             jmap[nn]=2*var(nn)-jmap[nn];
             invsigma=basering,jmap;
-            II=std(sigma(IItmp));
+            II=groebner(sigma(IItmp));
           }
           absprimarytmp[ab]= absFactorize(II[1],77);
           II=var(nn);
@@ -3974,7 +3974,7 @@ proc sep(poly f,int i, list #)
 
 
    poly h=gcd(f,diff(f,var(i)));
-   if((reduce(f,std(h),5)!=0)||(reduce(diff(f,var(i)),std(h),5)!=0))
+   if((reduce(f,groebner(h),5)!=0)||(reduce(diff(f,var(i)),groebner(h),5)!=0))
    {
       ERROR("FEHLER IN GCD");
    }
@@ -4073,7 +4073,7 @@ EXAMPLE: example zeroRad; shows an example"
    {
      intvec save=option(get);
      option(redSB);
-     I=std(I+F);
+     I=groebner(I+F);
      option(set,save);
      return(I);
    }
@@ -4141,7 +4141,7 @@ static proc algeRad(ideal i)
                 +"),(dp("+string(n)+"),lp);";
    execute(gnir);
    ideal K=imap(RH,ra);
-   K=std(K);
+   K=groebner(K);
    if (ncols(K)>1) { K=K[2..size(K)];}
    setring R;
    ideal ra=imap(RS,K);
@@ -4206,7 +4206,7 @@ EXAMPLE: example radicalEHV; shows an example
   {
     I0[l]=I[l];
   }
-  n=dim(std(I0))+cod-nvars(basering);
+  n=dim(groebner(I0))+cod-nvars(basering);
   //-----last codim elements of I are a complete intersection:----------
   if(n!=0)
   {
@@ -4214,21 +4214,21 @@ EXAMPLE: example radicalEHV; shows an example
     {
       I0[l]=I[size(I)-l+1];
     }
-    n=dim(std(I0))+cod-nvars(basering);
+    n=dim(groebner(I0))+cod-nvars(basering);
   }
   //-----taking a generic linear combination of the input:--------------
   if(n!=0)
   {
     M=transpose(sparsetriag(size(m[2]),cod,95,1));
     I0=ideal(M*transpose(I));
-    n=dim(std(I0))+cod-nvars(basering);
+    n=dim(groebner(I0))+cod-nvars(basering);
   }
   //-----taking a more generic linear combination of the input:---------
   if(n!=0)
   {
     M=transpose(sparsetriag(size(m[2]),cod,0,100));
     I0=ideal(M*transpose(I));
-    n=dim(std(I0))+cod-nvars(basering);
+    n=dim(groebner(I0))+cod-nvars(basering);
   }
   if(n==0)
   {
@@ -4301,12 +4301,12 @@ static proc int_ass_primary_e(ideal i, int e)
 
   if(!homog(i))
   {
-     i=std(i);
+     i=groebner(i);
   }
   list re=sres(i,0);                   //the resolution
   re=minres(re);                       //minimized resolution
   ideal ann = AnnExt_R(e,re);
-  if ( nvars(basering)-dim(std(ann)) != e )
+  if ( nvars(basering)-dim(groebner(ann)) != e )
   {
     return( ideal(1) );
   }
@@ -4365,7 +4365,7 @@ static proc analyze(list pr)
    int ii,jj;
    for(ii=1;ii<=size(pr) div 2;ii++)
    {
-      dim(std(pr[2*ii]));
+      dim(groebner(pr[2*ii]));
       idealsEqual(pr[2*ii-1],pr[2*ii]);
       "===========================";
    }
@@ -4562,7 +4562,7 @@ static proc min_ass_prim_charsets0_i (int patchPrimaryDecomposition, ideal PS)
     {
       I=I+ini_mod(PHI[i][j]);
     }
-    JS=std(PHI[i]);
+    JS=groebner(PHI[i]);
     sizeJS=size(JS);
     for(j=size(I);j>0;j--)
     {
@@ -4712,7 +4712,7 @@ static proc min_ass_prim_charsets1_i (int patchPrimaryDecomposition, ideal PS)
     {
       I=I+ITPHI[i][j];
     }
-    JS=std(PHI[i]);
+    JS=groebner(PHI[i]);
     sizeJS=size(JS);
     for(j=size(I);j>0;j--)
     {
@@ -4849,7 +4849,7 @@ static proc prim_dec_i(int patchPrimaryDecomposition, ideal I, int choose)
                 //    as computed by the procedure minsat,
                 //    if the vertex is of type 3, or
                 //    the empty list otherwise
-  ideal SI=std(I);
+  ideal SI=groebner(I);
   if(SI[1]==1)  // primdecSY(ideal(1))
   {
           ASSUME(1, ncols(SI)==1);
@@ -4920,7 +4920,7 @@ static proc prim_dec_i(int patchPrimaryDecomposition, ideal I, int choose)
                               // i.e., standard bases thereof
         U=U+QQ;
         H=intersect(H,SQ);
-        H=std(H);
+        H=groebner(H);
         ncolsH=ncols(H);
         check=0;
         if(ncolsH==ncolsSI)
@@ -5074,7 +5074,7 @@ static proc pseudo_prim_dec_charsets_i(int patchPrimaryDecomposition, ideal I, i
     }
     for(int i=size(L);i>=1;i--)
     {
-      L[i]=std(L[i]);
+      L[i]=groebner(L[i]);
     }
   }
   return (pseudo_prim_dec_i_i(patchPrimaryDecomposition,SI,L));
@@ -5124,7 +5124,7 @@ static proc pseudo_prim_dec_special_charsets_i (int patchPrimaryDecomposition, i
     for(i=ncols(fac);i>=1;i--)
     {
       SP=P+fac[i];
-      SP=std(SP);
+      SP=groebner(SP);
       if(SP[1]!=1)
       {
         if((choo==0) or (choo==1))
@@ -5143,7 +5143,7 @@ static proc pseudo_prim_dec_special_charsets_i (int patchPrimaryDecomposition, i
           }
           for(j=size(m);j>=1;j--)
             {
-              m[j]=std(m[j]);
+              m[j]=groebner(m[j]);
             }
         }
         dimSP=dim(SP);
@@ -5262,7 +5262,7 @@ static proc pseudo_prim_dec_i_i (int patchPrimaryDecomposition, ideal SI, list L
              //  as computed by the procedure minsat,
     Q[i]=QP;
   }
-  I'=std(I');
+  I'=groebner(I');
   return (Q, I');
                    // I' = remaining component
 }
@@ -5322,7 +5322,7 @@ static proc extraction (ideal SI, ideal SP)
       ring RAU = create_ring(ring_list(basering)[1],"("+A+U,"(dp("+string(a)+"),dp)","no_minpoly");
       ideal I=imap(R,SI);
       //I=std(I,hv);            // the standard basis in (R[U])[A]
-      I=std(I);            // the standard basis in (R[U])[A]
+      I=groebner(I);            // the standard basis in (R[U])[A]
       A[size(A)]=")";
       ring Rloc = create_ring("("+charstr(basering)+","+U, "("+A, "dp");
       ideal I=imap(RAU,I);
@@ -5363,7 +5363,7 @@ static proc extraction (ideal SI, ideal SP)
   if(f!=1)
   {
     SQ,f0,h0,fac=minsat(SI,f);
-    return(SQ,std(SI+h0),fac);
+    return(SQ,groebner(SI+h0),fac);
              // the tripel
              // a standard basis of Q,
              // a standard basis of remaining component,
@@ -5709,7 +5709,7 @@ static proc primdecGTZ_i(int patchPrimaryDecomposition,ideal i, list #)
       {
          for(int k=size(li);k>=1;k--)
          {
-            if(mindeg(std(lead(li[k][2]))[1])==0)
+            if(mindeg(groebner(lead(li[k][2]))[1])==0)
             {
 // 1 contained in ideal, i.e. component does not meet origin in local ordering
                li=delete(li,k);
@@ -5878,7 +5878,7 @@ static proc absPrimdecGTZ_i(int @patchPrimaryDecomposition, ideal @I, list #)
          }
          for(@k=size(primary_decomp);@k>=1;@k--)
          {
-            if(mindeg(std(lead(primary_decomp[@k][2]))[1])==0)
+            if(mindeg(groebner(lead(primary_decomp[@k][2]))[1])==0)
             {
 // 1 contained in ideal, i.e. component does not meet origin in local ordering
                primary_decomp=delete(primary_decomp,@k);
@@ -5969,7 +5969,7 @@ static proc absPrimdecGTZ_i(int @patchPrimaryDecomposition, ideal @I, list #)
     @psi=@Rz,@M;
     @phi=@Rz,@N;
     @I=@phi(@I),@p,@q;
-    @I=std(@I);
+    @I=groebner(@I);
     @J=@psi(@I);
     @J=sat(@J,@f);
     if(deg(@J[1])>0)
@@ -6103,7 +6103,7 @@ static proc primdecSY_i(int patchPrimaryDecomposition, ideal i, list #)
       {
         for(int k=size(li);k>=1;k--)
         {
-          if(mindeg(std(lead(li[k][2]))[1])==0)
+          if(mindeg(groebner(lead(li[k][2]))[1])==0)
           {
 // 1 contained in ideal, i.e. component does not meet origin in local ordering
             li=delete(li,k);
@@ -6248,7 +6248,7 @@ static proc minAssGTZ_i(int patchPrimaryDecomposition, ideal i,list #)
       {
          for(int k=size(li);k>=1;k--)
          {
-            if(mindeg(std(lead(li[k]))[1])==0)
+            if(mindeg(groebner(lead(li[k]))[1])==0)
             {
 // 1 contained in ideal, i.e. component does not meet origin in local ordering
                li=delete(li,k);
@@ -6400,7 +6400,7 @@ proc minAssChar_i(int patchPrimaryDecomposition, ideal i, list #)
       {
          for(int k=size(li);k>=1;k--)
          {
-            if(mindeg(std(lead(li[k]))[1])==0)
+            if(mindeg(groebner(lead(li[k]))[1])==0)
             {
 // 1 contained in ideal, i.e. component does not meet origin in local ordering
                li=delete(li,k);
@@ -6925,7 +6925,7 @@ static proc radicalReduction(ideal I, ideal ser, int allIndep, list #)
       }
       op = option(get);
       option(redSB);
-      @j = std(@j);  //to obtain a reduced standardbasis
+      @j = groebner(@j);  //to obtain a reduced standardbasis
       option(set, op);
 
       // SL 1 Debug messages
@@ -6933,7 +6933,7 @@ static proc radicalReduction(ideal I, ideal ser, int allIndep, list #)
       ideal zero_rad = zeroRad(@j);
       dbprint(printlevel - voice, "zero_rad passed");
       // SL 2
-      if(!attrib(zero_rad,"isSB")) { zero_rad = std(zero_rad);}
+      if(!attrib(zero_rad,"isSB")) { zero_rad = groebner(zero_rad);}
     }
     else
     {
@@ -7223,7 +7223,7 @@ EXAMPLE: example prepareAss; shows an example
       );
   }
 
-  ideal j=std(i);
+  ideal j=groebner(i);
   int cod=nvars(basering)-dim(j);
   int e;
   list er;
@@ -7241,7 +7241,7 @@ EXAMPLE: example prepareAss; shows an example
   {
      ann=AnnExt_R(e,re);
 
-     if(nvars(basering)-dim(std(ann))==e)
+     if(nvars(basering)-dim(groebner(ann))==e)
      {
         er[size(er)+1]=equiRadical(ann);
      }
@@ -7297,7 +7297,7 @@ EXAMPLE: example equidimMaxEHV; shows an example
     resolution re=mres(j,0);
   }
   ann = AnnExt_R(cod,re);
-  if( nvars(basering)-dim(std(ann) ) != cod)
+  if( nvars(basering)-dim(groebner(ann) ) != cod)
   {
      return( ideal(1) );
   }

@@ -792,6 +792,27 @@ example
 }
 
 //////////////////////////////////////////////////////////////////////////////
+proc set_groebner_ssi(string target)
+"SYNTAX: @code{set_groebner_ssi (} string_expression @code{)}
+TYPE:    string
+PURPOSE: sets an SSI target for standard basis calculations.
+         Calls to @code{grobner} will trigger an SSI call
+KEYWORDS: groebner basis computations"
+{
+   string groebner_ssi = target;
+   export(groebner_ssi);
+}
+
+proc get_groebner_ssi()
+{
+   if (defined(groebner_ssi)) {
+      return(groebner_ssi);
+   } else {
+      return(0);
+   }
+}
+
+//////////////////////////////////////////////////////////////////////////////
 proc groebner(def i_par, list #)
 "SYNTAX: @code{groebner (} ideal_expression @code{)} @*
          @code{groebner (} module_expression @code{)} @*
@@ -872,6 +893,30 @@ EXAMPLE: example groebner;  shows an example"
   if ((typeof(i_par)=="vector")||(typeof(i_par)=="module")||(typeof(i_par)=="matrix")) {module i=i_par;}
   else {ideal i=i_par; } // int, poly, number, ideal
   kill i_par;
+
+//----------------------- do a remote computation if requested ---------------------------
+  //string groebner_ssi = "ssi:a /tmp/bwb";
+  if (defined(groebner_ssi))
+  {
+    if (groebner_ssi != "")
+    {
+      link l = groebner_ssi;
+      if (find(groebner_ssi, "ssi:connect"))
+      {
+         open(l);
+      }
+      if (find(option(),"prot")) { "// groebner: using remote computation via groebner_ssi"; }
+      // Send the computation to the remote Singular
+      write(l, i, #);
+      if (find(groebner_ssi, "ssi:connect"))
+      {
+         def remote_result = read(l);
+         close(l);
+         return(remote_result);
+      }
+    }
+  }
+
 // check for integer etc coefficients
   if (attrib(basering,"ring_cf")==1) // either integer or integer,q
   {
@@ -880,7 +925,7 @@ EXAMPLE: example groebner;  shows an example"
   }
 
 //----------------------- save the given method ---------------------------
-  string method;                //all given methods as a coma separated string
+  string method;                //all given methods as a comma separated string
   int k;
   for (k=1; k<=size(#); k++)
   {
