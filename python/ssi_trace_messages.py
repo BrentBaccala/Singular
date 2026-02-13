@@ -87,6 +87,9 @@ def parse_trace(filename):
                         # Read weights for weighted orderings
                         weights = []
                         if ord_type in (3, 4, 5, 6, 8, 9):  # wp, Wp, ws, Ws, a, aa
+                            # NOTE: According to ssiLink.cc, n_weights = block1 - block0 + 1
+                            # However, empirical SSI data shows this may not be accurate for
+                            # ord_type 8 (a) and 9 (aa) orderings. May need special handling.
                             n_weights = block1 - block0 + 1
                             for _ in range(n_weights):
                                 if idx < len(tokens):

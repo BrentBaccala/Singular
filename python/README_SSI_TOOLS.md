@@ -87,7 +87,11 @@ See `doc/SSI-PROTOCOL.md` for complete protocol specification (Version 15).
 ## Known Issues
 
 - `ssi_reader.py` has issues with certain coefficient encodings in polynomial terms
-- Ordering block parsing is approximate in the trace tools (doesn't affect ring variables/coefficients)
+- Ordering block parsing for `a` and `aa` (extra weight) orderings may not be accurate in trace tools
+  - According to ssiLink.cc source, these should use block1-block0+1 formula for weight count
+  - But empirical SSI data shows different weight counts (e.g., 4 weights for 11-variable ring)
+  - Need further investigation of actual SSI encoding for these ordering types
+- Other ordering types (lp, dp, Wp, etc.) appear to parse correctly
 
 ## Future Enhancements
 
