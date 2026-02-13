@@ -67,10 +67,47 @@ def parse_trace(filename):
                     vars.append(varname)
                 msg_info['variables'] = vars
 
-                # Skip ordering blocks
+                # Parse ordering blocks
                 if idx < len(tokens):
                     n_blocks = int(tokens[idx])
                     msg_info['n_blocks'] = n_blocks
+                    idx += 1
+
+                    orderings = []
+                    for _ in range(n_blocks):
+                        if idx >= len(tokens):
+                            break
+                        ord_type = int(tokens[idx])
+                        idx += 1
+                        block0 = int(tokens[idx])
+                        idx += 1
+                        block1 = int(tokens[idx])
+                        idx += 1
+
+                        # Read weights for weighted orderings
+                        weights = []
+                        if ord_type in (3, 4, 5, 6, 8, 9):  # wp, Wp, ws, Ws, a, aa
+                            n_weights = block1 - block0 + 1
+                            for _ in range(n_weights):
+                                if idx < len(tokens):
+                                    weights.append(int(tokens[idx]))
+                                    idx += 1
+                        elif ord_type == 7:  # M (matrix ordering)
+                            n = block1 - block0 + 1
+                            n_weights = n * n
+                            for _ in range(n_weights):
+                                if idx < len(tokens):
+                                    weights.append(int(tokens[idx]))
+                                    idx += 1
+
+                        orderings.append({
+                            'type': ord_type,
+                            'block0': block0,
+                            'block1': block1,
+                            'weights': weights
+                        })
+
+                    msg_info['orderings'] = orderings
 
         elif type_code == 5:  # RING
             msg_info['type'] = 'RING'
@@ -142,7 +179,47 @@ def print_messages(messages, show_rings=True):
 
             if show_rings and 'variables' in msg:
                 print(f"  Variables ({msg['nvars']}): {', '.join(msg['variables'])}")
-                print(f"  Ordering blocks: {msg.get('n_blocks', '?')}")
+
+                # Display orderings
+                if 'orderings' in msg:
+                    ord_names = {
+                        0: 'lp', 1: 'dp', 2: 'Dp', 3: 'wp', 4: 'Wp',
+                        5: 'ws', 6: 'Ws', 7: 'M', 8: 'a', 9: 'aa',
+                        10: 'ls', 11: 'rs', 12: 'ds', 13: 'Ds',
+                        # Component orderings
+                        2: 'C', 4: 'c'  # Note: These may overlap with Dp(2) and Wp(4)
+                    }
+
+                    # For component orderings, check if block0/block1 suggest it's a component ordering
+                    def get_ord_name(ord_type, block0, block1):
+                        if ord_type in (2, 4) and block0 > 100:  # Heuristic for component ordering
+                            return 'C' if ord_type == 2 else 'c'
+                        return ord_names.get(ord_type, f'ord{ord_type}')
+
+                    ord_strs = []
+                    for ord_info in msg['orderings']:
+                        ord_type = ord_info['type']
+                        block0 = ord_info['block0']
+                        block1 = ord_info['block1']
+                        ord_name = get_ord_name(ord_type, block0, block1)
+
+                        if ord_info['weights']:
+                            if ord_type == 7:  # Matrix ordering
+                                ord_strs.append(f"{ord_name}({block0}..{block1}, matrix)")
+                            else:
+                                weights_str = ','.join(map(str, ord_info['weights']))
+                                ord_strs.append(f"{ord_name}({weights_str})")
+                        else:
+                            if block0 == block1 and block0 == 0:
+                                ord_strs.append(ord_name)
+                            elif ord_name in ('C', 'c'):
+                                ord_strs.append(ord_name)
+                            else:
+                                ord_strs.append(f"{ord_name}({block0}..{block1})")
+
+                    print(f"  Ordering: ({', '.join(ord_strs)})")
+                else:
+                    print(f"  Ordering blocks: {msg.get('n_blocks', '?')}")
 
         elif msg['type'] == 'IDEAL':
             n_gens = msg.get('n_generators', '?')
@@ -198,11 +275,44 @@ def print_summary(messages):
 
     print("\nRing contexts used:")
     ring_num = 0
+
+    ord_names = {
+        0: 'lp', 1: 'dp', 2: 'Dp', 3: 'wp', 4: 'Wp',
+        5: 'ws', 6: 'Ws', 7: 'M', 8: 'a', 9: 'aa',
+        10: 'ls', 11: 'rs', 12: 'ds', 13: 'Ds'
+    }
+
+    def get_ord_name(ord_type, block0, block1):
+        if ord_type in (2, 4) and block0 > 100:
+            return 'C' if ord_type == 2 else 'c'
+        return ord_names.get(ord_type, f'ord{ord_type}')
+
     for msg in messages:
         if msg['type'] == 'RING_DATA' and 'variables' in msg:
             ring_num += 1
             vars = msg.get('variables', [])
-            print(f"  Ring {ring_num}: Q[{', '.join(vars)}]")
+
+            # Format orderings
+            ord_str = ""
+            if 'orderings' in msg:
+                ord_parts = []
+                for ord_info in msg['orderings']:
+                    ord_type = ord_info['type']
+                    block0 = ord_info['block0']
+                    block1 = ord_info['block1']
+                    ord_name = get_ord_name(ord_type, block0, block1)
+
+                    if ord_info['weights']:
+                        weights_str = ','.join(map(str, ord_info['weights']))
+                        ord_parts.append(f"{ord_name}({weights_str})")
+                    elif ord_name in ('C', 'c'):
+                        ord_parts.append(ord_name)
+                    else:
+                        ord_parts.append(ord_name)
+
+                ord_str = f", ({', '.join(ord_parts)})"
+
+            print(f"  Ring {ring_num}: Q[{', '.join(vars)}]{ord_str}")
 
 
 def main():
