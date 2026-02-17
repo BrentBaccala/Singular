@@ -9,156 +9,129 @@ option(redSB);
 
 
 
-proc mathicgb_prOrder0(def r)
-{
-}
-
-proc mathicgb_setRingGlobal()
-{
-}
-
-
-
 proc makeComparable(ideal a) {return(sort(interred(a))[1]);}
 proc same(ideal a, ideal b) {
   return(matrix(makeComparable(a)) == matrix(makeComparable(b)));
 }
-proc blah(def f) {
-  f(a);
-}
 
 proc testGB(ideal i) {
-  mathicgb_setRingGlobal();
-  system("--ticks-per-sec", "100");
-  system("--min-time", "0.0001");
 
-  timer = 0;
   ideal A = mathicgb(i);
-  printf(" MathicGB time in ms: %;", timer * 10);
-
-  //A;  makeComparable(A);
-
-  timer = 0;
   ideal B = std(i);
-  printf(" Singular time in ms: %;", timer * 10);
-
-  //B;  makeComparable(B);
-
-  //makeComparable(A);"";makeComparable(B);
 
   printf(" Results equal: %;", same(A, B));
 }
 
 proc test1() {
   ring r = 32003,(x(1..5)),(a(2,3,4,5,6),is);
-  mathicgb_prOrder(r); testGB(cyclic(5));
+  testGB(cyclic(5));
 }
 
 proc test2() {
   ring r = 32003,(x(1..4)),lp;
-  mathicgb_prOrder(r); testGB(cyclic(4));
+  testGB(cyclic(4));
 }
 proc test3() {
   ring r = 32003,(x(1..5)),Dp;
-  mathicgb_prOrder(r); testGB(cyclic(5));
+  testGB(cyclic(5));
 }
 proc test4() {
   ring r = 32003,(x(1..5)),Ds;
-  mathicgb_prOrder(r); testGB(cyclic(5));
+  testGB(cyclic(5));
 }
 proc test4x() {
   ring r = 32003,(x(1..5)),(a(2,3,4,5,6),Ds);
-  mathicgb_prOrder(r); testGB(cyclic(5));
+  testGB(cyclic(5));
 }
 proc test5() {
   ring r = 32003,(x(1..5)),Wp(2,3,4,5,6);
-  mathicgb_prOrder(r); testGB(cyclic(5));
+  testGB(cyclic(5));
 }
 proc test6() {
   ring r = 32003,(x(1..5)),Ws(2,3,4,5,6);
-  mathicgb_prOrder(r); testGB(cyclic(5));
+  testGB(cyclic(5));
 }
 
 proc test7() {// doesn't match because interred doesn't work here
   ring r = 32003,(x(1..4)),Ws(-2,-3,-4,-5);
-  mathicgb_prOrder(r); testGB(cyclic(4));
+  testGB(cyclic(4));
 }
 
 proc test8() {
   ring r = 32003,(x(1..5)),ip;
-  mathicgb_prOrder(r); testGB(cyclic(5));
+  testGB(cyclic(5));
 }
 proc test9() {
   ring r = 32003,(x(1..5)),is;
-  mathicgb_prOrder(r); testGB(cyclic(5));
+  testGB(cyclic(5));
 }
 proc test10() {
   ring r = 32003,(x(1..5)),(a(2,3,4,5,6),is);
-  mathicgb_prOrder(r); testGB(cyclic(5));
+  testGB(cyclic(5));
 }
 proc test11() {
   ring r = 32003,(x(1..5)),dp;
-  mathicgb_prOrder(r); testGB(cyclic(5));
+  testGB(cyclic(5));
 }
 proc test12() {
   ring r = 32003,(x(1..5)),ds;
-  mathicgb_prOrder(r); testGB(cyclic(5));
+  testGB(cyclic(5));
 }
 proc test13() {
   ring r = 32003,(x(1..5)),(a(2,3,4,5,6),ds);
-  mathicgb_prOrder(r); testGB(cyclic(5));
+  testGB(cyclic(5));
 }
 proc test14() {
   ring r = 32003,(x(1..5)),wp(2,3,4,5,6);
-  mathicgb_prOrder(r); testGB(cyclic(5));
+  testGB(cyclic(5));
 }
 proc test15() {
   ring r = 32003,(x(1..5)),ws(2,3,4,5,6);
-  mathicgb_prOrder(r); testGB(cyclic(5));
+  testGB(cyclic(5));
 }
 proc test16() {// doesn't match because interred doesn't work here
   ring r = 32003,(x(1..4)),ws(-2,-3,-4,-5);
-  mathicgb_prOrder(r); testGB(cyclic(4));
+  testGB(cyclic(4));
 }
 proc test17() {
   ring r = 32003,(x(1..5)),ls;
-  mathicgb_prOrder(r); testGB(cyclic(5));
+  testGB(cyclic(5));
 }
 proc test18() {
   ring r = 32003,(x(1..5)),(a(2,3,4,5,6),ls);
-  mathicgb_prOrder(r); testGB(cyclic(5));
+  testGB(cyclic(5));
 }
 proc test19() {
   ring r = 32003,(x(1..5)),(dp,c);
-  mathicgb_prOrder(r); testGB(cyclic(5));
+  testGB(cyclic(5));
 }
 proc test20() {
   ring r = 32003,(x(1..5)),(dp,C);
-  mathicgb_prOrder(r); testGB(cyclic(5));
+  testGB(cyclic(5));
 }
 proc test21() {
   ring r = 32003,(x(1..5)),(c,dp);
-  mathicgb_prOrder(r); testGB(cyclic(5));
+  testGB(cyclic(5));
 }
 proc test22() {
   ring r = 32003,(x(1..5)),(C,dp);
-  mathicgb_prOrder(r); testGB(cyclic(5));
+  testGB(cyclic(5));
 }
 proc test23() {
   ring r = 32003,(x(1..5)),(Dp,c);
-  mathicgb_prOrder(r); testGB(cyclic(5));
+  testGB(cyclic(5));
 }
 proc test24() {
   ring r = 32003,(x(1..5)),(Dp,C);
-  mathicgb_prOrder(r); testGB(cyclic(5));
+  testGB(cyclic(5));
 }
 proc test25() {
   ring r = 32003,(x(1..4)),(c,Dp);
-  mathicgb_prOrder(r); testGB(cyclic(4));
+  testGB(cyclic(4));
 }
 proc test26() {
   ring r = 32003,(x(1..5)),(C,Dp);
-  mathicgb_prOrder(r); testGB(cyclic(5));
+  testGB(cyclic(5));
 }
 
 
@@ -206,7 +179,6 @@ test24();
 proc makeCyclic(int n) {
   ring r = 32003,(x(1..n)),dp;
   keepring r;
-  mathicgb_prOrder(r);
   return(cyclic(n));
 }
 
