@@ -4040,7 +4040,7 @@ void chainCritRing (poly p,int, kStrategy strat)
   auto iterators = kMergeBintoL_and_return_iterators(strat);
   for (auto jt = iterators.begin(); jt != iterators.end(); jt++)
   {
-    for (auto it = jt + 1; it != iterators.end(); jt++)
+    for (auto it = jt + 1; it != iterators.end(); it++)
     {
       // Element is from B and has the same lcm as jt
       if (n_DivBy(pGetCoeff((*jt)->lcm), pGetCoeff((*it)->lcm), currRing->cf)
