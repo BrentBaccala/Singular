@@ -3378,37 +3378,110 @@ void chainCritNormal (poly p,int ecart,kStrategy strat)
     *except the case the element (s,r) has also the same lcm
     *and is on the worst position with respect to (s,p) and (r,p)
     */
-    auto iterators = kMergeBintoL_and_return_iterators(strat);
-    for (auto jt = iterators.begin(); jt != iterators.end(); jt++)
+    /*
+    *B enters to L/their order with respect to B is permutated for elements
+    *B[i].p with the same leading term
+    */
+    kMergeBintoL(strat);
+    if (!strat->L.empty())
     {
-      for (auto it = jt + 1; it != iterators.end(); )
+    // j iterates from last (worst) to first (best), matching spielwiese j=Ll..0
+    auto jt = strat->L.end();
+    --jt;
+    loop  /*cannot be changed into a for !!! */
+    {
+      if (jt == strat->L.begin())
       {
-        if (pLmEqual((*jt)->lcm,(*it)->lcm))
+        /*now L[0] cannot be canceled any more and the tail can be removed*/
+        if (jt->p2 == strat->tail) jt->p2 = p;
+        break;
+      }
+      if (jt->p2 == p) // Was the element added from B?
+      {
+        auto it = jt;
+        --it;
+        loop
         {
-          /* it could be canceled but we search for a better one to cancel*/
-          strat->c3++;
-          auto lt = *it + 1;
-          if (isInPairsetL(lt,(*jt)->p1,(*it)->p1,strat)
-          && (pNext(lt->p) == strat->tail)
-          && (!pLmEqual((*it)->p,lt->p))
-          && pDivisibleBy(p,lt->lcm))
+          // In a multiset, we track "went past begin" via end() sentinel
+          if (it == strat->L.end())  break;
+          if ((it->p2 == p) && pLmEqual(jt->lcm,it->lcm))
           {
-            /*
-            *"NOT equal(...)" because in case of "equal" the element lt
-            *is "older" and has to be from theoretical point of view behind
-            *it, but we do not want to reorder L
-            */
-            strat->L.erase(lt);
+            /*it could be canceled but we search for a better one to cancel*/
+            strat->c3++;
+            // Search backward from it for a pair (jt->p1, it->p1)
+            LSet::iterator lt;
+            BOOLEAN found = FALSE;
+            if (it != strat->L.begin())
+            {
+              lt = it;
+              --lt;
+              while (TRUE)
+              {
+                if (((jt->p1 == lt->p1) && (it->p1 == lt->p2))
+                ||  ((jt->p1 == lt->p2) && (it->p1 == lt->p1)))
+                {
+                  found = TRUE;
+                  break;
+                }
+                if (lt == strat->L.begin()) break;
+                --lt;
+              }
+            }
+            if (found
+            && (pNext(lt->p) == strat->tail)
+            && (!pLmEqual(it->p,lt->p))
+            && pDivisibleBy(p,lt->lcm))
+            {
+              /*
+              *"NOT equal(...)" because in case of "equal" the element lt
+              *is "older" and has to be from theoretical point of view behind
+              *it, but we do not want to reorder L
+              */
+              it->p2 = strat->tail;
+              /*
+              *lt will be canceled, we cannot cancel it later on,
+              *so we mark it with "tail"
+              */
+              strat->L.erase(lt);
+              // In a multiset, erasing lt does not invalidate jt or it.
+              // Move it backward to continue checking.
+              if (it == strat->L.begin())
+                it = strat->L.end(); // sentinel: went past begin
+              else
+                --it;
+            }
+            else
+            {
+              // Erase it; jt is still valid in a multiset.
+              // Save position before it so we can continue.
+              auto prev = it;
+              if (prev != strat->L.begin())
+                --prev;
+              else
+                prev = strat->L.end(); // sentinel: went past begin
+              strat->L.erase(it);
+              it = prev;
+              // prev is already the next candidate, continue loop
+              // without extra decrement
+              continue;
+            }
           }
           else
           {
-            strat->L.erase(*it);
+            if (it == strat->L.begin())
+              break;
+            --it;
           }
-          it = iterators.erase(it);
         }
-        else
-          ++it;
       }
+      else if (jt->p2 == strat->tail)
+      {
+        /*now jt cannot be canceled any more and the tail can be removed*/
+        jt->p2 = p;
+      }
+      if (jt == strat->L.begin()) break;
+      --jt;
+    }
     }
   }
 }
@@ -3705,55 +3778,128 @@ void chainCritPart (poly p,int ecart,kStrategy strat)
     *except the case the element (s,r) has also the same lcm
     *and is on the worst position with respect to (s,p) and (r,p)
     */
-    auto iterators = kMergeBintoL_and_return_iterators(strat);
-    for (auto jt = iterators.begin(); jt != iterators.end(); jt++)
+    /*
+    *B enters to L/their order with respect to B is permutated for elements
+    *B[i].p with the same leading term
+    */
+    kMergeBintoL(strat);
+    if (!strat->L.empty())
     {
-      for (auto it = jt + 1; it != iterators.end(); )
+    // j iterates from last (worst) to first (best), matching spielwiese j=Ll..0
+    auto jt = strat->L.end();
+    --jt;
+    loop  /*cannot be changed into a for !!! */
+    {
+      if (jt == strat->L.begin())
       {
-        if (pLmEqual((*jt)->lcm,(*it)->lcm))
+        /*now L[0] cannot be canceled any more and the tail can be removed*/
+        if (jt->p2 == strat->tail) jt->p2 = p;
+        break;
+      }
+      if (jt->p2 == p) // Was the element added from B?
+      {
+        auto it = jt;
+        --it;
+        loop
         {
-          /* it could be canceled but we search for a better one to cancel*/
-          strat->c3++;
-          auto lt = *it + 1;
-          if (isInPairsetL((lt,(*jt)->p1,(*it)->p1,strat)
-          && (pNext(lt->p) == strat->tail)
-          && (!pLmEqual((*it)->p,lt->p))
-          && _p_LmDivisibleByPart(p,currRing,
-                         lt->lcm,currRing,
-                         currRing->real_var_start, currRing->real_var_end))
+          // In a multiset, we track "went past begin" via end() sentinel
+          if (it == strat->L.end())  break;
+          if ((it->p2 == p) && pLmEqual(jt->lcm,it->lcm))
           {
-            /*
-            *"NOT equal(...)" because in case of "equal" the element lt
-            *is "older" and has to be from theoretical point of view behind
-            *it, but we do not want to reorder L
-            */
-            if(TEST_OPT_DEBUG)
+            /*it could be canceled but we search for a better one to cancel*/
+            strat->c3++;
+            // Search backward from it for a pair (jt->p1, it->p1)
+            LSet::iterator lt;
+            BOOLEAN found = FALSE;
+            if (it != strat->L.begin())
             {
-              PrintS("chain-crit-part: divisible_by p=");
-              p_wrp(p,currRing);
-              Print(" delete L[l]");
-              p_wrp(lt->lcm,currRing);
-              PrintLn();
+              lt = it;
+              --lt;
+              while (TRUE)
+              {
+                if (((jt->p1 == lt->p1) && (it->p1 == lt->p2))
+                ||  ((jt->p1 == lt->p2) && (it->p1 == lt->p1)))
+                {
+                  found = TRUE;
+                  break;
+                }
+                if (lt == strat->L.begin()) break;
+                --lt;
+              }
             }
-            strat->L.erase(lt);
+            if (found
+            && (pNext(lt->p) == strat->tail)
+            && (!pLmEqual(it->p,lt->p))
+            && _p_LmDivisibleByPart(p,currRing,
+                           lt->lcm,currRing,
+                           currRing->real_var_start, currRing->real_var_end))
+            {
+              /*
+              *"NOT equal(...)" because in case of "equal" the element lt
+              *is "older" and has to be from theoretical point of view behind
+              *it, but we do not want to reorder L
+              */
+              it->p2 = strat->tail;
+              /*
+              *lt will be canceled, we cannot cancel it later on,
+              *so we mark it with "tail"
+              */
+              if(TEST_OPT_DEBUG)
+              {
+                PrintS("chain-crit-part: divisible_by p=");
+                p_wrp(p,currRing);
+                Print(" delete L[l]");
+                p_wrp(lt->lcm,currRing);
+                PrintLn();
+              }
+              strat->L.erase(lt);
+              // In a multiset, erasing lt does not invalidate jt or it.
+              // Move it backward to continue checking.
+              if (it == strat->L.begin())
+                it = strat->L.end(); // sentinel: went past begin
+              else
+                --it;
+            }
+            else
+            {
+              if(TEST_OPT_DEBUG)
+              {
+                PrintS("chain-crit-part: divisible_by(2) p=");
+                p_wrp(p,currRing);
+                Print(" delete L[i]");
+                p_wrp(it->lcm,currRing);
+                PrintLn();
+              }
+              // Erase it; jt is still valid in a multiset.
+              // Save position before it so we can continue.
+              auto prev = it;
+              if (prev != strat->L.begin())
+                --prev;
+              else
+                prev = strat->L.end(); // sentinel: went past begin
+              strat->L.erase(it);
+              it = prev;
+              // prev is already the next candidate, continue loop
+              // without extra decrement
+              continue;
+            }
           }
           else
           {
-            if(TEST_OPT_DEBUG)
-            {
-              PrintS("chain-crit-part: divisible_by(2) p=");
-              p_wrp(p,currRing);
-              Print(" delete L[i]");
-              p_wrp((*it)->lcm,currRing);
-              PrintLn();
-            }
-            strat->L.erase(*it);
+            if (it == strat->L.begin())
+              break;
+            --it;
           }
-          it = iterators.erase(it);
         }
-        else
-          ++it;
       }
+      else if (jt->p2 == strat->tail)
+      {
+        /*now jt cannot be canceled any more and the tail can be removed*/
+        jt->p2 = p;
+      }
+      if (jt == strat->L.begin()) break;
+      --jt;
+    }
     }
   }
 }
@@ -4037,50 +4183,121 @@ void chainCritRing (poly p,int, kStrategy strat)
   *except the case the element (s,r) has also the same lcm
   *and is on the worst position with respect to (s,p) and (r,p)
   */
-  auto iterators = kMergeBintoL_and_return_iterators(strat);
-  for (auto jt = iterators.begin(); jt != iterators.end(); jt++)
+  /*
+  *B enters to L/their order with respect to B is permutated for elements
+  *B[i].p with the same leading term
+  */
+  kMergeBintoL(strat);
+  if (strat->L.empty()) return;
+  // j iterates from last (worst) to first (best), matching spielwiese j=Ll..0
+  auto jt = strat->L.end();
+  --jt;
+  loop  /*cannot be changed into a for !!! */
   {
-    for (auto it = jt + 1; it != iterators.end(); it++)
+    if (jt == strat->L.begin())
     {
-      // Element is from B and has the same lcm as jt
-      if (n_DivBy(pGetCoeff((*jt)->lcm), pGetCoeff((*it)->lcm), currRing->cf)
-           && pLmEqual((*jt)->lcm,(*it)->lcm))
+      /*now L[0] cannot be canceled any more and the tail can be removed*/
+      if (jt->p2 == strat->tail) jt->p2 = p;
+      break;
+    }
+    if (jt->p2 == p) // Was the element added from B?
+    {
+      auto it = jt;
+      --it;
+      loop
       {
-        /* it could be canceled but we search for a better one to cancel*/
-        strat->c3++;
+        // In a multiset, we track "went past begin" via end() sentinel
+        if (it == strat->L.end())  break;
+        // Element is from B and has the same lcm as jt
+        if ((it->p2 == p) && n_DivBy(pGetCoeff(jt->lcm), pGetCoeff(it->lcm), currRing->cf)
+             && pLmEqual(jt->lcm,it->lcm))
+        {
+          /*it could be canceled but we search for a better one to cancel*/
+          strat->c3++;
 #ifdef KDEBUG
-        if (TEST_OPT_DEBUG)
-        {
-          PrintS("--- chain criterion func chainCritRing type 3\n");
-          PrintS("strat->L[j].lcm:");
-          wrp((*jt)->lcm);
-          PrintS("  strat->L[i].lcm:");
-          wrp((*it)->lcm);
-          PrintLn();
-        }
+          if (TEST_OPT_DEBUG)
+          {
+            PrintS("--- chain criterion func chainCritRing type 3\n");
+            PrintS("strat->L[j].lcm:");
+            wrp(jt->lcm);
+            PrintS("  strat->L[i].lcm:");
+            wrp(it->lcm);
+            PrintLn();
+          }
 #endif
-        auto lt = *it + 1;
-        if (isInPairsetL(lt,(*jt)->p1,(*it)->p1,strat)
-        && (pNext(lt->p) == strat->tail)
-        && (!pLmEqual((*it)->p,lt->p))
-        && pDivisibleBy(p,lt->lcm))
-        {
-          /*
-          *"NOT equal(...)" because in case of "equal" the element lt
-          *is "older" and has to be from theoretical point of view behind
-          *it, but we do not want to reorder L
-          */
-          strat->L.erase(lt);
+          // Search backward from it for a pair (jt->p1, it->p1)
+          LSet::iterator lt;
+          BOOLEAN found = FALSE;
+          if (it != strat->L.begin())
+          {
+            lt = it;
+            --lt;
+            while (TRUE)
+            {
+              if (((jt->p1 == lt->p1) && (it->p1 == lt->p2))
+              ||  ((jt->p1 == lt->p2) && (it->p1 == lt->p1)))
+              {
+                found = TRUE;
+                break;
+              }
+              if (lt == strat->L.begin()) break;
+              --lt;
+            }
+          }
+          if (found
+          && (pNext(lt->p) == strat->tail)
+          && (!pLmEqual(it->p,lt->p))
+          && pDivisibleBy(p,lt->lcm))
+          {
+            /*
+            *"NOT equal(...)" because in case of "equal" the element lt
+            *is "older" and has to be from theoretical point of view behind
+            *it, but we do not want to reorder L
+            */
+            it->p2 = strat->tail;
+            /*
+            *lt will be canceled, we cannot cancel it later on,
+            *so we mark it with "tail"
+            */
+            strat->L.erase(lt);
+            // In a multiset, erasing lt does not invalidate jt or it.
+            // Move it backward to continue checking.
+            if (it == strat->L.begin())
+              it = strat->L.end(); // sentinel: went past begin
+            else
+              --it;
+          }
+          else
+          {
+            // Erase it; jt is still valid in a multiset.
+            // Save position before it so we can continue.
+            auto prev = it;
+            if (prev != strat->L.begin())
+              --prev;
+            else
+              prev = strat->L.end(); // sentinel: went past begin
+            strat->L.erase(it);
+            it = prev;
+            // prev is already the next candidate, continue loop
+            // without extra decrement
+            continue;
+          }
         }
         else
         {
-          strat->L.erase(*it);
+          if (it == strat->L.begin())
+            break;
+          --it;
         }
-        it = iterators.erase(it);
       }
-      else
-        ++it;
     }
+    else if (jt->p2 == strat->tail)
+    {
+      /*now jt cannot be canceled any more and the tail can be removed*/
+      jt->p2 = p;
+    }
+    if (jt == strat->L.begin()) break;
+    --jt;
   }
 }
 
