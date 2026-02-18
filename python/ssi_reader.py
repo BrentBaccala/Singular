@@ -329,8 +329,7 @@ class SSIReader:
     def read_string(self) -> str:
         """Read a length-prefixed string."""
         length = self.read_int()
-        # Skip the single space after length
-        self.stream.read(1)
+        # read_int()'s read_token() already consumed the trailing space
         # Read exactly length bytes
         data = self._read_bytes(length)
         return data.decode('utf-8', errors='replace')
@@ -452,11 +451,13 @@ class SSIReader:
             block1 = self.read_int()
 
             # Read weights for weighted orderings
+            # Enum values from Singular's ring.h:
+            #   1=a, 5=M, 12=wp, 13=Wp, 18=ws, 19=Ws, 22=aa
             weights = []
-            if ord_type in (3, 4, 5, 6, 8, 9):  # wp, Wp, ws, Ws, a, aa
+            if ord_type in (1, 12, 13, 18, 19, 22):  # a, wp, Wp, ws, Ws, aa
                 n_weights = block1 - block0 + 1
                 weights = [self.read_int() for _ in range(n_weights)]
-            elif ord_type == 7:  # M (matrix ordering)
+            elif ord_type == 5:  # M (matrix ordering)
                 n_weights = block1 - block0 + 1
                 weights = [self.read_int() for _ in range(n_weights * n_weights)]
 
