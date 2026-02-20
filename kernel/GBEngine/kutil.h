@@ -282,6 +282,7 @@ public:
   int (*posInT)(const TSet T,const int tl,LObject &h);
   int (*posInL)(const LSet set, const int length,
                 LObject* L,const kStrategy strat);
+  int (*compareL)(const LObject &lhs, const LObject &rhs);
   void (*enterS)(LObject* h, int pos,kStrategy strat, int atR/* =-1*/ );
   void (*initEcartPair)(LObject * h, poly f, poly g, int ecartF, int ecartG);
   int (*posInLOld)(const LSet Ls,const int Ll,
@@ -482,6 +483,22 @@ int posInL10Ring (const LSet set, const int length,
              LObject* L,const kStrategy strat);
 int posInL110 (const LSet set, const int length,
              LObject* L,const kStrategy strat);
+int compareL0 (const LObject &lhs, const LObject &rhs);
+int compareL0Ring (const LObject &lhs, const LObject &rhs);
+int compareLSig (const LObject &lhs, const LObject &rhs);
+int compareLSigRing (const LObject &lhs, const LObject &rhs);
+int compareL11 (const LObject &lhs, const LObject &rhs);
+int compareL11Ring (const LObject &lhs, const LObject &rhs);
+int compareL110 (const LObject &lhs, const LObject &rhs);
+int compareL110Ring (const LObject &lhs, const LObject &rhs);
+int compareL13 (const LObject &lhs, const LObject &rhs);
+int compareL15 (const LObject &lhs, const LObject &rhs);
+int compareL15Ring (const LObject &lhs, const LObject &rhs);
+int compareL17 (const LObject &lhs, const LObject &rhs);
+int compareL17Ring (const LObject &lhs, const LObject &rhs);
+int compareL17_c (const LObject &lhs, const LObject &rhs);
+int compareL17_cRing (const LObject &lhs, const LObject &rhs);
+int compareLSpecial (const LObject &lhs, const LObject &rhs);
 KINLINE poly redtailBba (poly p,int end_pos,kStrategy strat,BOOLEAN normalize=FALSE);
 KINLINE poly redtailBbaBound (poly p,int end_pos,kStrategy strat,int bound,BOOLEAN normalize=FALSE);
 KINLINE poly redtailBba_Ring (poly p,int end_pos,kStrategy strat);

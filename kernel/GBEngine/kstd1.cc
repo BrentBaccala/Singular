@@ -3595,6 +3595,7 @@ ideal kInterRedBba (ideal F, ideal Q, int &need_retry)
   initBba(strat);
   /*set enterS, spSpolyShort, reduce, red, initEcart, initEcartPair*/
   strat->posInL=posInL0; /* ord according pComp */
+  strat->compareL=compareL0;
 
   /*Shdl=*/initBuchMora(F, Q, strat);
   reduc = olddeg = 0;
