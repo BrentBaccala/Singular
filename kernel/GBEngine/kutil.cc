@@ -3383,105 +3383,57 @@ void chainCritNormal (poly p,int ecart,kStrategy strat)
     *B[i].p with the same leading term
     */
     kMergeBintoL(strat);
-    if (!strat->L.empty())
+    for (auto jt = strat->L.begin(); jt != strat->L.end(); )
     {
-    // j iterates from last (worst) to first (best), matching spielwiese j=Ll..0
-    auto jt = strat->L.end();
-    --jt;
-    loop  /*cannot be changed into a for !!! */
-    {
-      if (jt == strat->L.begin())
+      if (jt + 1 == strat->L.end())
       {
         /*now L[0] cannot be canceled any more and the tail can be removed*/
         if (jt->p2 == strat->tail) jt->p2 = p;
         break;
       }
-      if (jt->p2 == p) // Was the element added from B?
+      if (jt->p2 == p)
       {
-        auto it = jt;
-        --it;
-        loop
+        for (auto it = jt + 1; it != strat->L.end(); )
         {
-          // In a multiset, we track "went past begin" via end() sentinel
-          if (it == strat->L.end())  break;
+          bool i_deleted = false;
           if ((it->p2 == p) && pLmEqual(jt->lcm,it->lcm))
           {
-            /*it could be canceled but we search for a better one to cancel*/
+            /*L[i] could be canceled but we search for a better one to cancel*/
             strat->c3++;
-            // Search backward from it for a pair (jt->p1, it->p1)
-            LSet::iterator lt;
-            BOOLEAN found = FALSE;
-            if (it != strat->L.begin())
-            {
-              lt = it;
-              --lt;
-              while (TRUE)
-              {
-                if (((jt->p1 == lt->p1) && (it->p1 == lt->p2))
-                ||  ((jt->p1 == lt->p2) && (it->p1 == lt->p1)))
-                {
-                  found = TRUE;
-                  break;
-                }
-                if (lt == strat->L.begin()) break;
-                --lt;
-              }
-            }
-            if (found
+            auto lt = it + 1;
+            if (isInPairsetL(lt,jt->p1,it->p1,strat)
             && (pNext(lt->p) == strat->tail)
             && (!pLmEqual(it->p,lt->p))
             && pDivisibleBy(p,lt->lcm))
             {
               /*
-              *"NOT equal(...)" because in case of "equal" the element lt
+              *"NOT equal(...)" because in case of "equal" the element L[l]
               *is "older" and has to be from theoretical point of view behind
-              *it, but we do not want to reorder L
+              *L[i], but we do not want to reorder L
               */
               it->p2 = strat->tail;
               /*
-              *lt will be canceled, we cannot cancel it later on,
+              *L[l] will be canceled, we cannot cancel L[i] later on,
               *so we mark it with "tail"
               */
               strat->L.erase(lt);
-              // In a multiset, erasing lt does not invalidate jt or it.
-              // Move it backward to continue checking.
-              if (it == strat->L.begin())
-                it = strat->L.end(); // sentinel: went past begin
-              else
-                --it;
             }
             else
             {
-              // Erase it; jt is still valid in a multiset.
-              // Save position before it so we can continue.
-              auto prev = it;
-              if (prev != strat->L.begin())
-                --prev;
-              else
-                prev = strat->L.end(); // sentinel: went past begin
-              strat->L.erase(it);
-              it = prev;
-              // prev is already the next candidate, continue loop
-              // without extra decrement
-              continue;
+              i_deleted = true;
+              it = strat->L.erase(it);
             }
           }
-          else
-          {
-            if (it == strat->L.begin())
-              break;
-            --it;
-          }
+          if (!i_deleted)
+            ++it;
         }
       }
       else if (jt->p2 == strat->tail)
       {
-        /*now jt cannot be canceled any more and the tail can be removed*/
+        /*now L[j] cannot be canceled any more and the tail can be removed*/
         jt->p2 = p;
       }
-      if (jt == strat->L.begin()) break;
-      --jt;
-    }
+      ++jt;
     }
   }
 }
