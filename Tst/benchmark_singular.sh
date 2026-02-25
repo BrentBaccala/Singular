@@ -913,10 +913,9 @@ run_benchmark() {
             times+=($runtime)
             total=$(echo "$total + $runtime" | bc)
 
-            # Parse Singular internal timer (BENCHMARK_TIME in ms)
-            local sing_time_ms=$(grep "^BENCHMARK_TIME:" "$output_file" | tail -1 | sed 's/BENCHMARK_TIME://')
-            if [ -n "$sing_time_ms" ]; then
-                local sing_time_s=$(echo "scale=4; $sing_time_ms / 1000" | bc)
+            # Parse Singular internal timer (BENCHMARK_TIME in seconds)
+            local sing_time_s=$(grep "^BENCHMARK_TIME:" "$output_file" | tail -1 | sed 's/BENCHMARK_TIME://')
+            if [ -n "$sing_time_s" ]; then
                 singular_times+=($sing_time_s)
                 singular_total=$(echo "$singular_total + $sing_time_s" | bc)
                 echo "Wall: ${runtime}s  Singular: ${sing_time_s}s"
