@@ -25,6 +25,7 @@
 */
 
 #ifdef HAVE_AVX2
+__attribute__((target("avx2,popcnt")))
 BOOLEAN pCompareChain_16bit_AVX2 (poly p,poly p1,poly p2,poly lcm, const ring R)
 {
   __m256i * p_exp_ptr = (__m256i *) p->exp;
@@ -97,6 +98,7 @@ BOOLEAN pCompareChain_16bit_AVX2 (poly p,poly p1,poly p2,poly lcm, const ring R)
 #endif
 
 #ifdef HAVE_SSE4
+__attribute__((target("sse4.1,sse4.2,popcnt")))
 BOOLEAN pCompareChain_16bit_SSE4 (poly p,poly p1,poly p2,poly lcm, const ring R)
 {
   __m128i * p_exp_ptr = (__m128i *) p->exp;
