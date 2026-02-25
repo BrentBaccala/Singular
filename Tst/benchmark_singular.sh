@@ -353,7 +353,12 @@ for exec_path in "${SINGULAR_EXECS[@]}"; do
             # Go up from .libs/Singular to the Singular directory, then up to the build directory
             build_dir=$(dirname $(dirname $(dirname "$exec_path")))
             name=$(basename "$build_dir")
-            
+            # If the build directory is just called "build", use the parent name instead
+            # e.g., ~/Singular-LSet/build/ → "Singular-LSet"
+            if [ "$name" = "build" ]; then
+                name=$(basename "$(dirname "$build_dir")")
+            fi
+
             # Find all .libs directories
             ld_path=$(find "$build_dir" -name .libs -type d 2>/dev/null | tr '\n' ':' | sed 's/:$//')
             
