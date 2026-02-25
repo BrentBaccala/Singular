@@ -13,7 +13,14 @@ SHOW_OUTPUT=0
 USE_PROT=0
 SHOW_STRATEGY=0
 USE_PERF=0
+TIMEOUT=0  # 0 = no timeout
+TRACK_MEMORY=0
 TEMP_DIR=$(mktemp -d)
+
+# SSI and custom file inputs
+declare -a SSI_FILES
+declare -a SSI_INDICES
+declare -a CUSTOM_FILES
 
 # Arrays to store Singular executables and their info
 declare -a SINGULAR_EXECS
@@ -50,10 +57,18 @@ OPTIONS:
   --katsura-n N             Number of variables for katsura tests (default: 5)
   --char, --characteristic N  Prime characteristic for finite field tests (default: 32003)
   --algorithm ALG[,ALG2,...]  Groebner basis algorithm(s) to use (default: std)
-                            Options: std, modstd, groebner, slimgb, sba, mathicgb, all
+                            Options: std, modstd, groebner, slimgb, sba, mathicgb, minAssGTZ, all
                             'all' runs: std, slimgb, sba, and modstd (char 0) or mathicgb (char p)
                             Can specify multiple separated by commas
                             Note: modstd only works in char 0; mathicgb only works in char p
+                            minAssGTZ runs primary decomposition (requires primdec.lib)
+  --timeout SECONDS         Kill test if it exceeds SECONDS (default: no timeout)
+  --memory                  Track peak memory usage (VmPeak from /proc)
+  --ssi FILE [--ssi-index N]  Load ring and ideal from Singular SSI file
+                            Can be specified multiple times for different files
+  --ssi-index N             Index of ideal in SSI file (default: 0, first ideal)
+  --file FILE               Load ring/ideal from a .sing/.tst file that defines ring R and ideal I
+                            Can be specified multiple times
   -s, --singular PATH       Path to Singular executable (can be specified multiple times)
                             If not specified, uses 'Singular' from PATH
   --warmup                  Perform an untimed warmup run before timed runs
@@ -97,6 +112,11 @@ EXAMPLES:
   $0 -s ~/build1/Singular -s ~/build2/Singular --algorithm std,sba --cyclic
   $0 --perf -s ~/src/Singular-build --cyclic-qq-dp -n 1
   $0 --char 97 --cyclic-fp-dp --algorithm all
+  $0 --ssi ~/helium/hydrogen-5.ssi --algorithm std -n 3
+  $0 --ssi ~/helium/hydrogen-5.ssi --ssi-index 0 --algorithm minAssGTZ
+  $0 --file ~/test-cases/singular/hard-gtz-id16053609.tst --algorithm std,minAssGTZ
+  $0 --timeout 300 --ssi ~/helium/helium-16.6.ssi --algorithm std
+  $0 --memory --cyclic-n 8 --cyclic-qq-dp --algorithm std,modstd
 
 EOF
     exit 0
@@ -168,6 +188,38 @@ while [[ $# -gt 0 ]]; do
         --show-strategy)
             SHOW_STRATEGY=1
             shift
+            ;;
+        --timeout)
+            TIMEOUT="$2"
+            shift 2
+            ;;
+        --memory)
+            TRACK_MEMORY=1
+            shift
+            ;;
+        --ssi)
+            SSI_FILES+=("$2")
+            SSI_INDICES+=(0)  # default index, may be overwritten by --ssi-index
+            TESTS_SPECIFIED=1
+            shift 2
+            ;;
+        --ssi-index)
+            # Update the index of the most recently added SSI file
+            if [ ${#SSI_FILES[@]} -eq 0 ]; then
+                echo "Error: --ssi-index must follow a --ssi option"
+                exit 1
+            fi
+            SSI_INDICES[$((${#SSI_INDICES[@]}-1))]="$2"
+            shift 2
+            ;;
+        --file)
+            if [ ! -f "$2" ]; then
+                echo "Error: File not found: $2"
+                exit 1
+            fi
+            CUSTOM_FILES+=("$(realpath "$2")")
+            TESTS_SPECIFIED=1
+            shift 2
             ;;
         --perf)
             USE_PERF=1
@@ -305,8 +357,13 @@ for exec_path in "${SINGULAR_EXECS[@]}"; do
             # Find all .libs directories
             ld_path=$(find "$build_dir" -name .libs -type d 2>/dev/null | tr '\n' ':' | sed 's/:$//')
             
-            # Find dyn_modules/.libs
+            # Find dyn_modules/.libs and LIB directory
             sing_path=$(find "$build_dir" -path "*/Singular/dyn_modules/*/.libs" -type d 2>/dev/null | tr '\n' ':' | sed 's/:$//')
+            # Also include the Singular/LIB directory for library access
+            lib_dir=$(find "$build_dir" -path "*/Singular/LIB" -type d 2>/dev/null | head -1)
+            if [ -n "$lib_dir" ]; then
+                sing_path="${lib_dir}:${sing_path}"
+            fi
         else
             # Assume it's an installed version or custom location
             name=$(basename $(dirname "$exec_path"))
@@ -326,7 +383,7 @@ echo "Number of runs per test: $NUM_RUNS"
 echo "Cyclic n: $CYCLIC_N"
 echo "Katsura n: $KATSURA_N"
 echo "Characteristic (Fp): $CHARACTERISTIC"
-echo "Algorithms: $RAW_ALGORITHMS"
+echo "Algorithms: ${RAW_ALGORITHMS:-std}"
 echo "Singular versions: ${#SINGULAR_EXECS[@]}"
 for i in "${!SINGULAR_EXECS[@]}"; do
     echo "  [$((i+1))] ${SINGULAR_NAMES[$i]}: ${SINGULAR_EXECS[$i]}"
@@ -337,6 +394,10 @@ echo "Show output: $([ $SHOW_OUTPUT -eq 1 ] && echo 'yes' || echo 'no')"
 echo "Protocol output: $([ $USE_PROT -eq 1 ] && echo 'enabled' || echo 'disabled')"
 echo "Show strategy: $([ $SHOW_STRATEGY -eq 1 ] && echo 'enabled' || echo 'disabled')"
 echo "Perf profiling: $([ $USE_PERF -eq 1 ] && echo 'enabled' || echo 'disabled')"
+echo "Timeout: $([ $TIMEOUT -gt 0 ] && echo "${TIMEOUT}s" || echo 'none')"
+echo "Memory tracking: $([ $TRACK_MEMORY -eq 1 ] && echo 'enabled' || echo 'disabled')"
+[ ${#SSI_FILES[@]} -gt 0 ] && echo "SSI files: ${SSI_FILES[*]}"
+[ ${#CUSTOM_FILES[@]} -gt 0 ] && echo "Custom files: ${CUSTOM_FILES[*]}"
 echo "Temporary directory: $TEMP_DIR"
 echo ""
 
@@ -354,18 +415,20 @@ validate_algorithm_for_test() {
     local algorithm=$1
     local test_name=$2
     local is_char_zero=$(test_is_char_zero "$test_name" && echo 1 || echo 0)
-    
+
     if [ "$algorithm" == "modstd" ] && [ $is_char_zero -eq 0 ]; then
         echo "Error: modstd only works in characteristic 0 (QQ rings)" >&2
         echo "Cannot use modstd with test: $test_name" >&2
         exit 1
     fi
-    
+
     if [ "$algorithm" == "mathicgb" ] && [ $is_char_zero -eq 1 ]; then
         echo "Error: mathicgb only works in prime characteristic (Fp rings)" >&2
         echo "Cannot use mathicgb with test: $test_name" >&2
         exit 1
     fi
+
+    # minAssGTZ works with any characteristic
 }
 
 # Function to get algorithms for a test (handles 'all' keyword)
@@ -391,7 +454,7 @@ get_algorithms_for_test() {
         local valid_algs=()
         for alg in "${algs[@]}"; do
             case $alg in
-                std|modstd|groebner|slimgb|sba|mathicgb)
+                std|modstd|groebner|slimgb|sba|mathicgb|minAssGTZ)
                     validate_algorithm_for_test "$alg" "$test_name"
                     valid_algs+=("$alg")
                     ;;
@@ -401,7 +464,7 @@ get_algorithms_for_test() {
                     ;;
                 *)
                     echo "Error: Unknown algorithm '$alg'" >&2
-                    echo "Valid options: std, modstd, groebner, slimgb, sba, mathicgb, all" >&2
+                    echo "Valid options: std, modstd, groebner, slimgb, sba, mathicgb, minAssGTZ, all" >&2
                     exit 1
                     ;;
             esac
@@ -415,8 +478,33 @@ get_algorithm_call() {
     local alg=$1
     if [ "$alg" == "modstd" ]; then
         echo "modStd"
+    elif [ "$alg" == "minAssGTZ" ]; then
+        echo "minAssGTZ"
     else
         echo "$alg"
+    fi
+}
+
+# Function to get the computation line for a given algorithm
+get_computation_lines() {
+    local alg=$1
+    local GB_ALGORITHM_CALL=$(get_algorithm_call "$alg")
+    if [ "$alg" == "minAssGTZ" ]; then
+        echo 'list L = minAssGTZ(I);'
+        echo '"BENCHMARK_GB_SIZE:" + string(size(L));'
+    else
+        echo "ideal J = $GB_ALGORITHM_CALL(I);"
+        echo '"BENCHMARK_GB_SIZE:" + string(size(J));'
+    fi
+}
+
+# Function to get required library loads for an algorithm
+get_lib_loads() {
+    local alg=$1
+    echo 'LIB "polylib.lib";'
+    echo 'LIB "modstd.lib";'
+    if [ "$alg" == "minAssGTZ" ]; then
+        echo 'LIB "primdec.lib";'
     fi
 }
 
@@ -426,35 +514,44 @@ create_test_file() {
     local algorithm=$2
     local filename="$TEMP_DIR/${test_name}_${algorithm}.sing"
     local GB_ALGORITHM_CALL=$(get_algorithm_call "$algorithm")
-    
+
+    # Determine which libraries to load (only what's needed)
+    local libs="LIB \"polylib.lib\";"
+    if [ "$algorithm" == "modstd" ] || [ "$algorithm" == "modStd" ]; then
+        libs="$libs\nLIB \"modstd.lib\";"
+    elif [ "$algorithm" == "minAssGTZ" ]; then
+        libs="$libs\nLIB \"primdec.lib\";"
+    fi
+
+    # Build options block
+    local opts=""
+    [ $SHOW_STRATEGY -eq 1 ] && opts="${opts}intvec options = option(get);\noptions[2] = options[2] + 2^23;\noption(set, options);\n"
+    [ $USE_PROT -eq 1 ] && opts="${opts}option(prot);\n"
+
+    # Build computation block with Singular internal timer
+    local computation=""
+    if [ "$algorithm" == "minAssGTZ" ]; then
+        computation="timer = 1;\nint t = timer;\nlist L = minAssGTZ(I);\nint elapsed = timer - t;\n\"BENCHMARK_TIME:\" + string(elapsed);\n\"BENCHMARK_GB_SIZE:\" + string(size(L));"
+    else
+        computation="timer = 1;\nint t = timer;\noption(redSB);\nideal J = $GB_ALGORITHM_CALL(I);\nint elapsed = timer - t;\n\"BENCHMARK_TIME:\" + string(elapsed);\n\"BENCHMARK_GB_SIZE:\" + string(size(J));"
+    fi
+
     # Handle newellp1 specially
     if [ "$test_name" == "newellp1" ]; then
-        cat > "$filename" << 'EOF'
-LIB "modstd.lib";
+        cat > "$filename" << SINGEOF
+$(echo -e "$libs")
 ring R=QQ, (x,y,z,u,v),M(0,0,0,1,1, 1,1,1,0,0, 1,1,0,0,0, 1,0,0,0,0, 0,0,0,1,0);
 ideal I=  -x + 7/5 - 231/125 * v^2 + 39/80 * u^2 - 1/5 * u^3 + 99/400 * u * v^2 - 1287/2000 * u^2 * v^2 + 33/125 * u^3 * v^2 - 3/16 * u + 56/125 * v^3 - 3/50 * u * v^3 + 39/250 * u^2 * v^3 - 8/125 * u^3 * v^3,
 -y + 63/125 * v^2 - 294/125 * v + 56/125 * v^3 - 819/1000 * u^2 * v + 42/125 * u^3 * v - 3/50 * u * v^3 + 351/2000 * u^2 * v^2 + 39/250 * u^2 * v^3 - 9/125 * u^3 * v^2 - 8/125 * u^3 * v^3,
 -z + 12/5 - 63/160 * u^2 + 63/160 * u;
-EOF
-        # Add optional settings
-        [ $SHOW_STRATEGY -eq 1 ] && cat >> "$filename" << 'EOF'
-intvec options = option(get);
-options[2] = options[2] + 2^23;
-option(set, options);
-EOF
-        [ $USE_PROT -eq 1 ] && echo "option(prot);" >> "$filename"
-        
-        # Add computation
-        cat >> "$filename" << EOF
-int t=timer;
-ideal J=$GB_ALGORITHM_CALL(I);
-timer-t;
+$(echo -e "$opts")
+$(echo -e "$computation")
 quit;
-EOF
+SINGEOF
         echo "$filename"
         return
     fi
-    
+
     # Generate variable list for cyclic
     local cyclic_vars=""
     for ((i=1; i<=$CYCLIC_N; i++)); do
@@ -464,7 +561,7 @@ EOF
             cyclic_vars="${cyclic_vars},x$i"
         fi
     done
-    
+
     # Generate variable list for katsura (0-indexed)
     local katsura_vars=""
     for ((i=0; i<=$KATSURA_N; i++)); do
@@ -474,131 +571,238 @@ EOF
             katsura_vars="${katsura_vars},x$i"
         fi
     done
-    
+
+    local ring_def=""
+    local ideal_def=""
+
     case $test_name in
         cyclic_qq_dp)
-            cat > "$filename" << EOF
-LIB "polylib.lib";
-LIB "modstd.lib";
-ring r = 0,($cyclic_vars),dp;
-ideal i = cyclic($CYCLIC_N);
-$([ $SHOW_STRATEGY -eq 1 ] && echo 'intvec options = option(get);
-options[2] = options[2] + 2^23;
-option(set, options);')
-$([ $USE_PROT -eq 1 ] && echo "option(prot);")
-option(redSB);
-ideal j = $GB_ALGORITHM_CALL(i);
-quit;
-EOF
+            ring_def="ring r = 0,($cyclic_vars),dp;"
+            ideal_def="ideal I = cyclic($CYCLIC_N);"
             ;;
         cyclic_fp_dp)
-            cat > "$filename" << EOF
-LIB "polylib.lib";
-LIB "modstd.lib";
-ring r = $CHARACTERISTIC,($cyclic_vars),dp;
-ideal i = cyclic($CYCLIC_N);
-$([ $SHOW_STRATEGY -eq 1 ] && echo 'intvec options = option(get);
-options[2] = options[2] + 2^23;
-option(set, options);')
-$([ $USE_PROT -eq 1 ] && echo "option(prot);")
-option(redSB);
-ideal j = $GB_ALGORITHM_CALL(i);
-quit;
-EOF
+            ring_def="ring r = $CHARACTERISTIC,($cyclic_vars),dp;"
+            ideal_def="ideal I = cyclic($CYCLIC_N);"
             ;;
         cyclic_qq_lp)
-            cat > "$filename" << EOF
-LIB "polylib.lib";
-LIB "modstd.lib";
-ring r = 0,($cyclic_vars),lp;
-ideal i = cyclic($CYCLIC_N);
-$([ $SHOW_STRATEGY -eq 1 ] && echo 'intvec options = option(get);
-options[2] = options[2] + 2^23;
-option(set, options);')
-$([ $USE_PROT -eq 1 ] && echo "option(prot);")
-option(redSB);
-ideal j = $GB_ALGORITHM_CALL(i);
-quit;
-EOF
+            ring_def="ring r = 0,($cyclic_vars),lp;"
+            ideal_def="ideal I = cyclic($CYCLIC_N);"
             ;;
         cyclic_fp_lp)
-            cat > "$filename" << EOF
-LIB "polylib.lib";
-LIB "modstd.lib";
-ring r = $CHARACTERISTIC,($cyclic_vars),lp;
-ideal i = cyclic($CYCLIC_N);
-$([ $SHOW_STRATEGY -eq 1 ] && echo 'intvec options = option(get);
-options[2] = options[2] + 2^23;
-option(set, options);')
-$([ $USE_PROT -eq 1 ] && echo "option(prot);")
-option(redSB);
-ideal j = $GB_ALGORITHM_CALL(i);
-quit;
-EOF
+            ring_def="ring r = $CHARACTERISTIC,($cyclic_vars),lp;"
+            ideal_def="ideal I = cyclic($CYCLIC_N);"
             ;;
         cyclic_hom_qq_dp)
-            cat > "$filename" << EOF
-LIB "polylib.lib";
-LIB "modstd.lib";
-ring r = 0,($cyclic_vars,h),dp;
-ideal i = homog(cyclic($CYCLIC_N),h);
-$([ $SHOW_STRATEGY -eq 1 ] && echo 'intvec options = option(get);
-options[2] = options[2] + 2^23;
-option(set, options);')
-$([ $USE_PROT -eq 1 ] && echo "option(prot);")
-option(redSB);
-ideal j = $GB_ALGORITHM_CALL(i);
-quit;
-EOF
+            ring_def="ring r = 0,($cyclic_vars,h),dp;"
+            ideal_def="ideal I = homog(cyclic($CYCLIC_N),h);"
             ;;
         cyclic_hom_fp_dp)
-            cat > "$filename" << EOF
-LIB "polylib.lib";
-LIB "modstd.lib";
-ring r = $CHARACTERISTIC,($cyclic_vars,h),dp;
-ideal i = homog(cyclic($CYCLIC_N),h);
-$([ $SHOW_STRATEGY -eq 1 ] && echo 'intvec options = option(get);
-options[2] = options[2] + 2^23;
-option(set, options);')
-$([ $USE_PROT -eq 1 ] && echo "option(prot);")
-option(redSB);
-ideal j = $GB_ALGORITHM_CALL(i);
-quit;
-EOF
+            ring_def="ring r = $CHARACTERISTIC,($cyclic_vars,h),dp;"
+            ideal_def="ideal I = homog(cyclic($CYCLIC_N),h);"
             ;;
         katsura_qq_dp)
-            cat > "$filename" << EOF
-LIB "polylib.lib";
-LIB "modstd.lib";
-ring r = 0,($katsura_vars),dp;
-ideal i = katsura($KATSURA_N);
-$([ $SHOW_STRATEGY -eq 1 ] && echo 'intvec options = option(get);
-options[2] = options[2] + 2^23;
-option(set, options);')
-$([ $USE_PROT -eq 1 ] && echo "option(prot);")
-option(redSB);
-ideal j = $GB_ALGORITHM_CALL(i);
-quit;
-EOF
+            ring_def="ring r = 0,($katsura_vars),dp;"
+            ideal_def="ideal I = katsura($KATSURA_N);"
             ;;
         katsura_fp_dp)
-            cat > "$filename" << EOF
-LIB "polylib.lib";
-LIB "modstd.lib";
-ring r = $CHARACTERISTIC,($katsura_vars),dp;
-ideal i = katsura($KATSURA_N);
-$([ $SHOW_STRATEGY -eq 1 ] && echo 'intvec options = option(get);
-options[2] = options[2] + 2^23;
-option(set, options);')
-$([ $USE_PROT -eq 1 ] && echo "option(prot);")
-option(redSB);
-ideal j = $GB_ALGORITHM_CALL(i);
-quit;
-EOF
+            ring_def="ring r = $CHARACTERISTIC,($katsura_vars),dp;"
+            ideal_def="ideal I = katsura($KATSURA_N);"
             ;;
     esac
-    
+
+    cat > "$filename" << SINGEOF
+$(echo -e "$libs")
+$ring_def
+$ideal_def
+$(echo -e "$opts")
+$(echo -e "$computation")
+quit;
+SINGEOF
     echo "$filename"
+}
+
+# Function to create SSI test input file
+create_ssi_test_file() {
+    local ssi_file=$1
+    local ssi_index=$2
+    local algorithm=$3
+    local filename="$TEMP_DIR/ssi_$(basename "$ssi_file" .ssi)_idx${ssi_index}_${algorithm}.sing"
+    local GB_ALGORITHM_CALL=$(get_algorithm_call "$algorithm")
+
+    # Determine which libraries to load
+    local libs='LIB "polylib.lib";
+LIB "modstd.lib";'
+    if [ "$algorithm" == "minAssGTZ" ]; then
+        libs="$libs"'
+LIB "primdec.lib";'
+    fi
+
+    # Build options block
+    local opts=""
+    [ $SHOW_STRATEGY -eq 1 ] && opts='intvec options = option(get);
+options[2] = options[2] + 2^23;
+option(set, options);
+'
+    [ $USE_PROT -eq 1 ] && opts="${opts}option(prot);
+"
+
+    # Build computation block
+    local computation=""
+    if [ "$algorithm" == "minAssGTZ" ]; then
+        computation='timer = 1;
+int t = timer;
+list L = minAssGTZ(I);
+int elapsed = timer - t;
+"BENCHMARK_TIME:" + string(elapsed);
+"BENCHMARK_GB_SIZE:" + string(size(L));'
+    else
+        computation="timer = 1;
+int t = timer;
+option(redSB);
+ideal J = $GB_ALGORITHM_CALL(I);
+int elapsed = timer - t;
+\"BENCHMARK_TIME:\" + string(elapsed);
+\"BENCHMARK_GB_SIZE:\" + string(size(J));"
+    fi
+
+    cat > "$filename" << SINGEOF
+$libs
+// Load ideal from SSI file: $ssi_file (index $ssi_index)
+link l = "ssi:r $ssi_file";
+int ssi_idx = 0;
+while (ssi_idx <= $ssi_index)
+{
+    def d = read(l);
+    if (ssi_idx < $ssi_index) { kill d; }
+    ssi_idx = ssi_idx + 1;
+}
+close(l);
+
+// d should be an ideal or list containing an ideal
+// Try to extract the ideal depending on type
+if (typeof(d) == "ideal")
+{
+    ideal I = d;
+}
+else
+{
+    if (typeof(d) == "list")
+    {
+        // First element of list is typically the ideal
+        if (size(d) > 0 && typeof(d[1]) == "ideal")
+        {
+            ideal I = d[1];
+        }
+        else
+        {
+            "ERROR: Cannot extract ideal from list";
+            quit;
+        }
+    }
+    else
+    {
+        "ERROR: Unexpected type: " + typeof(d);
+        quit;
+    }
+}
+
+"BENCHMARK_NVARS:" + string(nvars(basering));
+"BENCHMARK_NGENS:" + string(size(I));
+
+$opts
+$computation
+quit;
+SINGEOF
+    echo "$filename"
+}
+
+# Function to create custom file test input
+create_custom_test_file() {
+    local custom_file=$1
+    local algorithm=$2
+    local filename="$TEMP_DIR/custom_$(basename "$custom_file" | sed 's/\.[^.]*$//')_${algorithm}.sing"
+    local GB_ALGORITHM_CALL=$(get_algorithm_call "$algorithm")
+
+    # Read the custom file, strip any existing computation/quit lines
+    # The file should define ring R (or r) and ideal I (or i)
+    local file_content=$(grep -v '^\s*\(ideal [GJgj]\|timer\|int t\|int elapsed\|printf\|option(redSB)\|\$\|quit\|exit\)' "$custom_file" | grep -v 'BENCHMARK_')
+
+    # Determine which libraries to load (in addition to what's in the file)
+    local extra_libs=""
+    if [ "$algorithm" == "minAssGTZ" ]; then
+        if ! grep -q 'primdec.lib' "$custom_file"; then
+            extra_libs='LIB "primdec.lib";'
+        fi
+    fi
+    if ! grep -q 'modstd.lib' "$custom_file"; then
+        extra_libs="$extra_libs"'
+LIB "modstd.lib";'
+    fi
+
+    # Build options block
+    local opts=""
+    [ $SHOW_STRATEGY -eq 1 ] && opts='intvec options = option(get);
+options[2] = options[2] + 2^23;
+option(set, options);
+'
+    [ $USE_PROT -eq 1 ] && opts="${opts}option(prot);
+"
+
+    # Build computation block - need to figure out what the ideal variable is named
+    # Convention: look for "ideal I" or "ideal i" in the file
+    local ideal_var="I"
+    if grep -q 'ideal i\b' "$custom_file" && ! grep -q 'ideal I\b' "$custom_file"; then
+        ideal_var="i"
+    fi
+
+    local computation=""
+    if [ "$algorithm" == "minAssGTZ" ]; then
+        computation="timer = 1;
+int t = timer;
+list L = minAssGTZ($ideal_var);
+int elapsed = timer - t;
+\"BENCHMARK_TIME:\" + string(elapsed);
+\"BENCHMARK_GB_SIZE:\" + string(size(L));"
+    else
+        computation="timer = 1;
+int t = timer;
+option(redSB);
+ideal J = $GB_ALGORITHM_CALL($ideal_var);
+int elapsed = timer - t;
+\"BENCHMARK_TIME:\" + string(elapsed);
+\"BENCHMARK_GB_SIZE:\" + string(size(J));"
+    fi
+
+    cat > "$filename" << SINGEOF
+$extra_libs
+$file_content
+$opts
+$computation
+quit;
+SINGEOF
+    echo "$filename"
+}
+
+# Helper to run Singular with optional timeout
+run_singular() {
+    local ld_library_path=$1
+    local singular_path=$2
+    local executable=$3
+    local input_file=$4
+    local output_file=$5
+    local perf_prefix=$6
+
+    local timeout_prefix=""
+    if [ $TIMEOUT -gt 0 ]; then
+        timeout_prefix="timeout $TIMEOUT"
+    fi
+
+    if [ -n "$ld_library_path" ]; then
+        LD_LIBRARY_PATH="$ld_library_path" SINGULARPATH="$singular_path" $timeout_prefix $perf_prefix "$executable" < "$input_file" > "$output_file" 2>&1
+    else
+        $timeout_prefix $perf_prefix "$executable" < "$input_file" > "$output_file" 2>&1
+    fi
+    return $?
 }
 
 # Function to run benchmark
@@ -609,10 +813,10 @@ run_benchmark() {
     local executable=$4
     local test_name=$5
     local input_file=$6
-    
+
     echo -e "${BLUE}Testing $version_name - $test_name${NC}"
     echo "----------------------------------------"
-    
+
     # Show input file if requested
     if [ $SHOW_INPUT -eq 1 ]; then
         echo -e "${YELLOW}Input file ($input_file):${NC}"
@@ -621,7 +825,7 @@ run_benchmark() {
         echo "- - - - - - - - - - - - - - - - - - - -"
         echo ""
     fi
-    
+
     # Perform warmup run if requested
     if [ $WARMUP_RUN -eq 1 ]; then
         echo -n "Warmup run... "
@@ -629,91 +833,114 @@ run_benchmark() {
             echo ""
             echo -e "${YELLOW}Warmup output:${NC}"
             echo "- - - - - - - - - - - - - - - - - - - -"
-            if [ -n "$ld_library_path" ]; then
-                LD_LIBRARY_PATH="$ld_library_path" SINGULARPATH="$singular_path" "$executable" < "$input_file" 2>&1 | tee "$TEMP_DIR/warmup_output.txt"
-            else
-                "$executable" < "$input_file" 2>&1 | tee "$TEMP_DIR/warmup_output.txt"
-            fi
+            run_singular "$ld_library_path" "$singular_path" "$executable" "$input_file" "$TEMP_DIR/warmup_output.txt" ""
+            cat "$TEMP_DIR/warmup_output.txt"
             echo "- - - - - - - - - - - - - - - - - - - -"
         else
-            if [ -n "$ld_library_path" ]; then
-                LD_LIBRARY_PATH="$ld_library_path" SINGULARPATH="$singular_path" "$executable" < "$input_file" > /dev/null 2>&1
-            else
-                "$executable" < "$input_file" > /dev/null 2>&1
-            fi
+            run_singular "$ld_library_path" "$singular_path" "$executable" "$input_file" "/dev/null" ""
             echo "done"
         fi
     fi
-    
+
     local times=()
+    local singular_times=()
     local total=0
+    local singular_total=0
     local had_error=0
     local was_interrupted=0
-    
+    local gb_size=""
+    local peak_mem=""
+
     # Set up trap for SIGINT (CTRL-C) to mark interruption
     trap 'was_interrupted=1' INT
-    
+
     for i in $(seq 1 $NUM_RUNS); do
         echo -n "Run $i/$NUM_RUNS... "
-        
+
         # Check if we were interrupted
         if [ $was_interrupted -eq 1 ]; then
             echo -e "${YELLOW}INTERRUPTED${NC}"
             break
         fi
-        
+
         # Prepare perf command prefix if needed
         local perf_prefix=""
         local perf_data="$TEMP_DIR/perf_${version_name}_${test_name}_run${i}.data"
         if [ $USE_PERF -eq 1 ]; then
             perf_prefix="perf record -g -o $perf_data --"
         fi
-        
+
         # Run with time measurement
         local start=$(date +%s.%N)
         local output_file="$TEMP_DIR/output_${version_name}_${test_name}_run${i}.txt"
-        
+
+        run_singular "$ld_library_path" "$singular_path" "$executable" "$input_file" "$output_file" "$perf_prefix"
+        local exit_code=$?
+        local end=$(date +%s.%N)
+
         if [ $SHOW_OUTPUT -eq 1 ]; then
             echo ""
             echo -e "${YELLOW}Output from run $i:${NC}"
             echo "- - - - - - - - - - - - - - - - - - - -"
-            if [ -n "$ld_library_path" ]; then
-                LD_LIBRARY_PATH="$ld_library_path" SINGULARPATH="$singular_path" $perf_prefix "$executable" < "$input_file" 2>&1 | tee "$output_file"
-            else
-                $perf_prefix "$executable" < "$input_file" 2>&1 | tee "$output_file"
-            fi
+            cat "$output_file"
             echo "- - - - - - - - - - - - - - - - - - - -"
-        else
-            if [ -n "$ld_library_path" ]; then
-                LD_LIBRARY_PATH="$ld_library_path" SINGULARPATH="$singular_path" $perf_prefix "$executable" < "$input_file" > "$output_file" 2>&1
-            else
-                $perf_prefix "$executable" < "$input_file" > "$output_file" 2>&1
-            fi
         fi
-        local end=$(date +%s.%N)
-        
+
         # Check if we were interrupted during execution
         if [ $was_interrupted -eq 1 ]; then
             echo -e "${YELLOW}INTERRUPTED${NC}"
             break
         fi
-        
+
+        # Check for timeout
+        if [ $exit_code -eq 124 ]; then
+            echo -e "${YELLOW}TIMEOUT (${TIMEOUT}s)${NC}"
+            echo "$version_name|$test_name|TIMEOUT|0|0|0|0" >> "$TEMP_DIR/results.txt"
+            trap - INT
+            return
+        fi
+
         # Check for errors in output
         if grep -q "? error occurred" "$output_file" 2>/dev/null; then
             had_error=1
             echo -e "${RED}ERROR${NC}"
             if [ $SHOW_OUTPUT -eq 0 ]; then
                 echo -e "${RED}Singular error:${NC}"
-                # Show context around the error (lines starting with ?)
                 grep "^   ?" "$output_file"
             fi
         else
             local runtime=$(echo "$end - $start" | bc)
             times+=($runtime)
             total=$(echo "$total + $runtime" | bc)
-            echo "Time: ${runtime}s"
+
+            # Parse Singular internal timer (BENCHMARK_TIME in ms)
+            local sing_time_ms=$(grep "^BENCHMARK_TIME:" "$output_file" | tail -1 | sed 's/BENCHMARK_TIME://')
+            if [ -n "$sing_time_ms" ]; then
+                local sing_time_s=$(echo "scale=4; $sing_time_ms / 1000" | bc)
+                singular_times+=($sing_time_s)
+                singular_total=$(echo "$singular_total + $sing_time_s" | bc)
+                echo "Wall: ${runtime}s  Singular: ${sing_time_s}s"
+            else
+                echo "Wall: ${runtime}s"
+            fi
+
+            # Parse GB/result size
+            local this_gb_size=$(grep "^BENCHMARK_GB_SIZE:" "$output_file" | tail -1 | sed 's/BENCHMARK_GB_SIZE://')
+            if [ -n "$this_gb_size" ]; then
+                gb_size="$this_gb_size"
+            fi
+
+            # Track memory if requested
+            if [ $TRACK_MEMORY -eq 1 ]; then
+                local this_peak=$(grep "^VmPeak:" "$output_file" 2>/dev/null | awk '{print $2}')
+                if [ -z "$this_peak" ]; then
+                    # Try /usr/bin/time if available - for now just report from proc
+                    # Parse from Singular's memory reporting if available
+                    :
+                fi
+            fi
         fi
-        
+
         # Show perf report if requested
         if [ $USE_PERF -eq 1 ] && [ -f "$perf_data" ] && [ $had_error -eq 0 ]; then
             echo ""
@@ -724,68 +951,107 @@ run_benchmark() {
             echo ""
         fi
     done
-    
+
     # Restore default SIGINT handler
     trap - INT
-    
+
     # Handle interruption
     if [ $was_interrupted -eq 1 ]; then
         echo ""
         echo -e "${YELLOW}Test INTERRUPTED by user${NC}"
         echo ""
-        # Store interruption marker
         echo "$version_name|$test_name|INTERRUPTED|0|0|0|0" >> "$TEMP_DIR/results.txt"
         return
     fi
-    
+
     # Only calculate statistics if we have successful runs
     if [ $had_error -eq 1 ]; then
         echo ""
         echo -e "${RED}Test FAILED - skipping statistics${NC}"
         echo ""
-        # Store failure marker
         echo "$version_name|$test_name|FAILED|0|0|0|0" >> "$TEMP_DIR/results.txt"
         return
     fi
-    
-    # Calculate statistics
-    local avg=$(echo "scale=4; $total / $NUM_RUNS" | bc)
-    
-    # Find min and max
+
+    local n_runs=${#times[@]}
+    if [ $n_runs -eq 0 ]; then
+        echo -e "${RED}No successful runs${NC}"
+        echo "$version_name|$test_name|FAILED|0|0|0|0" >> "$TEMP_DIR/results.txt"
+        return
+    fi
+
+    # Calculate wall-clock statistics
+    local avg=$(echo "scale=4; $total / $n_runs" | bc)
     local min=${times[0]}
     local max=${times[0]}
     for time in "${times[@]}"; do
-        if (( $(echo "$time < $min" | bc -l) )); then
-            min=$time
-        fi
-        if (( $(echo "$time > $max" | bc -l) )); then
-            max=$time
-        fi
+        if (( $(echo "$time < $min" | bc -l) )); then min=$time; fi
+        if (( $(echo "$time > $max" | bc -l) )); then max=$time; fi
     done
-    
-    # Calculate standard deviation
+
     local sum_sq_diff=0
     for time in "${times[@]}"; do
         local diff=$(echo "$time - $avg" | bc)
         local sq_diff=$(echo "$diff * $diff" | bc)
         sum_sq_diff=$(echo "$sum_sq_diff + $sq_diff" | bc)
     done
-    local variance=$(echo "scale=6; $sum_sq_diff / $NUM_RUNS" | bc)
+    local variance=$(echo "scale=6; $sum_sq_diff / $n_runs" | bc)
     local stddev=$(echo "scale=4; sqrt($variance)" | bc)
-    
-    if [ $NUM_RUNS -gt 1 ]; then
+
+    # Calculate Singular timer statistics if available
+    local sing_avg="" sing_stddev="" sing_min="" sing_max=""
+    if [ ${#singular_times[@]} -gt 0 ]; then
+        sing_avg=$(echo "scale=4; $singular_total / ${#singular_times[@]}" | bc)
+        sing_min=${singular_times[0]}
+        sing_max=${singular_times[0]}
+        for st in "${singular_times[@]}"; do
+            if (( $(echo "$st < $sing_min" | bc -l) )); then sing_min=$st; fi
+            if (( $(echo "$st > $sing_max" | bc -l) )); then sing_max=$st; fi
+        done
+        local sing_sq_diff=0
+        for st in "${singular_times[@]}"; do
+            local sd=$(echo "$st - $sing_avg" | bc)
+            local ssq=$(echo "$sd * $sd" | bc)
+            sing_sq_diff=$(echo "$sing_sq_diff + $ssq" | bc)
+        done
+        local sing_var=$(echo "scale=6; $sing_sq_diff / ${#singular_times[@]}" | bc)
+        sing_stddev=$(echo "scale=4; sqrt($sing_var)" | bc)
+    fi
+
+    if [ $n_runs -gt 1 ] || [ -n "$gb_size" ]; then
         echo ""
-        echo -e "${GREEN}Results:${NC}"
+        echo -e "${GREEN}Results (wall-clock):${NC}"
         echo "  Average: ${avg}s"
-        echo "  Std Dev: ${stddev}s"
+        [ $n_runs -gt 1 ] && echo "  Std Dev: ${stddev}s"
         echo "  Min:     ${min}s"
         echo "  Max:     ${max}s"
-        echo "  Total:   ${total}s"
+        if [ -n "$sing_avg" ]; then
+            echo -e "${GREEN}Results (Singular timer):${NC}"
+            echo "  Average: ${sing_avg}s"
+            [ ${#singular_times[@]} -gt 1 ] && echo "  Std Dev: ${sing_stddev}s"
+            echo "  Min:     ${sing_min}s"
+            echo "  Max:     ${sing_max}s"
+            local overhead=$(echo "scale=4; $avg - $sing_avg" | bc)
+            echo "  Overhead (startup): ${overhead}s"
+        fi
+        [ -n "$gb_size" ] && echo "  Result size: $gb_size"
         echo ""
     fi
-    
-    # Store results for summary
-    echo "$version_name|$test_name|$avg|$stddev|$min|$max|$total" >> "$TEMP_DIR/results.txt"
+
+    # Store results - use Singular timer if available, otherwise wall-clock
+    local result_avg="$avg"
+    local result_stddev="$stddev"
+    local result_min="$min"
+    local result_max="$max"
+    local result_total="$total"
+    if [ -n "$sing_avg" ]; then
+        result_avg="$sing_avg"
+        result_stddev="$sing_stddev"
+        result_min="$sing_min"
+        result_max="$sing_max"
+        result_total="$singular_total"
+    fi
+    echo "$version_name|$test_name|$result_avg|$result_stddev|$result_min|$result_max|$result_total" >> "$TEMP_DIR/results.txt"
 }
 
 # Initialize results file
@@ -864,6 +1130,49 @@ for base_test in "${BASE_TESTS[@]}"; do
     done
 done
 
+# Add SSI file tests
+for idx in "${!SSI_FILES[@]}"; do
+    ssi_file="${SSI_FILES[$idx]}"
+    ssi_index="${SSI_INDICES[$idx]}"
+    ssi_basename=$(basename "$ssi_file" .ssi)
+    # SSI files define their own ring, determine char from file content
+    # For algorithm selection, treat as generic (allow any algorithm specified)
+    if [ -z "$RAW_ALGORITHMS" ]; then
+        RAW_ALGORITHMS="std"
+    fi
+    # SSI tests can use any explicitly specified algorithm
+    IFS=',' read -ra ssi_algs <<< "$RAW_ALGORITHMS"
+    if [ "$RAW_ALGORITHMS" == "all" ]; then
+        ssi_algs=(std slimgb sba modstd minAssGTZ)
+    fi
+    for algorithm in "${ssi_algs[@]}"; do
+        test_name="ssi-${ssi_basename}-idx${ssi_index}-${algorithm}"
+        TESTS_TO_RUN+=("${test_name}:$(create_ssi_test_file "$ssi_file" "$ssi_index" "$algorithm")")
+    done
+done
+
+# Add custom file tests
+for custom_file in "${CUSTOM_FILES[@]}"; do
+    custom_basename=$(basename "$custom_file" | sed 's/\.[^.]*$//')
+    # Determine characteristic from file content for algorithm validation
+    local_char=$(grep -oP 'ring\s+\w+\s*=\s*\K[0-9]+' "$custom_file" | head -1)
+    if [ -z "$RAW_ALGORITHMS" ]; then
+        RAW_ALGORITHMS="std"
+    fi
+    IFS=',' read -ra custom_algs <<< "$RAW_ALGORITHMS"
+    if [ "$RAW_ALGORITHMS" == "all" ]; then
+        if [ "$local_char" == "0" ]; then
+            custom_algs=(std modstd slimgb sba minAssGTZ)
+        else
+            custom_algs=(std mathicgb slimgb sba minAssGTZ)
+        fi
+    fi
+    for algorithm in "${custom_algs[@]}"; do
+        test_name="file-${custom_basename}-${algorithm}"
+        TESTS_TO_RUN+=("${test_name}:$(create_custom_test_file "$custom_file" "$algorithm")")
+    done
+done
+
 if [ ${#TESTS_TO_RUN[@]} -eq 0 ]; then
     echo -e "${RED}No tests selected to run!${NC}"
     echo "Use --help to see available options"
@@ -907,6 +1216,8 @@ while IFS='|' read -r version test avg stddev min max total; do
             version_failed["$version|$test"]=1
         elif [ "$avg" == "INTERRUPTED" ]; then
             version_interrupted["$version|$test"]=1
+        elif [ "$avg" == "TIMEOUT" ]; then
+            version_failed["$version|$test"]="TIMEOUT"
         else
             version_times["$version|$test"]="$avg"
             version_stddev["$version|$test"]="$stddev"
@@ -924,6 +1235,10 @@ for key in "${!version_failed[@]}"; do
     test=$(echo "$key" | cut -d'|' -f2)
     test_set["$test"]=1
 done
+for key in "${!version_interrupted[@]}"; do
+    test=$(echo "$key" | cut -d'|' -f2)
+    test_set["$test"]=1
+done
 
 # Print comparison table (text format)
 if [ ${#SINGULAR_EXECS[@]} -eq 1 ]; then
@@ -934,7 +1249,9 @@ if [ ${#SINGULAR_EXECS[@]} -eq 1 ]; then
     
     for test in "${!test_set[@]}"; do
         key="${SINGULAR_NAMES[0]}|$test"
-        if [ "${version_failed[$key]}" == "1" ]; then
+        if [ "${version_failed[$key]}" == "TIMEOUT" ]; then
+            printf "%-40s %-20s\n" "$test" "TIMEOUT"
+        elif [ "${version_failed[$key]}" == "1" ]; then
             printf "%-40s %-20s\n" "$test" "FAILED"
         else
             time="${version_times[$key]}"
@@ -970,7 +1287,11 @@ else
         declare -a test_failed
         for name in "${SINGULAR_NAMES[@]}"; do
             key="$name|$test"
-            if [ "${version_failed[$key]}" == "1" ]; then
+            if [ "${version_failed[$key]}" == "TIMEOUT" ]; then
+                printf " %-25s" "TIMEOUT"
+                test_failed+=(1)
+                test_times+=(0)
+            elif [ "${version_failed[$key]}" == "1" ]; then
                 printf " %-25s" "FAILED"
                 test_failed+=(1)
                 test_times+=(0)
@@ -1038,8 +1359,10 @@ MDEOF
     
     for test in "${sorted_tests[@]}"; do
         key="${SINGULAR_NAMES[0]}|$test"
-        
-        if [ "${version_failed[$key]}" == "1" ]; then
+
+        if [ "${version_failed[$key]}" == "TIMEOUT" ]; then
+            echo "| $test | TIMEOUT |" >> "$MARKDOWN_FILE"
+        elif [ "${version_failed[$key]}" == "1" ]; then
             echo "| $test | FAILED |" >> "$MARKDOWN_FILE"
         else
             time="${version_times[$key]}"
@@ -1073,8 +1396,10 @@ MDEOF
         
         for name in "${SINGULAR_NAMES[@]}"; do
             key="$name|$test"
-            
-            if [ "${version_failed[$key]}" == "1" ]; then
+
+            if [ "${version_failed[$key]}" == "TIMEOUT" ]; then
+                echo -n " TIMEOUT |" >> "$MARKDOWN_FILE"
+            elif [ "${version_failed[$key]}" == "1" ]; then
                 echo -n " FAILED |" >> "$MARKDOWN_FILE"
             else
                 time="${version_times[$key]}"
