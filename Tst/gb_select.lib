@@ -1,0 +1,69 @@
+///////////////////////////////////////////////////////////////////////////////
+version="version gb_select.lib 0.1 Feb 2026 ";
+category="Groebner Basis";
+info="
+LIBRARY:  gb_select.lib  Select Groebner basis algorithm for testing
+AUTHOR:   Brent Baccala
+
+OVERVIEW:
+  Provides a mechanism to override the std() function with a different
+  Groebner basis algorithm for testing purposes.
+
+  Load this library with a string variable gb_algorithm already set
+  to one of: \"std\", \"sba\", \"slimgb\", \"mathicgb\", \"groebner\"
+
+  Example usage:
+    Singular --execute 'string gb_algorithm=\"sba\"; LIB \"gb_select.lib\";' < test.tst
+
+PROCEDURES:
+  gb_select_std(i)   replacement for std() that dispatches to selected algorithm
+";
+
+LIB "standard.lib";
+
+static proc mod_init()
+{
+  if (!defined(gb_algorithm))
+  {
+    string gb_algorithm = "std";
+    export(gb_algorithm);
+  }
+}
+
+proc gb_select_std(def i, list #)
+"USAGE:   gb_select_std(i); i ideal or module
+RETURN:  standard basis of i using the algorithm selected by gb_algorithm
+NOTE:    gb_algorithm can be: std, sba, slimgb, mathicgb, groebner
+"
+{
+  if (gb_algorithm == "std")
+  {
+    return(std(i));
+  }
+  if (gb_algorithm == "sba")
+  {
+    // sba(ideal, int method, int deg_bound)
+    // method 0 = default, deg_bound 0 = no bound
+    return(sba(i, 0, 0));
+  }
+  if (gb_algorithm == "slimgb")
+  {
+    return(slimgb(i));
+  }
+  if (gb_algorithm == "mathicgb")
+  {
+    if (defined(Singmathic))
+    {
+      return(mathicgb(i));
+    }
+    else
+    {
+      ERROR("mathicgb not available - Singular not compiled with mathicgb support");
+    }
+  }
+  if (gb_algorithm == "groebner")
+  {
+    return(groebner(i));
+  }
+  ERROR("Unknown gb_algorithm: " + gb_algorithm);
+}
