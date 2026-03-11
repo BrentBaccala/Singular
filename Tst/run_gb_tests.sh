@@ -228,14 +228,22 @@ for testfile in "${TESTS[@]}"; do
             -e '/^\/\/ hostname:/d' -e '/^\/\/ sysname:/d' \
             -e '/^\/\/ \*\* loaded/d' -e '/^\/\/ \*\* library/d' \
             -e '/^\/\/ \*\* redefining/d' \
+            -e '/>> tst_memory/d' -e '/>> tst_timer/d' \
             -e '/^STDIN /d' \
+            -e 's|[^ ]*standard\.lib::|standard.lib::|g' \
+            -e 's|standard\.lib::\([a-zA-Z_]*\) line [0-9]*|standard.lib::\1 line NNN|g' \
+            -e 's|standard\.lib::\([a-zA-Z_]*\) ([0-9]*)|standard.lib::\1 (NNN)|g' \
             "$reffile" > "$RESULTS_DIR/${testname}.res.expected.clean" 2>/dev/null
         sed -e '/used time:/d' -e '/tst_status/d' -e '/^Singular/d' \
             -e '/\$Id/d' -e '/init >>/d' -e '/^\/\/ computer:/d' \
             -e '/^\/\/ hostname:/d' -e '/^\/\/ sysname:/d' \
             -e '/^\/\/ \*\* loaded/d' -e '/^\/\/ \*\* library/d' \
             -e '/^\/\/ \*\* redefining/d' \
+            -e '/>> tst_memory/d' -e '/>> tst_timer/d' \
             -e '/^STDIN /d' \
+            -e 's|[^ ]*standard\.lib::|standard.lib::|g' \
+            -e 's|standard\.lib::\([a-zA-Z_]*\) line [0-9]*|standard.lib::\1 line NNN|g' \
+            -e 's|standard\.lib::\([a-zA-Z_]*\) ([0-9]*)|standard.lib::\1 (NNN)|g' \
             "$newresfile" > "$RESULTS_DIR/${testname}.res.new.clean" 2>/dev/null
 
         if diff -w -b "$RESULTS_DIR/${testname}.res.expected.clean" \
