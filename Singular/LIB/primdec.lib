@@ -1174,7 +1174,7 @@ example
    poly  p = z2+1;
    poly  q = z4+2;
    ideal i = p^2*q^3,(y-z3)^3,(x-yz+z4)^4;
-   i=std(i);
+   i=groebner(i);
    list  pr= zero_decomp(i,ideal(0),0);
    pr;
 }
@@ -1644,7 +1644,7 @@ example
 { "EXAMPLE:"; echo = 2;
    ring s1=(0,x,y),(a,b,c,d,e,f,g),lp;
    ideal i=ea-fbg,fa+be,ec-fdg,fc+de;
-   i=std(i);
+   i=groebner(i);
    list  l=independSet(i);
    l;
    i=i,g;
@@ -1714,7 +1714,7 @@ example
 { "EXAMPLE:"; echo = 2;
    ring s1=(0,x,y),(a,b,c,d,e,f,g),lp;
    ideal i=ea-fbg,fa+be,ec-fdg,fc+de;
-   i=std(i);
+   i=groebner(i);
    list  l=maxIndependSet(i);
    l;
    i=i,g;
@@ -2204,7 +2204,7 @@ static proc minAssPrimes_i(int patchPrimaryDecomposition, ideal i, list #)
           }
           for(j = 1; j <= size(qr) div 2; j++)
           {
-            re[size(re) + 1] = std(qr[2 * j]);
+            re[size(re) + 1] = groebner(qr[2 * j]);
           }
         }
       }
@@ -7192,7 +7192,7 @@ example
 { "EXAMPLE:"; echo = 2;
    ring s1 = (0, x, y), (a, b, c, d, e, f, g), lp;
    ideal i = ea - fbg, fa + be, ec - fdg, fc + de;
-   i = std(i);
+   i = groebner(i);
    list l = newMaxIndependSetDp(i);
    l;
    i = i, g;
@@ -8910,7 +8910,7 @@ example
 { "EXAMPLE:"; echo = 2;
    ring s1 = (0, x, y), (a, b, c, d, e, f, g), lp;
    ideal i = ea - fbg, fa + be, ec - fdg, fc + de;
-   i = std(i);
+   i = groebner(i);
    list l = newMaxIndependSetLp(i);
    l;
    i = i, g;
@@ -9271,7 +9271,7 @@ example
    poly  p = z2+1;
    poly  q = z4+2;
    ideal i = p^2*q^3,(y-z3)^3,(x-yz+z4)^4;
-   i=std(i);
+   i=groebner(i);
    list  pr= newZero_decomp(i,ideal(0),0);
    pr;
 }
