@@ -880,7 +880,7 @@ EXAMPLE: example groebner;  shows an example"
   }
 
 //----------------------- save the given method ---------------------------
-  string method;                //all given methods as a coma separated string
+  string method;                //all given methods as a comma separated string
   int k;
   for (k=1; k<=size(#); k++)
   {
@@ -888,6 +888,12 @@ EXAMPLE: example groebner;  shows an example"
      {
        method = method + "," + #[k];
      }
+  }
+
+  // If no method specified and a global default is set, use it
+  if (size(method) == 0 && defined(groebner_default_method))
+  {
+    method = "," + groebner_default_method;
   }
 
 //--------------------- save data from basering ---------------------------
@@ -943,6 +949,15 @@ EXAMPLE: example groebner;  shows an example"
 //ideal or module, global ordering, no matrix ordering, no extra weight vector
 //The interesting cases start now.
 
+  //--- handle sba method: dispatch directly if requested ---
+  if (find(method, "sba"))
+  {
+    if (p_opt) { "sba in " + string(P); }
+    i = sba(i);
+    option(set,opt);
+    return(i);
+  }
+
  //------------------ classify the possible settings ---------------------
   string algorithm;       //possibilities: std, slimgb, stdorslimgb, mathicgb
   string conversion;      //possibilities: hilb, fglm, hilborfglm, no
@@ -970,9 +985,13 @@ EXAMPLE: example groebner;  shows an example"
     algorithm = "slimgb";
   }
   if( find(method,"std") && find(method,"slimgb") ||
-      (!find(method,"std") && !find(method,"slimgb")) )
+      (!find(method,"std") && !find(method,"slimgb") && !find(method,"mathicgb")) )
   {
     algorithm = "stdorslimgb";
+  }
+  if( find(method,"mathicgb") )
+  {
+    algorithm = "mathicgb";
   }
 
   //define conversion:
