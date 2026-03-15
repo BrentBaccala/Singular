@@ -1380,6 +1380,7 @@ static void enterOnePairRing (int i,poly p,int /*ecart*/, int isFromQ,kStrategy 
       return;
   }
   h.lcm = p_Lcm(p,strat->S[i],currRing);
+  h.sev_lcm = p_GetShortExpVector(h.lcm, currRing);
   pSetCoeff0(h.lcm, n_Lcm(pGetCoeff(p), pGetCoeff(strat->S[i]), currRing->cf));
   if (nIsZero(pGetCoeff(h.lcm)))
   {
@@ -1959,6 +1960,7 @@ void enterOnePairNormal (int i,poly p,int ecart, int isFromQ,kStrategy strat, in
     pLcm(p,strat->S[i],Lp.lcm);
 #endif
   pSetm(Lp.lcm);
+  Lp.sev_lcm = p_GetShortExpVector(Lp.lcm, currRing);
 
 
   if (strat->sugarCrit && ALLOW_PROD_CRIT(strat))
@@ -2237,6 +2239,7 @@ static void enterOnePairLift (int i,poly p,int ecart, int isFromQ,kStrategy stra
 #endif
   /*- computes the lcm(s[i],p) -*/
   Lp.lcm = p_Lcm(p,strat->S[i],currRing);
+  Lp.sev_lcm = p_GetShortExpVector(Lp.lcm, currRing);
 
   if (strat->sugarCrit)
   {
@@ -2458,6 +2461,7 @@ static void enterOnePairSig (int i, poly p, poly pSig, int, int ecart, int isFro
     pLcm(p,strat->S[i],Lp.lcm);
 #endif
   pSetm(Lp.lcm);
+  Lp.sev_lcm = p_GetShortExpVector(Lp.lcm, currRing);
 
   // set coeffs of multipliers m1 and m2
   pSetCoeff0(m1, nInit(1));
@@ -2731,6 +2735,7 @@ static void enterOnePairSigRing (int i, poly p, poly pSig, int, int ecart, int i
     pLcm(p,strat->S[i],Lp.lcm);
 #endif
   pSetm(Lp.lcm);
+  Lp.sev_lcm = p_GetShortExpVector(Lp.lcm, currRing);
 
   // set coeffs of multipliers m1 and m2
   if(rField_is_Ring(currRing))
@@ -3103,6 +3108,7 @@ void enterOnePairSpecial (int i,poly p,int ecart,kStrategy strat, int atR = -1)
   Lp.i_r = -1;
 
   Lp.lcm = p_Lcm(p,strat->S[i],currRing);
+  Lp.sev_lcm = p_GetShortExpVector(Lp.lcm, currRing);
   /*-  compute the short s-polynomial -*/
 
   #ifdef HAVE_PLURAL
@@ -3192,6 +3198,7 @@ std::vector<LSet::iterator> kMergeBintoL_and_return_iterators(kStrategy strat)
 void chainCritNormal (poly p,int ecart,kStrategy strat)
 {
   int j;
+  unsigned long sev_p = p_GetShortExpVector(p, currRing);
 
   /*
   *pairtest[i] is TRUE if spoly(S[i],p) == 0.
@@ -3231,7 +3238,8 @@ void chainCritNormal (poly p,int ecart,kStrategy strat)
         {
           for (auto it = strat->B.begin(); it != strat->B.end(); )
           {
-            if (pDivisibleBy(strat->S[j],it->lcm))
+            if (!(strat->sevS[j] & ~it->sev_lcm)
+            && pDivisibleBy(strat->S[j],it->lcm))
             {
               it = strat->B.erase(it);
               strat->c3++;
@@ -3256,7 +3264,8 @@ void chainCritNormal (poly p,int ecart,kStrategy strat)
     */
       for (auto it = strat->L.begin(); it != strat->L.end(); )
       {
-        if (sugarDivisibleBy(ecart,it->ecart)
+        if (!(sev_p & ~it->sev_lcm)
+        && sugarDivisibleBy(ecart,it->ecart)
         && ((it->p == strat->tail) || (rHasGlobalOrdering(currRing)))
         && pCompareChain(p,it->p1,it->p2,it->lcm))
         {
@@ -3310,7 +3319,8 @@ void chainCritNormal (poly p,int ecart,kStrategy strat)
       */
       for (auto jt = strat->L.begin(); jt != strat->L.end(); )
       {
-        if (pCompareChain(p,jt->p1,jt->p2,jt->lcm))
+        if (!(sev_p & ~jt->sev_lcm)
+        && pCompareChain(p,jt->p1,jt->p2,jt->lcm))
         {
           if ((pNext(jt->p) == strat->tail)||(rHasGlobalOrdering(currRing)))
           {
@@ -3352,10 +3362,12 @@ void chainCritNormal (poly p,int ecart,kStrategy strat)
     for (auto jt = strat->L.begin(); jt != strat->L.end(); )
     {
       #ifdef HAVE_SHIFTBBA
-      if ((jt->p1!=NULL) &&
+      if (!(sev_p & ~jt->sev_lcm)
+      && (jt->p1!=NULL) &&
       pCompareChain(p,jt->p1,jt->p2,jt->lcm))
       #else
-      if (pCompareChain(p,jt->p1,jt->p2,jt->lcm))
+      if (!(sev_p & ~jt->sev_lcm)
+      && pCompareChain(p,jt->p1,jt->p2,jt->lcm))
       #endif
       {
         if ((pNext(jt->p) == strat->tail)||(rHasGlobalOrdering(currRing)))
@@ -11693,6 +11705,7 @@ BOOLEAN enterOnePairShift (poly q, poly p, int ecart, int isFromQ, kStrategy str
 #endif
   /*- computes the lcm(s[i],p) -*/
   Lp.lcm = p_Lcm(p,q, currRing); // q is what was strat->S[i], so a poly in LM/TR presentation
+  Lp.sev_lcm = p_GetShortExpVector(Lp.lcm, currRing);
 
   /* the V criterion */
   if (!pmIsInV(Lp.lcm))
