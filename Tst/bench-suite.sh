@@ -26,6 +26,7 @@ NUMACTL_ARGS=""
 TASKSET_ARGS=""
 SKIP_CLASSIFY=0
 SKIP_TO=""
+APPEND=0
 LISTFILES=()
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
@@ -43,6 +44,7 @@ while [[ $# -gt 0 ]]; do
         --taskset) TASKSET_ARGS="$2"; shift 2 ;;
         --skip-classify) SKIP_CLASSIFY=1; shift ;;
         --skip-to) SKIP_TO="$2"; shift 2 ;;
+        --append) APPEND=1; shift ;;
         *) LISTFILES+=("$1"); shift ;;
     esac
 done
@@ -78,9 +80,10 @@ collect_tests() {
         local dir
         dir=$(dirname "$listfile")
         while IFS= read -r line; do
-            # Skip empty lines and comments
+            # Skip empty lines, comments, and disabled tests (;prefix)
             [[ -z "$line" ]] && continue
             [[ "$line" =~ ^# ]] && continue
+            [[ "$line" =~ ^';' ]] && continue
             # Strip trailing whitespace
             line=$(echo "$line" | sed 's/[[:space:]]*$//')
             local testpath="${dir}/${line}.tst"
@@ -253,8 +256,12 @@ main() {
     # Output CSV
     local csv_out
     if [[ -n "$OUTPUT" ]]; then
-        csv_header > "$OUTPUT"
-        csv_out="$OUTPUT"
+        if [[ $APPEND -eq 1 && -f "$OUTPUT" ]]; then
+            csv_out="$OUTPUT"
+        else
+            csv_header > "$OUTPUT"
+            csv_out="$OUTPUT"
+        fi
     else
         csv_header
     fi
