@@ -132,7 +132,7 @@ CLASSIFY_SINGULAR="${BUILD_COMMANDS[0]}"
 
 # CSV header
 csv_header() {
-    echo "build,test_name,class,iterations,run,total_time_ms,per_iter_ms,clean_exit,list_file"
+    echo "build,test_name,class,iterations,run,warmup_cpu_us,warmup_wall_us,cpu_us,wall_us,ext_wall_ns,clean_exit,list_file"
 }
 
 # Collect tests from all list files
@@ -205,7 +205,7 @@ benchmark_test() {
     local iters="${TEST_ITERS[$key]}"
 
     if [[ "$class" == "FAIL" ]]; then
-        echo "${build_name},${testfile},FAIL,0,${run_num},0,0,no,${listfile}"
+        echo "${build_name},${testfile},FAIL,0,${run_num},0,0,0,0,0,no,${listfile}"
         return
     fi
 
@@ -224,41 +224,44 @@ benchmark_test() {
         "'$WRAPPER' --class '$class' --iterations '$iters' '$testfile' | $full_cmd 2>&1") || exit_code=$?
     end_ns=$(date +%s%N)
 
-    local bench_time=0
+    local warmup_cpu_us=0
+    local warmup_wall_us=0
+    local cpu_us=0
+    local wall_us=0
+    local ext_wall_ns=$(( end_ns - start_ns ))
     local clean="yes"
 
     if [[ $exit_code -ne 0 ]]; then
         clean="no"
     fi
 
-    # Extract BENCH_TIME from Singular's timer
-    local bench_line
-    bench_line=$(echo "$output" | grep '^BENCH_TIME:' | tail -1) || true
-
-    if [[ -n "$bench_line" ]]; then
-        bench_time=$(echo "$bench_line" | sed 's/BENCH_TIME:[[:space:]]*//' | tr -d '[:space:]')
-        if ! [[ "$bench_time" =~ ^-?[0-9]+$ ]]; then
-            bench_time=0
+    # Extract all four Singular timers (microseconds)
+    extract_timer() {
+        local label="$1"
+        local line
+        line=$(echo "$output" | grep "^${label}:" | tail -1) || true
+        if [[ -n "$line" ]]; then
+            local val
+            val=$(echo "$line" | sed "s/${label}:[[:space:]]*//" | tr -d '[:space:]')
+            if [[ "$val" =~ ^-?[0-9]+$ ]]; then
+                echo "$val"
+                return
+            fi
         fi
-    fi
+        echo "0"
+    }
 
-    # Wall-clock fallback if Singular's timer didn't report
-    if [[ $bench_time -eq 0 && $exit_code -eq 0 ]]; then
-        bench_time=$(( (end_ns - start_ns) / 1000000 ))
-    fi
+    warmup_cpu_us=$(extract_timer "BENCH_WARMUP_CPU")
+    warmup_wall_us=$(extract_timer "BENCH_WARMUP_WALL")
+    cpu_us=$(extract_timer "BENCH_CPU")
+    wall_us=$(extract_timer "BENCH_WALL")
 
     # Check for errors in output (but not warnings)
     if echo "$output" | grep -qi '^ *\? error\|^   \? Segment\|SIGSEGV\|Abort'; then
         clean="no"
     fi
 
-    # Calculate per-iteration time
-    local per_iter=0
-    if [[ $iters -gt 0 && $bench_time -gt 0 ]]; then
-        per_iter=$(( bench_time / iters ))
-    fi
-
-    echo "${build_name},${testfile},${class},${iters},${run_num},${bench_time},${per_iter},${clean},${listfile}"
+    echo "${build_name},${testfile},${class},${iters},${run_num},${warmup_cpu_us},${warmup_wall_us},${cpu_us},${wall_us},${ext_wall_ns},${clean},${listfile}"
 }
 
 # Load classification from file (keys are filenames, not paths)
@@ -436,7 +439,7 @@ main() {
                 fi
 
                 local clean
-                clean=$(echo "$result" | cut -d, -f8)
+                clean=$(echo "$result" | cut -d, -f11)
                 if [[ "$clean" == "yes" ]]; then
                     success=$((success + 1))
                     echo "done" >&2

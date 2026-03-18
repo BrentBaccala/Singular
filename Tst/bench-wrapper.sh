@@ -55,27 +55,30 @@ case "$CLASS" in
         # Uses "execute" approach: load body into string, execute in loop
         # This avoids redefinition issues for some cases
         cat <<'HEADER'
-system("--ticks-per-sec", 1000);
+system("--ticks-per-sec", 1000000);
 HEADER
         # Emit the test body once outside the loop for definitions,
         # then time repeated executions. Actually, for Class A we just
         # wrap in a simple loop. Variable redefinitions will be caught
         # by the classifier.
         echo "int benchX_N = $ITERATIONS;"
-        # Warmup: one untimed iteration for library loading and cache priming
+        # Warmup: one timed iteration for library loading and cache priming
+        echo 'int benchX_wc = timer; int benchX_ww = rtimer;'
         strip_test_body "$TESTFILE"
-        echo 'int benchX_start = timer;'
+        echo '"BENCH_WARMUP_CPU:", timer - benchX_wc;'
+        echo '"BENCH_WARMUP_WALL:", rtimer - benchX_ww;'
+        echo 'int benchX_c = timer; int benchX_w = rtimer;'
         echo 'for (int benchX_i = 1; benchX_i <= benchX_N; benchX_i++) {'
         strip_test_body "$TESTFILE"
         echo '}'
-        echo 'int benchX_end = timer;'
-        echo '"BENCH_TIME:", benchX_end - benchX_start;'
+        echo '"BENCH_CPU:", timer - benchX_c;'
+        echo '"BENCH_WALL:", rtimer - benchX_w;'
         echo 'exit;'
         ;;
     B)
         # Class B: Proc wrapper - wrap body in a proc for local scope
         cat <<'HEADER'
-system("--ticks-per-sec", 1000);
+system("--ticks-per-sec", 1000000);
 HEADER
         # Extract LIB lines and put them outside the proc
         grep -E '^[[:space:]]*LIB[[:space:]]+' "$TESTFILE" | grep -v 'tst\.lib' || true
@@ -85,40 +88,48 @@ HEADER
         echo '  return();'
         echo '}'
         echo "int benchX_N = $ITERATIONS;"
-        # Warmup: one untimed iteration for library loading and cache priming
+        # Warmup: one timed iteration for library loading and cache priming
+        echo 'int benchX_wc = timer; int benchX_ww = rtimer;'
         echo '  benchX_body();'
-        echo 'int benchX_start = timer;'
+        echo '"BENCH_WARMUP_CPU:", timer - benchX_wc;'
+        echo '"BENCH_WARMUP_WALL:", rtimer - benchX_ww;'
+        echo 'int benchX_c = timer; int benchX_w = rtimer;'
         echo 'for (int benchX_i = 1; benchX_i <= benchX_N; benchX_i++) {'
         echo '  benchX_body();'
         echo '}'
-        echo 'int benchX_end = timer;'
-        echo '"BENCH_TIME:", benchX_end - benchX_start;'
+        echo '"BENCH_CPU:", timer - benchX_c;'
+        echo '"BENCH_WALL:", rtimer - benchX_w;'
         echo 'exit;'
         ;;
     C)
         # Class C: Single run - just time one execution (no warmup)
         cat <<'HEADER'
-system("--ticks-per-sec", 1000);
-int benchX_start = timer;
+system("--ticks-per-sec", 1000000);
+int benchX_c = timer; int benchX_w = rtimer;
 HEADER
         strip_test_body "$TESTFILE"
-        echo 'int benchX_end = timer;'
-        echo '"BENCH_TIME:", benchX_end - benchX_start;'
+        echo '"BENCH_WARMUP_CPU:", 0;'
+        echo '"BENCH_WARMUP_WALL:", 0;'
+        echo '"BENCH_CPU:", timer - benchX_c;'
+        echo '"BENCH_WALL:", rtimer - benchX_w;'
         echo 'exit;'
         ;;
     D)
         # Class D: Concatenate file N times
         cat <<'HEADER'
-system("--ticks-per-sec", 1000);
+system("--ticks-per-sec", 1000000);
 HEADER
-        # Warmup: one untimed iteration
+        # Warmup: one timed iteration
+        echo 'int benchX_wc = timer; int benchX_ww = rtimer;'
         strip_test_body "$TESTFILE"
-        echo 'int benchX_start = timer;'
+        echo '"BENCH_WARMUP_CPU:", timer - benchX_wc;'
+        echo '"BENCH_WARMUP_WALL:", rtimer - benchX_ww;'
+        echo 'int benchX_c = timer; int benchX_w = rtimer;'
         for ((i = 1; i <= ITERATIONS; i++)); do
             strip_test_body "$TESTFILE"
         done
-        echo 'int benchX_end = timer;'
-        echo '"BENCH_TIME:", benchX_end - benchX_start;'
+        echo '"BENCH_CPU:", timer - benchX_c;'
+        echo '"BENCH_WALL:", rtimer - benchX_w;'
         echo 'exit;'
         ;;
     *)
