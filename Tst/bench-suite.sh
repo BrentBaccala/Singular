@@ -26,6 +26,7 @@
 #   --numactl ARGS      numactl arguments (e.g., "--membind=1")
 #   --taskset ARGS      taskset arguments (e.g., "-c 11")
 #   --save-classify     Write classification files after classifying new tests
+#   --classify-from F   Load classifications from file F (read-only)
 #   --skip-to TEST      Skip tests until TEST is reached (resume)
 #   --append            Append to output file instead of overwriting
 
@@ -38,6 +39,7 @@ OUTPUT=""
 NUMACTL_ARGS=""
 TASKSET_ARGS=""
 SAVE_CLASSIFY=0
+CLASSIFY_FROM=""
 SKIP_TO=""
 APPEND=0
 LISTFILES=()
@@ -61,6 +63,7 @@ while [[ $# -gt 0 ]]; do
         --numactl) NUMACTL_ARGS="$2"; shift 2 ;;
         --taskset) TASKSET_ARGS="$2"; shift 2 ;;
         --save-classify) SAVE_CLASSIFY=1; shift ;;
+        --classify-from) CLASSIFY_FROM="$2"; shift 2 ;;
         --skip-to) SKIP_TO="$2"; shift 2 ;;
         --append) APPEND=1; shift ;;
         --) parsing_builds=0; shift ;;
@@ -319,6 +322,12 @@ main() {
     done
     echo "Target time: ${TARGET_TIME}s, Timeout: ${TIMEOUT}s" >&2
     echo "" >&2
+
+    # Load explicit classification file if given
+    if [[ -n "$CLASSIFY_FROM" && -f "$CLASSIFY_FROM" ]]; then
+        echo "Loading classification from $CLASSIFY_FROM" >&2
+        load_classification "$CLASSIFY_FROM"
+    fi
 
     # Auto-load classification files for each list file
     for listfile in "${LISTFILES[@]}"; do
