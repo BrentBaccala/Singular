@@ -9,15 +9,23 @@
 #     spielwiese=/home/claude/Singular/install/bin/Singular
 #     spielwiese-mimalloc="LD_PRELOAD=/usr/lib/libmimalloc.so /home/claude/Singular/install/bin/Singular"
 #
+# Classification:
+#   For each LISTFILE, looks for a classification file in the same directory
+#   named by replacing .lst with _classification.csv (e.g., ok_s.lst ->
+#   ok_s_classification.csv). Auto-loads if found. Tests not in any
+#   classification file are classified on the fly.
+#
+#   Use --save-classify to write/update classification files after classifying.
+#   Without this flag, classification files are never modified.
+#
 # Options:
 #   -n RUNS             Number of runs per test (default: 1)
 #   --target-time SECS  Target time per test for calibration (default: 20)
 #   --timeout SECS      Timeout per individual run (default: 300)
 #   --output FILE       CSV output file (default: stdout)
-#   --classify-file F   Save/load classification from file
 #   --numactl ARGS      numactl arguments (e.g., "--membind=1")
 #   --taskset ARGS      taskset arguments (e.g., "-c 11")
-#   --skip-classify     Skip classification, load from --classify-file
+#   --save-classify     Write classification files after classifying new tests
 #   --skip-to TEST      Skip tests until TEST is reached (resume)
 #   --append            Append to output file instead of overwriting
 
@@ -27,10 +35,9 @@ RUNS=1
 TARGET_TIME=20
 TIMEOUT=300
 OUTPUT=""
-CLASSIFY_FILE=""
 NUMACTL_ARGS=""
 TASKSET_ARGS=""
-SKIP_CLASSIFY=0
+SAVE_CLASSIFY=0
 SKIP_TO=""
 APPEND=0
 LISTFILES=()
@@ -51,10 +58,9 @@ while [[ $# -gt 0 ]]; do
         --target-time) TARGET_TIME="$2"; shift 2 ;;
         --timeout) TIMEOUT="$2"; shift 2 ;;
         --output|-o) OUTPUT="$2"; shift 2 ;;
-        --classify-file) CLASSIFY_FILE="$2"; shift 2 ;;
         --numactl) NUMACTL_ARGS="$2"; shift 2 ;;
         --taskset) TASKSET_ARGS="$2"; shift 2 ;;
-        --skip-classify) SKIP_CLASSIFY=1; shift ;;
+        --save-classify) SAVE_CLASSIFY=1; shift ;;
         --skip-to) SKIP_TO="$2"; shift 2 ;;
         --append) APPEND=1; shift ;;
         --) parsing_builds=0; shift ;;
@@ -95,6 +101,17 @@ if [[ ${#LISTFILES[@]} -eq 0 ]]; then
     echo "Error: no list files specified. Use -- to separate builds from list files." >&2
     exit 1
 fi
+
+# Derive classification filename from list filename
+# ok_s.lst -> ok_s_classification.csv
+classify_file_for() {
+    local lstfile="$1"
+    local base
+    base=$(basename "$lstfile" .lst)
+    local dir
+    dir=$(dirname "$lstfile")
+    echo "${dir}/${base}_classification.csv"
+}
 
 # Build a command string with optional numactl/taskset prefix
 build_full_cmd() {
@@ -142,14 +159,19 @@ collect_tests() {
 declare -A TEST_CLASS
 declare -A TEST_ITERS
 
+# Track which list files had new classifications (for --save-classify)
+declare -A CLASSIFY_DIRTY
+
 classify_test() {
     local testfile="$1"
+    local listfile="$2"
     local result
 
     result=$(bash "$CLASSIFIER" --singular "$CLASSIFY_SINGULAR" \
         --target-time "$TARGET_TIME" --timeout "$TIMEOUT" "$testfile" 2>/dev/null) || {
         TEST_CLASS["$testfile"]="FAIL"
         TEST_ITERS["$testfile"]=0
+        CLASSIFY_DIRTY["$listfile"]=1
         return 1
     }
 
@@ -159,6 +181,7 @@ classify_test() {
 
     TEST_CLASS["$testfile"]="$class"
     TEST_ITERS["$testfile"]="$iters"
+    CLASSIFY_DIRTY["$listfile"]=1
     return 0
 }
 
@@ -234,12 +257,22 @@ load_classification() {
     done < "$file"
 }
 
-# Save classification to file
-save_classification() {
-    local file="$1"
-    for testfile in "${!TEST_CLASS[@]}"; do
-        echo "${testfile},${TEST_CLASS[$testfile]},${TEST_ITERS[$testfile]}"
-    done | sort > "$file"
+# Save classification for a specific list file
+save_classification_for() {
+    local listfile="$1"
+    local cfile
+    cfile=$(classify_file_for "$listfile")
+
+    # Collect all tests belonging to this list file
+    {
+        while IFS='|' read -r testfile tlistfile; do
+            if [[ "$tlistfile" == "$listfile" && -n "${TEST_CLASS[$testfile]+x}" ]]; then
+                echo "${testfile},${TEST_CLASS[$testfile]},${TEST_ITERS[$testfile]}"
+            fi
+        done <<< "$(collect_tests)"
+    } | sort > "$cfile"
+
+    echo "Saved classification to $cfile" >&2
 }
 
 # Main execution
@@ -256,15 +289,27 @@ main() {
     echo "Target time: ${TARGET_TIME}s, Timeout: ${TIMEOUT}s" >&2
     echo "" >&2
 
-    # Load existing classification if requested
-    if [[ $SKIP_CLASSIFY -eq 1 && -n "$CLASSIFY_FILE" && -f "$CLASSIFY_FILE" ]]; then
-        echo "Loading classification from $CLASSIFY_FILE" >&2
-        load_classification "$CLASSIFY_FILE"
-    fi
+    # Auto-load classification files for each list file
+    for listfile in "${LISTFILES[@]}"; do
+        local cfile
+        cfile=$(classify_file_for "$listfile")
+        if [[ -f "$cfile" ]]; then
+            echo "Loading classification from $cfile" >&2
+            load_classification "$cfile"
+        fi
+    done
 
-    # Phase 1: Classification (if not skipping)
-    if [[ $SKIP_CLASSIFY -eq 0 ]]; then
-        echo "=== Phase 1: Classifying tests (using ${BUILD_NAMES[0]}) ===" >&2
+    # Phase 1: Classify any tests not yet classified
+    local need_classify=0
+    while IFS='|' read -r testfile listfile; do
+        if [[ -z "${TEST_CLASS[$testfile]+x}" ]]; then
+            need_classify=1
+            break
+        fi
+    done <<< "$tests"
+
+    if [[ $need_classify -eq 1 ]]; then
+        echo "=== Phase 1: Classifying unclassified tests (using ${BUILD_NAMES[0]}) ===" >&2
         local count=0
         local skipping=1
         [[ -z "$SKIP_TO" ]] && skipping=0
@@ -279,14 +324,14 @@ main() {
             fi
 
             count=$((count + 1))
-            echo -ne "\r  [$count/$total] Classifying: $testfile ... " >&2
 
             if [[ -n "${TEST_CLASS[$testfile]+x}" ]]; then
-                echo "cached (${TEST_CLASS[$testfile]})" >&2
                 continue
             fi
 
-            if classify_test "$testfile"; then
+            echo -ne "\r  [$count/$total] Classifying: $testfile ... " >&2
+
+            if classify_test "$testfile" "$listfile"; then
                 echo "${TEST_CLASS[$testfile]} (N=${TEST_ITERS[$testfile]})" >&2
             else
                 echo "FAIL" >&2
@@ -296,9 +341,11 @@ main() {
         echo "" >&2
         echo "Classification complete." >&2
 
-        if [[ -n "$CLASSIFY_FILE" ]]; then
-            save_classification "$CLASSIFY_FILE"
-            echo "Saved classification to $CLASSIFY_FILE" >&2
+        # Save classification files if requested
+        if [[ $SAVE_CLASSIFY -eq 1 ]]; then
+            for listfile in "${!CLASSIFY_DIRTY[@]}"; do
+                save_classification_for "$listfile"
+            done
         fi
     fi
 
@@ -344,7 +391,7 @@ main() {
 
                 # Classify if not already done
                 if [[ -z "${TEST_CLASS[$testfile]+x}" ]]; then
-                    classify_test "$testfile" || true
+                    classify_test "$testfile" "$listfile" || true
                 fi
 
                 local class="${TEST_CLASS[$testfile]}"
