@@ -171,6 +171,7 @@ collect_tests() {
 # Classification — keyed by filename (basename), not full path
 declare -A TEST_CLASS
 declare -A TEST_ITERS
+declare -A TEST_TIMEOUT
 
 # Track which list files had new classifications (for --save-classify)
 declare -A CLASSIFY_DIRTY
@@ -191,6 +192,7 @@ classify_test() {
         --target-time "$TARGET_TIME" --timeout "$TIMEOUT" "$testfile" 2>/dev/null) || {
         TEST_CLASS["$key"]="FAIL"
         TEST_ITERS["$key"]=0
+        TEST_TIMEOUT["$key"]=$TIMEOUT
         CLASSIFY_DIRTY["$listfile"]=1
         return 1
     }
@@ -201,6 +203,12 @@ classify_test() {
 
     TEST_CLASS["$key"]="$class"
     TEST_ITERS["$key"]="$iters"
+    # Default timeout: 60 for looped classes, 300 for single run
+    if [[ "$class" == "C" ]]; then
+        TEST_TIMEOUT["$key"]=300
+    else
+        TEST_TIMEOUT["$key"]=60
+    fi
     CLASSIFY_DIRTY["$listfile"]=1
     return 0
 }
@@ -229,11 +237,12 @@ benchmark_test() {
     local full_cmd
     full_cmd=$(build_full_cmd "$build_cmd")
 
-    # Run the actual benchmark with wall-clock fallback
+    # Run the actual benchmark
+    local test_timeout="${TEST_TIMEOUT[$key]:-$TIMEOUT}"
     local output exit_code=0
     local start_ns end_ns
     start_ns=$(date +%s%N)
-    output=$(timeout "$TIMEOUT" bash -c \
+    output=$(timeout "$test_timeout" bash -c \
         "'$WRAPPER' --class '$class' --iterations '$iters' '$testfile' | $full_cmd 2>&1") || exit_code=$?
     end_ns=$(date +%s%N)
 
@@ -280,12 +289,19 @@ benchmark_test() {
 # Load classification from file (keys are filenames, not paths)
 load_classification() {
     local file="$1"
-    while IFS=',' read -r testname class iters _; do
+    while IFS=',' read -r testname class iters tout; do
         # Strip any path prefix — classification files use filenames only
         local key
         key=$(basename "$testname")
         TEST_CLASS["$key"]="$class"
         TEST_ITERS["$key"]="$iters"
+        if [[ -n "$tout" ]]; then
+            TEST_TIMEOUT["$key"]="$tout"
+        elif [[ "$class" == "C" ]]; then
+            TEST_TIMEOUT["$key"]=300
+        else
+            TEST_TIMEOUT["$key"]=60
+        fi
     done < "$file"
 }
 
@@ -301,7 +317,7 @@ save_classification_for() {
             local key
             key=$(classify_key "$testfile")
             if [[ "$tlistfile" == "$listfile" && -n "${TEST_CLASS[$key]+x}" ]]; then
-                echo "${key},${TEST_CLASS[$key]},${TEST_ITERS[$key]}"
+                echo "${key},${TEST_CLASS[$key]},${TEST_ITERS[$key]},${TEST_TIMEOUT[$key]:-300}"
             fi
         done <<< "$(collect_tests)"
     } | sort > "$cfile"
