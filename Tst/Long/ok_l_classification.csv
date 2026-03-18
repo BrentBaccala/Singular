@@ -1,10 +1,10 @@
-allres_l.tst,A,100000
+allres_l.tst,A,10000
 bardet_probl_l.tst,A,2
 brnoeth_l.tst,C,1
 bug_39.tst,A,2222
 bug_4.tst,C,1
 bug_45.tst,A,219
-bug_res.tst,A,100000
+bug_res.tst,A,10000
 bug_tr164.tst,C,1
 charseries_l.tst,C,1
 classify2.tst,C,1
@@ -25,9 +25,9 @@ fglmquot1_l.tst,A,8
 finvar2_l.tst,C,1
 finvar_l.tst,C,1
 fres_l.tst,C,1
-gcd0_l.tst,A,100000
+gcd0_l.tst,A,10000
 gcd_univar_p_create.tst,C,1
-gcdp_l.tst,A,100000
+gcdp_l.tst,A,10000
 gmssin_l.tst,A,3
 groebner_l.tst,A,38
 hnoether_l.tst,A,588
