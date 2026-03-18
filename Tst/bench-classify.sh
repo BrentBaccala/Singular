@@ -65,13 +65,26 @@ try_class() {
 }
 
 # Phase 1: Get baseline timing with Class C (single run)
-if ! try_class C 1; then
-    # Test doesn't even run - skip it
-    echo -e "${TESTFILE}\tFAIL\t0\t0"
-    exit 1
+# If Singular's timer fails (e.g., test kills the basering), fall back to
+# wall-clock timing so we still get a baseline for calibration.
+if try_class C 1; then
+    SINGLE_TIME_MS=$BENCH_TIME_MS
+else
+    # Wall-clock fallback
+    start_ns=$(date +%s%N)
+    timeout "$TIMEOUT" bash -c \
+        "'$WRAPPER' --class C --iterations 1 '$TESTFILE' | '$SINGULAR' -q" > /dev/null 2>&1
+    rc=$?
+    end_ns=$(date +%s%N)
+    if [[ $rc -ne 0 ]] && [[ $rc -ne 124 ]]; then
+        # Non-timeout, non-zero exit — test is truly broken
+        echo -e "${TESTFILE}\tFAIL\t0\t0"
+        exit 1
+    fi
+    SINGLE_TIME_MS=$(( (end_ns - start_ns) / 1000000 ))
+    # Subtract ~500ms for Singular startup overhead
+    SINGLE_TIME_MS=$(( SINGLE_TIME_MS > 500 ? SINGLE_TIME_MS - 500 : 0 ))
 fi
-
-SINGLE_TIME_MS=$BENCH_TIME_MS
 
 # If single run takes > 10s, use Class C with 1 iteration
 if [[ $SINGLE_TIME_MS -ge 10000 ]]; then

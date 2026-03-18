@@ -134,19 +134,23 @@ benchmark_test() {
         return
     fi
 
-    # Run the actual benchmark
+    # Run the actual benchmark with wall-clock fallback
     local output exit_code=0
+    local start_ns end_ns
+    start_ns=$(date +%s%N)
     output=$(timeout "$TIMEOUT" bash -c \
         "'$WRAPPER' --class '$class' --iterations '$iters' '$testfile' | $SINGULAR_CMD 2>&1") || exit_code=$?
+    end_ns=$(date +%s%N)
 
     local bench_time=0
     local clean="yes"
+    local timing_source="singular"
 
     if [[ $exit_code -ne 0 ]]; then
         clean="no"
     fi
 
-    # Extract BENCH_TIME
+    # Extract BENCH_TIME from Singular's timer
     local bench_line
     bench_line=$(echo "$output" | grep '^BENCH_TIME:' | tail -1) || true
 
@@ -154,10 +158,13 @@ benchmark_test() {
         bench_time=$(echo "$bench_line" | sed 's/BENCH_TIME:[[:space:]]*//' | tr -d '[:space:]')
         if ! [[ "$bench_time" =~ ^-?[0-9]+$ ]]; then
             bench_time=0
-            clean="no"
         fi
-    else
-        clean="no"
+    fi
+
+    # Wall-clock fallback if Singular's timer didn't report
+    if [[ $bench_time -eq 0 && $exit_code -eq 0 ]]; then
+        bench_time=$(( (end_ns - start_ns) / 1000000 ))
+        timing_source="wallclock"
     fi
 
     # Check for errors in output (but not warnings)
