@@ -57,6 +57,8 @@ HEADER
         # wrap in a simple loop. Variable redefinitions will be caught
         # by the classifier.
         echo "int benchX_N = $ITERATIONS;"
+        # Warmup: one untimed iteration for library loading and cache priming
+        strip_test_body "$TESTFILE"
         echo 'int benchX_start = timer;'
         echo 'for (int benchX_i = 1; benchX_i <= benchX_N; benchX_i++) {'
         strip_test_body "$TESTFILE"
@@ -78,6 +80,8 @@ HEADER
         echo '  return();'
         echo '}'
         echo "int benchX_N = $ITERATIONS;"
+        # Warmup: one untimed iteration for library loading and cache priming
+        echo '  benchX_body();'
         echo 'int benchX_start = timer;'
         echo 'for (int benchX_i = 1; benchX_i <= benchX_N; benchX_i++) {'
         echo '  benchX_body();'
@@ -87,7 +91,7 @@ HEADER
         echo 'exit;'
         ;;
     C)
-        # Class C: Single run - just time one execution
+        # Class C: Single run - just time one execution (no warmup)
         cat <<'HEADER'
 system("--ticks-per-sec", 1000);
 int benchX_start = timer;
@@ -101,8 +105,10 @@ HEADER
         # Class D: Concatenate file N times
         cat <<'HEADER'
 system("--ticks-per-sec", 1000);
-int benchX_start = timer;
 HEADER
+        # Warmup: one untimed iteration
+        strip_test_body "$TESTFILE"
+        echo 'int benchX_start = timer;'
         for ((i = 1; i <= ITERATIONS; i++)); do
             strip_test_body "$TESTFILE"
         done
