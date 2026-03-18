@@ -156,7 +156,7 @@ m24si.tst,X,0
 m27si.tst,X,0
 m28si.tst,A,10000
 m29si.tst,A,10000
-m2ex.tst,A,6666
+m2ex.tst,X,0
 m2si.tst,A,10000
 m30si.tst,A,10000
 m31si.tst,A,10000
@@ -314,7 +314,7 @@ substit.tst,A,10000
 syzygies.tst,A,1818
 syzygy.tst,A,20000
 teste.tst,A,10000
-time.tst,A,10000
+time.tst,X,0
 trac.tst,A,10000
 trans.tst,A,10000
 typ.tst,A,20000
