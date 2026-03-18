@@ -135,23 +135,33 @@ csv_header() {
     echo "build,test_name,class,iterations,run,warmup_cpu_us,warmup_wall_us,cpu_us,wall_us,ext_wall_ns,clean_exit,list_file"
 }
 
-# Collect tests from all list files
+# Collect tests from list files and/or individual .tst files
 collect_tests() {
     for listfile in "${LISTFILES[@]}"; do
-        local dir
-        dir=$(dirname "$listfile")
-        while IFS= read -r line; do
-            [[ -z "$line" ]] && continue
-            [[ "$line" =~ ^# ]] && continue
-            [[ "$line" =~ ^';' ]] && continue
-            line=$(echo "$line" | sed 's/[[:space:]]*$//')
-            local testpath="${dir}/${line}.tst"
-            if [[ -f "$testpath" ]]; then
-                echo "$testpath|$listfile"
+        if [[ "$listfile" == *.tst ]]; then
+            # Individual test file
+            if [[ -f "$listfile" ]]; then
+                echo "$listfile|$listfile"
             else
-                echo "Warning: test file not found: $testpath" >&2
+                echo "Warning: test file not found: $listfile" >&2
             fi
-        done < "$listfile"
+        else
+            # List file
+            local dir
+            dir=$(dirname "$listfile")
+            while IFS= read -r line; do
+                [[ -z "$line" ]] && continue
+                [[ "$line" =~ ^# ]] && continue
+                [[ "$line" =~ ^';' ]] && continue
+                line=$(echo "$line" | sed 's/[[:space:]]*$//')
+                local testpath="${dir}/${line}.tst"
+                if [[ -f "$testpath" ]]; then
+                    echo "$testpath|$listfile"
+                else
+                    echo "Warning: test file not found: $testpath" >&2
+                fi
+            done < "$listfile"
+        fi
     done
 }
 
