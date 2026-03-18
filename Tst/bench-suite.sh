@@ -1,12 +1,17 @@
 #!/bin/bash
-# bench-suite.sh - Benchmark all tests from a test list file
+# bench-suite.sh - Benchmark Singular test suite across builds
 #
 # Usage:
-#   bench-suite.sh [OPTIONS] LISTFILE [LISTFILE2 ...]
+#   bench-suite.sh [OPTIONS] name=command [name=command ...] -- LISTFILE [LISTFILE2 ...]
+#
+# Build specifications:
+#   name=command where command is the full Singular invocation, e.g.:
+#     spielwiese=/home/claude/Singular/install/bin/Singular
+#     spielwiese-mimalloc="LD_PRELOAD=/usr/lib/libmimalloc.so /home/claude/Singular/install/bin/Singular"
 #
 # Options:
-#   --singular PATH     Path to Singular binary
-#   --target-time SECS  Target time per test (default: 20)
+#   -n RUNS             Number of runs per test (default: 1)
+#   --target-time SECS  Target time per test for calibration (default: 20)
 #   --timeout SECS      Timeout per individual run (default: 300)
 #   --output FILE       CSV output file (default: stdout)
 #   --classify-file F   Save/load classification from file
@@ -14,10 +19,11 @@
 #   --taskset ARGS      taskset arguments (e.g., "-c 11")
 #   --skip-classify     Skip classification, load from --classify-file
 #   --skip-to TEST      Skip tests until TEST is reached (resume)
+#   --append            Append to output file instead of overwriting
 
 set -e
 
-SINGULAR="${SINGULAR:-Singular}"
+RUNS=1
 TARGET_TIME=20
 TIMEOUT=300
 OUTPUT=""
@@ -29,13 +35,19 @@ SKIP_TO=""
 APPEND=0
 LISTFILES=()
 
+# Build specs: parallel arrays
+declare -a BUILD_NAMES
+declare -a BUILD_COMMANDS
+
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 WRAPPER="$SCRIPT_DIR/bench-wrapper.sh"
 CLASSIFIER="$SCRIPT_DIR/bench-classify.sh"
 
+# Parse arguments
+parsing_builds=1
 while [[ $# -gt 0 ]]; do
     case "$1" in
-        --singular) SINGULAR="$2"; shift 2 ;;
+        -n) RUNS="$2"; shift 2 ;;
         --target-time) TARGET_TIME="$2"; shift 2 ;;
         --timeout) TIMEOUT="$2"; shift 2 ;;
         --output|-o) OUTPUT="$2"; shift 2 ;;
@@ -45,17 +57,48 @@ while [[ $# -gt 0 ]]; do
         --skip-classify) SKIP_CLASSIFY=1; shift ;;
         --skip-to) SKIP_TO="$2"; shift 2 ;;
         --append) APPEND=1; shift ;;
-        *) LISTFILES+=("$1"); shift ;;
+        --) parsing_builds=0; shift ;;
+        *=*)
+            if [[ $parsing_builds -eq 1 ]]; then
+                local_name="${1%%=*}"
+                local_cmd="${1#*=}"
+                BUILD_NAMES+=("$local_name")
+                BUILD_COMMANDS+=("$local_cmd")
+                shift
+            else
+                LISTFILES+=("$1"); shift
+            fi
+            ;;
+        *)
+            LISTFILES+=("$1"); shift
+            ;;
     esac
 done
 
+# Backwards compatibility: if no builds specified, check for SINGULAR env var
+if [[ ${#BUILD_NAMES[@]} -eq 0 ]]; then
+    if [[ -n "${SINGULAR:-}" ]]; then
+        BUILD_NAMES+=("default")
+        BUILD_COMMANDS+=("$SINGULAR")
+    else
+        echo "Usage: bench-suite.sh [OPTIONS] name=command [...] -- LISTFILE [...]" >&2
+        echo "" >&2
+        echo "Examples:" >&2
+        echo "  bench-suite.sh spielwiese=/path/to/Singular -- Short/ok_s.lst" >&2
+        echo "  bench-suite.sh -n 5 spiel=/path/to/Singular LSet=/other/Singular -- Short/ok_s.lst" >&2
+        echo '  bench-suite.sh "mimalloc=LD_PRELOAD=/usr/lib/libmimalloc.so /path/to/Singular" -- Short/ok_s.lst' >&2
+        exit 1
+    fi
+fi
+
 if [[ ${#LISTFILES[@]} -eq 0 ]]; then
-    echo "Usage: bench-suite.sh [OPTIONS] LISTFILE [LISTFILE2 ...]" >&2
+    echo "Error: no list files specified. Use -- to separate builds from list files." >&2
     exit 1
 fi
 
-# Build the Singular command with optional numactl/taskset
-build_singular_cmd() {
+# Build a command string with optional numactl/taskset prefix
+build_full_cmd() {
+    local base_cmd="$1"
     local cmd=""
     if [[ -n "$NUMACTL_ARGS" ]]; then
         cmd="numactl $NUMACTL_ARGS "
@@ -63,15 +106,16 @@ build_singular_cmd() {
     if [[ -n "$TASKSET_ARGS" ]]; then
         cmd="${cmd}taskset $TASKSET_ARGS "
     fi
-    cmd="${cmd}${SINGULAR} -q"
+    cmd="${cmd}${base_cmd} -q"
     echo "$cmd"
 }
 
-SINGULAR_CMD=$(build_singular_cmd)
+# Use the first build for classification (classification is build-independent)
+CLASSIFY_SINGULAR="${BUILD_COMMANDS[0]}"
 
 # CSV header
 csv_header() {
-    echo "test_name,class,iterations,total_time_ms,per_iter_ms,clean_exit,list_file"
+    echo "build,test_name,class,iterations,run,total_time_ms,per_iter_ms,clean_exit,list_file"
 }
 
 # Collect tests from all list files
@@ -80,11 +124,9 @@ collect_tests() {
         local dir
         dir=$(dirname "$listfile")
         while IFS= read -r line; do
-            # Skip empty lines, comments, and disabled tests (;prefix)
             [[ -z "$line" ]] && continue
             [[ "$line" =~ ^# ]] && continue
             [[ "$line" =~ ^';' ]] && continue
-            # Strip trailing whitespace
             line=$(echo "$line" | sed 's/[[:space:]]*$//')
             local testpath="${dir}/${line}.tst"
             if [[ -f "$testpath" ]]; then
@@ -96,7 +138,7 @@ collect_tests() {
     done
 }
 
-# Classification phase
+# Classification
 declare -A TEST_CLASS
 declare -A TEST_ITERS
 
@@ -104,47 +146,50 @@ classify_test() {
     local testfile="$1"
     local result
 
-    # Export SINGULAR for the classifier
-    export SINGULAR
-
-    result=$(bash "$CLASSIFIER" --singular "$SINGULAR" --target-time "$TARGET_TIME" --timeout "$TIMEOUT" "$testfile" 2>/dev/null) || {
+    result=$(bash "$CLASSIFIER" --singular "$CLASSIFY_SINGULAR" \
+        --target-time "$TARGET_TIME" --timeout "$TIMEOUT" "$testfile" 2>/dev/null) || {
         TEST_CLASS["$testfile"]="FAIL"
         TEST_ITERS["$testfile"]=0
         return 1
     }
 
     local class iters
-    class=$(echo "$result" | cut -f2)
-    iters=$(echo "$result" | cut -f3)
+    class=$(echo "$result" | cut -d, -f2)
+    iters=$(echo "$result" | cut -d, -f3)
 
     TEST_CLASS["$testfile"]="$class"
     TEST_ITERS["$testfile"]="$iters"
     return 0
 }
 
-# Benchmark a single test
+# Benchmark a single test with a specific build
 benchmark_test() {
-    local testfile="$1"
+    local build_name="$1"
+    local build_cmd="$2"
+    local testfile="$3"
+    local run_num="$4"
+    local listfile="$5"
     local class="${TEST_CLASS[$testfile]}"
     local iters="${TEST_ITERS[$testfile]}"
-    local listfile="$2"
 
     if [[ "$class" == "FAIL" ]]; then
-        echo "${testfile},FAIL,0,0,0,no,${listfile}"
+        echo "${build_name},${testfile},FAIL,0,${run_num},0,0,no,${listfile}"
         return
     fi
+
+    local full_cmd
+    full_cmd=$(build_full_cmd "$build_cmd")
 
     # Run the actual benchmark with wall-clock fallback
     local output exit_code=0
     local start_ns end_ns
     start_ns=$(date +%s%N)
     output=$(timeout "$TIMEOUT" bash -c \
-        "'$WRAPPER' --class '$class' --iterations '$iters' '$testfile' | $SINGULAR_CMD 2>&1") || exit_code=$?
+        "'$WRAPPER' --class '$class' --iterations '$iters' '$testfile' | $full_cmd 2>&1") || exit_code=$?
     end_ns=$(date +%s%N)
 
     local bench_time=0
     local clean="yes"
-    local timing_source="singular"
 
     if [[ $exit_code -ne 0 ]]; then
         clean="no"
@@ -164,7 +209,6 @@ benchmark_test() {
     # Wall-clock fallback if Singular's timer didn't report
     if [[ $bench_time -eq 0 && $exit_code -eq 0 ]]; then
         bench_time=$(( (end_ns - start_ns) / 1000000 ))
-        timing_source="wallclock"
     fi
 
     # Check for errors in output (but not warnings)
@@ -178,7 +222,7 @@ benchmark_test() {
         per_iter=$(( bench_time / iters ))
     fi
 
-    echo "${testfile},${class},${iters},${bench_time},${per_iter},${clean},${listfile}"
+    echo "${build_name},${testfile},${class},${iters},${run_num},${bench_time},${per_iter},${clean},${listfile}"
 }
 
 # Load classification from file
@@ -205,9 +249,11 @@ main() {
     local total
     total=$(echo "$tests" | wc -l)
 
-    echo "Benchmarking $total tests with Singular: $SINGULAR" >&2
+    echo "Benchmarking $total tests × ${#BUILD_NAMES[@]} builds × $RUNS runs" >&2
+    for i in "${!BUILD_NAMES[@]}"; do
+        echo "  ${BUILD_NAMES[$i]}: ${BUILD_COMMANDS[$i]}" >&2
+    done
     echo "Target time: ${TARGET_TIME}s, Timeout: ${TIMEOUT}s" >&2
-    echo "Command: $SINGULAR_CMD" >&2
     echo "" >&2
 
     # Load existing classification if requested
@@ -218,7 +264,7 @@ main() {
 
     # Phase 1: Classification (if not skipping)
     if [[ $SKIP_CLASSIFY -eq 0 ]]; then
-        echo "=== Phase 1: Classifying tests ===" >&2
+        echo "=== Phase 1: Classifying tests (using ${BUILD_NAMES[0]}) ===" >&2
         local count=0
         local skipping=1
         [[ -z "$SKIP_TO" ]] && skipping=0
@@ -250,7 +296,6 @@ main() {
         echo "" >&2
         echo "Classification complete." >&2
 
-        # Save classification
         if [[ -n "$CLASSIFY_FILE" ]]; then
             save_classification "$CLASSIFY_FILE"
             echo "Saved classification to $CLASSIFY_FILE" >&2
@@ -261,7 +306,7 @@ main() {
     echo "=== Phase 2: Benchmarking ===" >&2
 
     # Output CSV
-    local csv_out
+    local csv_out=""
     if [[ -n "$OUTPUT" ]]; then
         if [[ $APPEND -eq 1 && -f "$OUTPUT" ]]; then
             csv_out="$OUTPUT"
@@ -273,54 +318,63 @@ main() {
         csv_header
     fi
 
-    local count=0
+    local total_runs=$(( total * ${#BUILD_NAMES[@]} * RUNS ))
+    local run_count=0
     local success=0
     local failed=0
-    local skipping=1
-    [[ -z "$SKIP_TO" ]] && skipping=0
 
-    while IFS='|' read -r testfile listfile; do
-        if [[ $skipping -eq 1 ]]; then
-            if [[ "$testfile" == *"$SKIP_TO"* ]]; then
-                skipping=0
-            else
-                continue
-            fi
-        fi
+    for run in $(seq 1 $RUNS); do
+        for bi in "${!BUILD_NAMES[@]}"; do
+            local build_name="${BUILD_NAMES[$bi]}"
+            local build_cmd="${BUILD_COMMANDS[$bi]}"
 
-        count=$((count + 1))
+            local skipping=1
+            [[ -z "$SKIP_TO" ]] && skipping=0
 
-        # Classify if not already done
-        if [[ -z "${TEST_CLASS[$testfile]+x}" ]]; then
-            classify_test "$testfile" || true
-        fi
+            while IFS='|' read -r testfile listfile; do
+                if [[ $skipping -eq 1 ]]; then
+                    if [[ "$testfile" == *"$SKIP_TO"* ]]; then
+                        skipping=0
+                    else
+                        continue
+                    fi
+                fi
 
-        local class="${TEST_CLASS[$testfile]}"
-        echo -ne "\r  [$count/$total] Benchmarking ($class): $testfile ... " >&2
+                run_count=$((run_count + 1))
 
-        local result
-        result=$(benchmark_test "$testfile" "$listfile")
+                # Classify if not already done
+                if [[ -z "${TEST_CLASS[$testfile]+x}" ]]; then
+                    classify_test "$testfile" || true
+                fi
 
-        if [[ -n "$csv_out" ]]; then
-            echo "$result" >> "$csv_out"
-        else
-            echo "$result"
-        fi
+                local class="${TEST_CLASS[$testfile]}"
+                echo -ne "\r  [$run_count/$total_runs] Run $run, $build_name ($class): $testfile ... " >&2
 
-        local clean
-        clean=$(echo "$result" | cut -d, -f6)
-        if [[ "$clean" == "yes" ]]; then
-            success=$((success + 1))
-            echo "done" >&2
-        else
-            failed=$((failed + 1))
-            echo "ISSUES" >&2
-        fi
-    done <<< "$tests"
+                local result
+                result=$(benchmark_test "$build_name" "$build_cmd" "$testfile" "$run" "$listfile")
+
+                if [[ -n "$csv_out" ]]; then
+                    echo "$result" >> "$csv_out"
+                else
+                    echo "$result"
+                fi
+
+                local clean
+                clean=$(echo "$result" | cut -d, -f8)
+                if [[ "$clean" == "yes" ]]; then
+                    success=$((success + 1))
+                    echo "done" >&2
+                else
+                    failed=$((failed + 1))
+                    echo "ISSUES" >&2
+                fi
+            done <<< "$tests"
+        done
+    done
 
     echo "" >&2
     echo "=== Summary ===" >&2
-    echo "Total: $count, Success: $success, Issues: $failed" >&2
+    echo "Total runs: $run_count, Success: $success, Issues: $failed" >&2
 
     # Class breakdown
     local class_a=0 class_b=0 class_c=0 class_d=0 class_fail=0
