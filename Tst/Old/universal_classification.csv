@@ -31,7 +31,7 @@ err4.tst,A,100000
 err5.tst,A,4000
 err6.tst,A,20000
 err7.tst,A,20000
-execut.tst,A,20000
+execut.tst,C,1
 factor.tst,A,833
 fak.tst,A,625
 fastelim.tst,C,1
@@ -86,7 +86,7 @@ m10ex.tst,C,1
 m10si.tst,A,100000
 m110si.tst,A,100000
 m111si.tst,A,100000
-m112si.tst,A,100000
+m112si.tst,C,1
 m113si.tst,A,20000
 m114si.tst,A,444
 m115si.tst,A,2222
@@ -99,7 +99,7 @@ m11si.tst,A,100000
 m120si.tst,A,100000
 m121si.tst,A,100000
 m122si.tst,A,465
-m123si.tst,A,20000
+m123si.tst,C,1
 m124si.tst,A,10000
 m125si.tst,A,100000
 m126si.tst,A,100000
@@ -117,11 +117,11 @@ m135si.tst,A,100000
 m136si.tst,A,100000
 m137si.tst,A,100000
 m138si.tst,A,100000
-m139si.tst,A,625
+m139si.tst,C,1
 m13ex.tst,A,100000
 m13si.tst,A,100000
-m140si.tst,A,100000
-m141si.tst,A,20000
+m140si.tst,C,1
+m141si.tst,C,1
 m142si.tst,A,100000
 m143si.tst,A,100000
 m144si.tst,A,100000
@@ -152,8 +152,8 @@ m20si.tst,A,100000
 m21si.tst,A,100000
 m22si.tst,A,100000
 m23si.tst,A,100000
-m24si.tst,A,571
-m27si.tst,A,5000
+m24si.tst,C,1
+m27si.tst,C,1
 m28si.tst,A,100000
 m29si.tst,A,100000
 m2ex.tst,A,6666

@@ -36,5 +36,5 @@ hres_l.tst,A,30
 intdet_l.tst,A,47
 jmsconst.tst,C,1
 lres_l.tst,A,136
-makedbm_l.tst,A,2857
+makedbm_l.tst,C,1
 minor_l.tst,A,139

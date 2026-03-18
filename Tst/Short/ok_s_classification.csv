@@ -10,7 +10,7 @@ bug_bucket.tst,A,100000
 bug_content.tst,A,100000
 bug_curvepar.tst,A,2857
 bug_division_2.tst,A,100000
-bug_dump.tst,A,100000
+bug_dump.tst,C,1
 bug_ecart.tst,A,100000
 bug_genus_etc.tst,A,46
 bug_heuristic.tst,A,4
@@ -49,8 +49,8 @@ bug_sca.tst,A,20000
 bug_sheafcoh.tst,A,2857
 bug_slimsyz.tst,A,100000
 bug_solve.tst,A,4000
-bug_ssi_algring.tst,A,100000
-bug_ssi_attr.tst,A,100000
+bug_ssi_algring.tst,C,1
+bug_ssi_attr.tst,C,1
 bug_subst.tst,A,100000
 bug_tr237.tst,A,20000
 bug_tr276.tst,C,1
@@ -176,6 +176,6 @@ reesclos.tst,A,19
 resources_s.tst,A,6666
 sagbi2.tst,A,47
 sets.tst,A,869
-ssi_Z.tst,A,100000
-ssi_ringref.tst,A,100000
+ssi_Z.tst,C,1
+ssi_ringref.tst,C,1
 vdim_overflow.tst,A,4
