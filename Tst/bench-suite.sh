@@ -184,7 +184,7 @@ benchmark_test() {
 # Load classification from file
 load_classification() {
     local file="$1"
-    while IFS=$'\t' read -r testfile class iters _; do
+    while IFS=',' read -r testfile class iters _; do
         TEST_CLASS["$testfile"]="$class"
         TEST_ITERS["$testfile"]="$iters"
     done < "$file"
@@ -194,7 +194,7 @@ load_classification() {
 save_classification() {
     local file="$1"
     for testfile in "${!TEST_CLASS[@]}"; do
-        echo -e "${testfile}\t${TEST_CLASS[$testfile]}\t${TEST_ITERS[$testfile]}"
+        echo "${testfile},${TEST_CLASS[$testfile]},${TEST_ITERS[$testfile]}"
     done | sort > "$file"
 }
 

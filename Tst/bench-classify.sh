@@ -8,8 +8,8 @@
 # Usage:
 #   bench-classify.sh [--singular PATH] [--target-time 20] TESTFILE
 #
-# Output (tab-separated):
-#   TESTFILE  CLASS  ITERATIONS  SINGLE_RUN_MS
+# Output (comma-separated):
+#   TESTFILE,CLASS,ITERATIONS,SINGLE_RUN_MS
 
 set -e
 
@@ -78,7 +78,7 @@ else
     end_ns=$(date +%s%N)
     if [[ $rc -ne 0 ]] && [[ $rc -ne 124 ]]; then
         # Non-timeout, non-zero exit — test is truly broken
-        echo -e "${TESTFILE}\tFAIL\t0\t0"
+        echo -e "${TESTFILE},FAIL,0,0"
         exit 1
     fi
     SINGLE_TIME_MS=$(( (end_ns - start_ns) / 1000000 ))
@@ -88,7 +88,7 @@ fi
 
 # If single run takes > 10s, use Class C with 1 iteration
 if [[ $SINGLE_TIME_MS -ge 10000 ]]; then
-    echo -e "${TESTFILE}\tC\t1\t${SINGLE_TIME_MS}"
+    echo "${TESTFILE},C,1,${SINGLE_TIME_MS}"
     exit 0
 fi
 
@@ -109,28 +109,28 @@ fi
 
 # If target is 1, no need for looping - use Class C
 if [[ $TARGET_N -le 1 ]]; then
-    echo -e "${TESTFILE}\tC\t1\t${SINGLE_TIME_MS}"
+    echo "${TESTFILE},C,1,${SINGLE_TIME_MS}"
     exit 0
 fi
 
 # Phase 2: Test if Class A works with a small iteration count
 if try_class A "$TEST_ITERATIONS"; then
-    echo -e "${TESTFILE}\tA\t${TARGET_N}\t${SINGLE_TIME_MS}"
+    echo "${TESTFILE},A,${TARGET_N},${SINGLE_TIME_MS}"
     exit 0
 fi
 
 # Phase 3: Try Class B
 if try_class B "$TEST_ITERATIONS"; then
-    echo -e "${TESTFILE}\tB\t${TARGET_N}\t${SINGLE_TIME_MS}"
+    echo "${TESTFILE},B,${TARGET_N},${SINGLE_TIME_MS}"
     exit 0
 fi
 
 # Phase 4: Try Class D
 if try_class D "$TEST_ITERATIONS"; then
-    echo -e "${TESTFILE}\tD\t${TARGET_N}\t${SINGLE_TIME_MS}"
+    echo "${TESTFILE},D,${TARGET_N},${SINGLE_TIME_MS}"
     exit 0
 fi
 
 # Fallback: Class C single run
-echo -e "${TESTFILE}\tC\t1\t${SINGLE_TIME_MS}"
+echo "${TESTFILE},C,1,${SINGLE_TIME_MS}"
 exit 0
