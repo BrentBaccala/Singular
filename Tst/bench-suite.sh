@@ -209,6 +209,10 @@ benchmark_test() {
         return
     fi
 
+    if [[ "$class" == "X" ]]; then
+        return  # excluded from benchmarking, no output
+    fi
+
     local full_cmd
     full_cmd=$(build_full_cmd "$build_cmd")
 
@@ -405,8 +409,6 @@ main() {
                     fi
                 fi
 
-                run_count=$((run_count + 1))
-
                 # Classify if not already done
                 local key
                 key=$(classify_key "$testfile")
@@ -415,6 +417,13 @@ main() {
                 fi
 
                 local class="${TEST_CLASS[$key]}"
+
+                # Skip excluded tests
+                if [[ "$class" == "X" ]]; then
+                    continue
+                fi
+
+                run_count=$((run_count + 1))
                 echo -ne "\r  [$run_count/$total_runs] Run $run, $build_name ($class): $testfile ... " >&2
 
                 local result
@@ -444,17 +453,18 @@ main() {
     echo "Total runs: $run_count, Success: $success, Issues: $failed" >&2
 
     # Class breakdown
-    local class_a=0 class_b=0 class_c=0 class_d=0 class_fail=0
+    local class_a=0 class_b=0 class_c=0 class_d=0 class_x=0 class_fail=0
     for class in "${TEST_CLASS[@]}"; do
         case "$class" in
             A) class_a=$((class_a + 1)) ;;
             B) class_b=$((class_b + 1)) ;;
             C) class_c=$((class_c + 1)) ;;
             D) class_d=$((class_d + 1)) ;;
+            X) class_x=$((class_x + 1)) ;;
             FAIL) class_fail=$((class_fail + 1)) ;;
         esac
     done
-    echo "Classes: A=$class_a, B=$class_b, C=$class_c, D=$class_d, FAIL=$class_fail" >&2
+    echo "Classes: A=$class_a, B=$class_b, C=$class_c, D=$class_d, X=$class_x (excluded), FAIL=$class_fail" >&2
 
     if [[ -n "$csv_out" ]]; then
         echo "Results written to: $csv_out" >&2
