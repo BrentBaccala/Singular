@@ -464,7 +464,7 @@ main() {
             FAIL) class_fail=$((class_fail + 1)) ;;
         esac
     done
-    echo "Classes: A=$class_a, B=$class_b, C=$class_c, D=$class_d, X=$class_x (excluded), FAIL=$class_fail" >&2
+    echo "Classes: A=$class_a, B=$class_b, C=$class_c, D=$class_d, X=$class_x, FAIL=$class_fail" >&2
 
     if [[ -n "$csv_out" ]]; then
         echo "Results written to: $csv_out" >&2
