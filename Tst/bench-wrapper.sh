@@ -41,6 +41,11 @@ strip_test_body() {
         -e '/^[[:space:]]*tst_status\b/d' \
         -e '/^[[:space:]]*exit[[:space:]]*;/d' \
         -e '/^[[:space:]]*\$[[:space:]]*$/d' \
+        -e '/^[[:space:]]*timer[[:space:]]*=[[:space:]]*[0-9]/d' \
+        -e '/^[[:space:]]*int[[:space:]]+t[[:space:]]*=[[:space:]]*timer/d' \
+        -e '/^[[:space:]]*int[[:space:]]+elapsed[[:space:]]*=[[:space:]]*timer/d' \
+        -e '/^[[:space:]]*printf\(.*elapsed/d' \
+        -e '/^[[:space:]]*printf\(.*Basis has/d' \
         "$1"
 }
 
