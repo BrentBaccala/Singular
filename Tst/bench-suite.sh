@@ -155,22 +155,29 @@ collect_tests() {
     done
 }
 
-# Classification
+# Classification — keyed by filename (basename), not full path
 declare -A TEST_CLASS
 declare -A TEST_ITERS
 
 # Track which list files had new classifications (for --save-classify)
 declare -A CLASSIFY_DIRTY
 
+# Get the classification key (basename) for a test file path
+classify_key() {
+    basename "$1"
+}
+
 classify_test() {
     local testfile="$1"
     local listfile="$2"
+    local key
+    key=$(classify_key "$testfile")
     local result
 
     result=$(bash "$CLASSIFIER" --singular "$CLASSIFY_SINGULAR" \
         --target-time "$TARGET_TIME" --timeout "$TIMEOUT" "$testfile" 2>/dev/null) || {
-        TEST_CLASS["$testfile"]="FAIL"
-        TEST_ITERS["$testfile"]=0
+        TEST_CLASS["$key"]="FAIL"
+        TEST_ITERS["$key"]=0
         CLASSIFY_DIRTY["$listfile"]=1
         return 1
     }
@@ -179,8 +186,8 @@ classify_test() {
     class=$(echo "$result" | cut -d, -f2)
     iters=$(echo "$result" | cut -d, -f3)
 
-    TEST_CLASS["$testfile"]="$class"
-    TEST_ITERS["$testfile"]="$iters"
+    TEST_CLASS["$key"]="$class"
+    TEST_ITERS["$key"]="$iters"
     CLASSIFY_DIRTY["$listfile"]=1
     return 0
 }
@@ -192,8 +199,10 @@ benchmark_test() {
     local testfile="$3"
     local run_num="$4"
     local listfile="$5"
-    local class="${TEST_CLASS[$testfile]}"
-    local iters="${TEST_ITERS[$testfile]}"
+    local key
+    key=$(classify_key "$testfile")
+    local class="${TEST_CLASS[$key]}"
+    local iters="${TEST_ITERS[$key]}"
 
     if [[ "$class" == "FAIL" ]]; then
         echo "${build_name},${testfile},FAIL,0,${run_num},0,0,no,${listfile}"
@@ -248,26 +257,31 @@ benchmark_test() {
     echo "${build_name},${testfile},${class},${iters},${run_num},${bench_time},${per_iter},${clean},${listfile}"
 }
 
-# Load classification from file
+# Load classification from file (keys are filenames, not paths)
 load_classification() {
     local file="$1"
-    while IFS=',' read -r testfile class iters _; do
-        TEST_CLASS["$testfile"]="$class"
-        TEST_ITERS["$testfile"]="$iters"
+    while IFS=',' read -r testname class iters _; do
+        # Strip any path prefix — classification files use filenames only
+        local key
+        key=$(basename "$testname")
+        TEST_CLASS["$key"]="$class"
+        TEST_ITERS["$key"]="$iters"
     done < "$file"
 }
 
-# Save classification for a specific list file
+# Save classification for a specific list file (filenames only)
 save_classification_for() {
     local listfile="$1"
     local cfile
     cfile=$(classify_file_for "$listfile")
 
-    # Collect all tests belonging to this list file
+    # Collect all tests belonging to this list file, write filename only
     {
         while IFS='|' read -r testfile tlistfile; do
-            if [[ "$tlistfile" == "$listfile" && -n "${TEST_CLASS[$testfile]+x}" ]]; then
-                echo "${testfile},${TEST_CLASS[$testfile]},${TEST_ITERS[$testfile]}"
+            local key
+            key=$(classify_key "$testfile")
+            if [[ "$tlistfile" == "$listfile" && -n "${TEST_CLASS[$key]+x}" ]]; then
+                echo "${key},${TEST_CLASS[$key]},${TEST_ITERS[$key]}"
             fi
         done <<< "$(collect_tests)"
     } | sort > "$cfile"
@@ -302,7 +316,9 @@ main() {
     # Phase 1: Classify any tests not yet classified
     local need_classify=0
     while IFS='|' read -r testfile listfile; do
-        if [[ -z "${TEST_CLASS[$testfile]+x}" ]]; then
+        local key
+        key=$(classify_key "$testfile")
+        if [[ -z "${TEST_CLASS[$key]+x}" ]]; then
             need_classify=1
             break
         fi
@@ -325,7 +341,9 @@ main() {
 
             count=$((count + 1))
 
-            if [[ -n "${TEST_CLASS[$testfile]+x}" ]]; then
+            local key
+            key=$(classify_key "$testfile")
+            if [[ -n "${TEST_CLASS[$key]+x}" ]]; then
                 continue
             fi
 
@@ -390,11 +408,13 @@ main() {
                 run_count=$((run_count + 1))
 
                 # Classify if not already done
-                if [[ -z "${TEST_CLASS[$testfile]+x}" ]]; then
+                local key
+                key=$(classify_key "$testfile")
+                if [[ -z "${TEST_CLASS[$key]+x}" ]]; then
                     classify_test "$testfile" "$listfile" || true
                 fi
 
-                local class="${TEST_CLASS[$testfile]}"
+                local class="${TEST_CLASS[$key]}"
                 echo -ne "\r  [$run_count/$total_runs] Run $run, $build_name ($class): $testfile ... " >&2
 
                 local result
