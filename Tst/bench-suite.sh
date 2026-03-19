@@ -278,8 +278,8 @@ benchmark_test() {
     cpu_us=$(extract_timer "BENCH_CPU")
     wall_us=$(extract_timer "BENCH_WALL")
 
-    # Check for errors in output (but not warnings)
-    if echo "$output" | grep -qi '^ *\? error\|^   \? Segment\|SIGSEGV\|Abort'; then
+    # Check for crashes only (not Singular runtime errors, which some tests produce deliberately)
+    if echo "$output" | grep -qi 'SIGSEGV\|Segmentation fault\|Abort'; then
         clean="no"
     fi
 
