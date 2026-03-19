@@ -25,6 +25,7 @@
 #   --output FILE       CSV output file (default: stdout)
 #   --numactl ARGS      numactl arguments (e.g., "--membind=1")
 #   --taskset ARGS      taskset arguments (e.g., "-c 11")
+#   --scale FACTOR      Scale looped iteration counts (e.g., 0.5 halves, 2.0 doubles)
 #   --save-classify     Write classification files after classifying new tests
 #   --classify-from F   Load classifications from file F (read-only)
 #   --skip-to TEST      Skip tests until TEST is reached (resume)
@@ -35,6 +36,7 @@ set -e
 RUNS=1
 TARGET_TIME=20
 TIMEOUT=300
+SCALE=""
 OUTPUT=""
 NUMACTL_ARGS=""
 TASKSET_ARGS=""
@@ -62,6 +64,7 @@ while [[ $# -gt 0 ]]; do
         --output|-o) OUTPUT="$2"; shift 2 ;;
         --numactl) NUMACTL_ARGS="$2"; shift 2 ;;
         --taskset) TASKSET_ARGS="$2"; shift 2 ;;
+        --scale) SCALE="$2"; shift 2 ;;
         --save-classify) SAVE_CLASSIFY=1; shift ;;
         --classify-from) CLASSIFY_FROM="$2"; shift 2 ;;
         --skip-to) SKIP_TO="$2"; shift 2 ;;
@@ -224,6 +227,11 @@ benchmark_test() {
     key=$(classify_key "$testfile")
     local class="${TEST_CLASS[$key]}"
     local iters="${TEST_ITERS[$key]}"
+
+    # Apply scaling to looped tests
+    if [[ -n "$SCALE" && "$class" != "C" && "$class" != "X" && "$class" != "FAIL" ]]; then
+        iters=$(python3 -c "print(max(1, round($iters * $SCALE)))")
+    fi
 
     if [[ "$class" == "FAIL" ]]; then
         echo "${build_name},${testfile},FAIL,0,${run_num},0,0,0,0,0,no,${listfile}"
