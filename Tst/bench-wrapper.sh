@@ -101,8 +101,10 @@ HEADER
         echo '"BENCH_WALL:", rtimer - benchX_w;'
         echo 'exit;'
         ;;
-    C)
+    C|E)
         # Class C: Single run - just time one execution (no warmup)
+        # Class E: Same as C, but Singular timers expected to read 0
+        #          (test kills basering). Only ext_wall_ns is valid.
         cat <<'HEADER'
 system("--ticks-per-sec", 1000000);
 int benchX_c = timer; int benchX_w = rtimer;

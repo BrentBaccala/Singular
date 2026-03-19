@@ -229,7 +229,7 @@ benchmark_test() {
     local iters="${TEST_ITERS[$key]}"
 
     # Apply scaling to looped tests
-    if [[ -n "$SCALE" && "$class" != "C" && "$class" != "X" && "$class" != "FAIL" ]]; then
+    if [[ -n "$SCALE" && "$class" != "C" && "$class" != "E" && "$class" != "X" && "$class" != "FAIL" ]]; then
         iters=$(python3 -c "print(max(1, round($iters * $SCALE)))")
     fi
 
@@ -499,18 +499,19 @@ main() {
     echo "Total runs: $run_count, Success: $success, Issues: $failed" >&2
 
     # Class breakdown
-    local class_a=0 class_b=0 class_c=0 class_d=0 class_x=0 class_fail=0
+    local class_a=0 class_b=0 class_c=0 class_d=0 class_e=0 class_x=0 class_fail=0
     for class in "${TEST_CLASS[@]}"; do
         case "$class" in
             A) class_a=$((class_a + 1)) ;;
             B) class_b=$((class_b + 1)) ;;
             C) class_c=$((class_c + 1)) ;;
             D) class_d=$((class_d + 1)) ;;
+            E) class_e=$((class_e + 1)) ;;
             X) class_x=$((class_x + 1)) ;;
             FAIL) class_fail=$((class_fail + 1)) ;;
         esac
     done
-    echo "Classes: A=$class_a, B=$class_b, C=$class_c, D=$class_d, X=$class_x, FAIL=$class_fail" >&2
+    echo "Classes: A=$class_a, B=$class_b, C=$class_c, D=$class_d, E=$class_e, X=$class_x, FAIL=$class_fail" >&2
 
     if [[ -n "$csv_out" ]]; then
         echo "Results written to: $csv_out" >&2

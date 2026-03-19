@@ -82,7 +82,7 @@ m106si.tst,A,20000,60
 m107si.tst,A,20000,60
 m108si.tst,A,20000,60
 m109si.tst,A,20000,60
-m10ex.tst,C,1,300
+m10ex.tst,E,1,300
 m10si.tst,A,20000,60
 m110si.tst,A,20000,60
 m111si.tst,A,20000,60
@@ -106,7 +106,7 @@ m126si.tst,A,20000,60
 m127si.tst,A,20000,60
 m128si.tst,A,20000,60
 m129si.tst,A,20000,60
-m12ex.tst,C,1,300
+m12ex.tst,E,1,300
 m12si.tst,A,20000,60
 m130si.tst,A,20000,60
 m131si.tst,A,20000,60
@@ -227,7 +227,7 @@ m85si.tst,A,20000,60
 m86si.tst,A,20000,60
 m88si.tst,A,20000,60
 m89si.tst,A,20000,60
-m8ex.tst,C,1,300
+m8ex.tst,E,1,300
 m8si.tst,A,20000,60
 m90si.tst,A,317,60
 m90si_1.tst,A,108,60

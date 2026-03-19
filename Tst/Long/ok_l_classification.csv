@@ -1,6 +1,6 @@
 allres_l.tst,A,10000,60
 bardet_probl_l.tst,A,2,60
-brnoeth_l.tst,C,1,300
+brnoeth_l.tst,E,1,300
 bug_39.tst,A,2224,60
 bug_4.tst,C,1,300
 bug_45.tst,A,226,60
@@ -12,7 +12,7 @@ classify_l.tst,A,20000,60
 cyclic-sba_l.tst,C,1,300
 deform_l.tst,A,10,60
 det_minor.tst,A,25,60
-eco-sba_l.tst,C,1,300
+eco-sba_l.tst,E,1,300
 eliminate_2.tst,A,3,60
 eliminate_6.tst,A,3,60
 eliminate_8.tst,A,7,60
