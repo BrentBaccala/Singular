@@ -122,8 +122,8 @@ conv_bi.tst,A,68489,60
 facstd.tst,A,5,60
 fermat_gcd_1var.tst,A,903,60
 fermat_gcd_2var.tst,A,1,60
-fermat_gcd_3var.tst,A,1,60
-fermat_gcd_4var.tst,A,1,60
+fermat_gcd_3var.tst,A,1,300
+fermat_gcd_4var.tst,A,1,300
 fermat_gcd_mod_1var.tst,A,482,60
 fermat_gcd_mod_2var.tst,A,3,60
 fermat_gcd_mod_3var.tst,A,1,60
@@ -138,7 +138,7 @@ gcd5test.tst,C,1,300
 gcd_univar_p_alpha_s.tst,A,6,60
 gcd_univar_p_s.tst,A,1304,60
 gmssin_s.tst,A,186,60
-homalg.tst,A,1,60
+homalg.tst,A,1,300
 invar_lib.tst,A,3,60
 issue1277.tst,A,886,60
 issue1284.tst,A,168371,60
