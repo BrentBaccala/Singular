@@ -3422,7 +3422,7 @@ void chainCritNormal (poly p,int ecart,kStrategy strat)
   }
   else
   {
-    for (auto jt = strat->L.begin(); jt != strat->L.end(); )
+    for (auto jt = strat->L.ubegin(); jt != strat->L.uend(); )
     {
       #ifdef HAVE_SHIFTBBA
       if (!(sev_p & ~jt->sev_lcm)
