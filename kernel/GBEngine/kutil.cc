@@ -1248,6 +1248,69 @@ LSet::iterator LSet::erase(LSet::iterator it) {
   return writable_set<LObject, CompareLObject>::erase(it);
 }
 
+LSet::unordered_iterator LSet::erase(LSet::unordered_iterator it) {
+  LObject& Lp = *it;
+  const kStrategy strat = key_comp().strat;
+
+  if (Lp.lcm!=NULL)
+  {
+    kDeleteLcm(&Lp);
+  }
+  if (Lp.sig!=NULL)
+  {
+    if (pGetCoeff(Lp.sig) != NULL)
+      pLmDelete(Lp.sig);
+    else
+      pLmFree(Lp.sig);
+  }
+  if (Lp.p!=NULL)
+  {
+    if (pNext(Lp.p) == strat->tail)
+    {
+      if (pGetCoeff(Lp.p) != NULL)
+        pLmDelete(Lp.p);
+      else
+        pLmFree(Lp.p);
+      /*- tail belongs to several int spolys -*/
+    }
+    else
+    {
+      // search p in T, if it is there, do not delete it
+      if (rHasGlobalOrdering(currRing) || (kFindInT(Lp.p, strat) < 0))
+      {
+        Lp.Delete();
+      }
+    }
+  }
+  #ifdef HAVE_SHIFTBBA
+  /* this logic was added in commit 95b7138 to fix a memory leak */
+  if (is_shifted_p1(/*strat->P.p1,*/strat))
+  {
+    // clean up strat->P.p1: may be shifted
+    pLmDelete(strat->P.p1);
+    strat->P.p1=NULL;
+  }
+  #endif
+
+  // Remove from pair_index before erasing from the set
+  if (Lp.p1 != NULL && Lp.p2 != NULL)
+  {
+    auto key = canonicalize_pair(Lp.p1, Lp.p2);
+    // For unordered_iterator, match by comparing the pointed-to LObject address
+    auto range = pair_index.equal_range(key);
+    for (auto pit = range.first; pit != range.second; ++pit)
+    {
+      if (&(*pit->second) == &Lp)
+      {
+        pair_index.erase(pit);
+        break;
+      }
+    }
+  }
+
+  return writable_set<LObject, CompareLObject>::erase(it);
+}
+
 /*2
 * Reorder L and rebuild pair_index with new iterators
 */
@@ -3262,7 +3325,7 @@ void chainCritNormal (poly p,int ecart,kStrategy strat)
     *and lcm(s,r)#lcm(s,p) and lcm(s,r)#lcm(r,p)
     *and in case the sugar is o.k. then L[j] can be canceled
     */
-      for (auto it = strat->L.begin(); it != strat->L.end(); )
+      for (auto it = strat->L.ubegin(); it != strat->L.uend(); )
       {
         if (!(sev_p & ~it->sev_lcm)
         && sugarDivisibleBy(ecart,it->ecart)
@@ -3317,7 +3380,7 @@ void chainCritNormal (poly p,int ecart,kStrategy strat)
       *and lcm(s,r)#lcm(s,p) and lcm(s,r)#lcm(r,p)
       *and in case the sugar is o.k. then L[j] can be canceled
       */
-      for (auto jt = strat->L.begin(); jt != strat->L.end(); )
+      for (auto jt = strat->L.ubegin(); jt != strat->L.uend(); )
       {
         if (!(sev_p & ~jt->sev_lcm)
         && pCompareChain(p,jt->p1,jt->p2,jt->lcm))

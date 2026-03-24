@@ -196,6 +196,7 @@ public:
   int   i_r1, i_r2;
   unsigned seq;       // the sequence number of the LSet when this LObject was inserted
                       // used to determine LSet ordering for equal LObjects
+  size_t flat_index;      // index in writable_set's flat array for unordered iteration
   unsigned checked; // this is the index of S up to which
                       // the corresponding LObject was already checked in
                       // critical pair creation => when entering the
@@ -326,6 +327,9 @@ public:
   using writable_set<LObject, CompareLObject>::empty;
   using writable_set<LObject, CompareLObject>::size;
   using writable_set<LObject, CompareLObject>::size_type;
+  using writable_set<LObject, CompareLObject>::unordered_iterator;
+  using writable_set<LObject, CompareLObject>::ubegin;
+  using writable_set<LObject, CompareLObject>::uend;
   void reorder();
   KINLINE iterator push(LObject& lobject);
   KINLINE bool would_be_top(LObject& lobject);
@@ -334,6 +338,7 @@ public:
   KINLINE const LObject& top(void);
   KINLINE iterator insert(LObject& lobject);
   iterator erase(iterator it);
+  unordered_iterator erase(unordered_iterator it);
 
   // Fast lookup: find an iterator >= it where (p1,p2) or (p2,p1) matches
   // Returns true if found, and updates it to point to the match

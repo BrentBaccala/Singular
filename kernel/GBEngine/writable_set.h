@@ -16,6 +16,8 @@
  *   and dereferences element pointers when comparing
  * - Provides an iterator_wrapper that automatically dereferences pointers, so users
  *   work directly with T& references in range-based for loops and iterator operations
+ * - Maintains a parallel flat array of multiset iterators for cache-friendly
+ *   unordered iteration (used by chain criterion scanning)
  *
  * MEMORY MANAGEMENT:
  * - Objects are allocated with new on insert/emplace
@@ -47,6 +49,7 @@
 #include <memory>
 #include <iterator>
 #include <utility>
+#include <vector>
 
 template<typename T, typename Compare = std::less<T>>
 class writable_set {
@@ -62,6 +65,7 @@ private:
     using set_type = std::multiset<T*, ptr_compare>;
     Compare comp_;  // Must be declared before data_ for initialization order
     set_type data_;
+    std::vector<typename set_type::iterator> flat_;
 
 public:
     using value_type = T;
@@ -128,6 +132,49 @@ public:
     using reverse_iterator = std::reverse_iterator<iterator>;
     using const_reverse_iterator = std::reverse_iterator<const_iterator>;
 
+    // Unordered iterator for cache-friendly scanning of the flat array
+    class unordered_iterator {
+        writable_set* owner_;
+        size_t pos_;
+        friend class writable_set;
+
+        void skip_deleted() {
+            while (pos_ < owner_->flat_.size()
+                   && owner_->flat_[pos_] == owner_->data_.end())
+                ++pos_;
+        }
+
+    public:
+        using iterator_category = std::forward_iterator_tag;
+        using value_type = T;
+        using difference_type = std::ptrdiff_t;
+        using pointer = T*;
+        using reference = T&;
+
+        unordered_iterator() : owner_(nullptr), pos_(0) {}
+        unordered_iterator(writable_set* owner, size_t pos)
+            : owner_(owner), pos_(pos) {
+            skip_deleted();
+        }
+
+        reference operator*() const { return **(owner_->flat_[pos_]); }
+        pointer operator->() const { return *(owner_->flat_[pos_]); }
+
+        unordered_iterator& operator++() {
+            ++pos_;
+            skip_deleted();
+            return *this;
+        }
+        unordered_iterator operator++(int) {
+            unordered_iterator tmp = *this;
+            ++(*this);
+            return tmp;
+        }
+
+        bool operator==(const unordered_iterator& other) const { return pos_ == other.pos_; }
+        bool operator!=(const unordered_iterator& other) const { return pos_ != other.pos_; }
+    };
+
     // Constructors
     writable_set() : comp_(), data_(ptr_compare(&comp_)) {}
     writable_set(const Compare& comp) : comp_(comp), data_(ptr_compare(&comp_)) {}
@@ -161,7 +208,15 @@ public:
         for (auto ptr : other.data_) {
             data_.insert(ptr);
         }
+        // Rebuild flat_ from our new data_ iterators
+        flat_.clear();
+        flat_.reserve(data_.size());
+        for (auto it = data_.begin(); it != data_.end(); ++it) {
+            (*it)->flat_index = flat_.size();
+            flat_.push_back(it);
+        }
         other.data_.clear();
+        other.flat_.clear();
     }
 
     // Assignment operators
@@ -179,6 +234,14 @@ public:
         if (this != &other) {
             clear();
             data_ = std::move(other.data_);
+            // Rebuild flat_ from moved data_ iterators
+            flat_.clear();
+            flat_.reserve(data_.size());
+            for (auto it = data_.begin(); it != data_.end(); ++it) {
+                (*it)->flat_index = flat_.size();
+                flat_.push_back(it);
+            }
+            other.flat_.clear();
         }
         return *this;
     }
@@ -188,13 +251,17 @@ public:
         clear();
     }
 
-    // Iterators
+    // Ordered iterators
     iterator begin() { return iterator(data_.begin()); }
     iterator end() { return iterator(data_.end()); }
     const_iterator begin() const { return const_iterator(data_.begin()); }
     const_iterator end() const { return const_iterator(data_.end()); }
     const_iterator cbegin() const { return const_iterator(data_.begin()); }
     const_iterator cend() const { return const_iterator(data_.end()); }
+
+    // Unordered iterators
+    unordered_iterator ubegin() { return unordered_iterator(this, 0); }
+    unordered_iterator uend() { return unordered_iterator(this, flat_.size()); }
 
     reverse_iterator rbegin() { return reverse_iterator(end()); }
     reverse_iterator rend() { return reverse_iterator(begin()); }
@@ -214,37 +281,59 @@ public:
             delete ptr;
         }
         data_.clear();
+        flat_.clear();
     }
 
     iterator insert(const T& value) {
         T* new_obj = new T(value);
+        new_obj->flat_index = flat_.size();
         auto result = data_.insert(new_obj);
+        flat_.push_back(result);
         return iterator(result);
     }
 
     iterator insert(T&& value) {
         T* new_obj = new T(std::move(value));
+        new_obj->flat_index = flat_.size();
         auto result = data_.insert(new_obj);
+        flat_.push_back(result);
         return iterator(result);
     }
 
     template<typename... Args>
     iterator emplace(Args&&... args) {
         T* new_obj = new T(std::forward<Args>(args)...);
+        new_obj->flat_index = flat_.size();
         auto result = data_.insert(new_obj);
+        flat_.push_back(result);
         return iterator(result);
     }
 
     iterator erase(const_iterator pos) {
+        size_t fi = (*pos.it_)->flat_index;
+        if (fi < flat_.size()) flat_[fi] = data_.end();
         delete *pos.it_;
         return iterator(data_.erase(pos.it_));
     }
 
     iterator erase(const_iterator first, const_iterator last) {
         for (auto it = first; it != last; ++it) {
+            size_t fi = (*it.it_)->flat_index;
+            if (fi < flat_.size()) flat_[fi] = data_.end();
             delete *it.it_;
         }
         return iterator(data_.erase(first.it_, last.it_));
+    }
+
+    // Erase via unordered_iterator; returns next valid unordered position
+    unordered_iterator erase(unordered_iterator pos) {
+        auto set_it = flat_[pos.pos_];
+        delete *set_it;
+        data_.erase(set_it);
+        flat_[pos.pos_] = data_.end();
+        ++pos.pos_;
+        pos.skip_deleted();
+        return pos;
     }
 
     size_type erase(const T& value) {
@@ -300,6 +389,14 @@ public:
         // Re-insert all pointers from old tree into new tree
         for (auto ptr : old_data) {
             data_.insert(ptr);
+        }
+
+        // Rebuild flat_ from our new data_ iterators
+        flat_.clear();
+        flat_.reserve(data_.size());
+        for (auto it = data_.begin(); it != data_.end(); ++it) {
+            (*it)->flat_index = flat_.size();
+            flat_.push_back(it);
         }
 
         // old_data destructor just clears pointers, doesn't delete objects
