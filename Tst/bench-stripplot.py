@@ -56,15 +56,41 @@ def make_time_formatter(max_us, tick_values):
     return fmt
 
 
+def make_count_formatter(max_val, tick_values):
+    """Return a formatter for hardware counter values (instructions, cycles, etc.)."""
+    if max_val >= 1e9:
+        divisor, suffix = 1e9, 'B'
+    elif max_val >= 1e6:
+        divisor, suffix = 1e6, 'M'
+    elif max_val >= 1e3:
+        divisor, suffix = 1e3, 'K'
+    else:
+        divisor, suffix = 1, ''
+
+    all_integer = all(abs(v / divisor - round(v / divisor)) < 0.01
+                      for v in tick_values if v >= 0)
+
+    if all_integer:
+        def fmt(val, _pos=None):
+            return f'{val/divisor:.0f} {suffix}'.rstrip()
+        return fmt
+    else:
+        def fmt(val, _pos=None):
+            return f'{val/divisor:.1f} {suffix}'.rstrip()
+        return fmt
+
+
 def main():
     parser = argparse.ArgumentParser(
         description='Strip plot of benchmark timings')
     parser.add_argument('files', nargs='+', help='CSV benchmark files')
     parser.add_argument('-o', '--output', default='bench-timings.pdf',
                         help='Output PDF file (default: bench-timings.pdf)')
-    parser.add_argument('--metric', choices=['wall_us', 'cpu_us'],
+    parser.add_argument('--metric',
+                        choices=['wall_us', 'cpu_us', 'instructions', 'cycles',
+                                 'cache_misses', 'branch_misses'],
                         default='wall_us',
-                        help='Timing metric (default: wall_us)')
+                        help='Metric to plot (default: wall_us)')
     parser.add_argument('--per-page', type=int, default=45,
                         help='Tests per page (default: 45)')
     parser.add_argument('--title', type=str, default=None,
@@ -72,7 +98,12 @@ def main():
     args = parser.parse_args()
 
     metric = args.metric
-    metric_label = 'Wall Time' if metric == 'wall_us' else 'CPU Time'
+    metric_labels = {
+        'wall_us': 'Wall Time', 'cpu_us': 'CPU Time',
+        'instructions': 'Instructions', 'cycles': 'Cycles',
+        'cache_misses': 'Cache Misses', 'branch_misses': 'Branch Misses',
+    }
+    metric_label = metric_labels.get(metric, metric)
     title = args.title or f'Benchmark {metric_label} by Test (sorted by mean)'
 
     # Read all data
@@ -167,11 +198,15 @@ def main():
             ax.margins(x=0.05)
             ax.set_xlim(left=max(0, ax.get_xlim()[0]))
 
-            # Set consistent time units based on the page's max value
+            # Set consistent units based on the page's max value
             # Get the auto-generated tick positions to decide on decimal format
             tick_vals = ax.get_xticks()
-            ax.xaxis.set_major_formatter(
-                ticker.FuncFormatter(make_time_formatter(ax.get_xlim()[1], tick_vals)))
+            if metric in ('instructions', 'cycles', 'cache_misses', 'branch_misses'):
+                ax.xaxis.set_major_formatter(
+                    ticker.FuncFormatter(make_count_formatter(ax.get_xlim()[1], tick_vals)))
+            else:
+                ax.xaxis.set_major_formatter(
+                    ticker.FuncFormatter(make_time_formatter(ax.get_xlim()[1], tick_vals)))
 
             page_title = f'{title}  (page {page+1}/{n_pages})'
             ax.set_title(page_title, fontsize=11, fontweight='bold')

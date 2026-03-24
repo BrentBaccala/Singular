@@ -76,9 +76,12 @@ def main():
                         help='Only show tests with CV%% above this threshold')
     parser.add_argument('--min-runs', type=int, default=2,
                         help='Minimum runs needed for stats (default: 2)')
-    parser.add_argument('--metric', choices=['cpu_us', 'wall_us', 'ext_wall_ns'],
+    parser.add_argument('--metric',
+                        choices=['cpu_us', 'wall_us', 'ext_wall_ns',
+                                 'instructions', 'cycles', 'cache_misses',
+                                 'branch_misses'],
                         default='wall_us',
-                        help='Which timing metric to analyze (default: wall_us)')
+                        help='Which metric to analyze (default: wall_us)')
     parser.add_argument('--log-end', type=str, default=None,
                         help='Log file end timestamp for absolute time reconstruction')
     parser.add_argument('--during', nargs=2, metavar=('START', 'END'),
@@ -127,6 +130,10 @@ def main():
     tests = defaultdict(list)
     for i, row in enumerate(rows):
         metric = args.metric
+        if metric not in row:
+            print(f"Error: metric '{metric}' not found in CSV. "
+                  f"Available columns: {', '.join(row.keys())}")
+            return
         if metric == 'ext_wall_ns':
             val = int(row[metric]) / 1000  # convert to us for display
         else:

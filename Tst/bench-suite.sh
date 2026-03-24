@@ -138,7 +138,7 @@ CLASSIFY_SINGULAR="${BUILD_COMMANDS[0]}"
 
 # CSV header
 csv_header() {
-    echo "build,test_name,class,iterations,run,warmup_cpu_us,warmup_wall_us,cpu_us,wall_us,ext_wall_ns,clean_exit,list_file"
+    echo "build,test_name,class,iterations,run,warmup_cpu_us,warmup_wall_us,cpu_us,wall_us,ext_wall_ns,clean_exit,list_file,instructions,cycles,cache_misses,branch_misses"
 }
 
 # Collect tests from list files and/or individual .tst files
@@ -234,7 +234,7 @@ benchmark_test() {
     fi
 
     if [[ "$class" == "FAIL" ]]; then
-        echo "${build_name},${testfile},FAIL,0,${run_num},0,0,0,0,0,no,${listfile}"
+        echo "${build_name},${testfile},FAIL,0,${run_num},0,0,0,0,0,no,${listfile},0,0,0,0"
         return
     fi
 
@@ -249,9 +249,13 @@ benchmark_test() {
     local test_timeout="${TEST_TIMEOUT[$key]:-$TIMEOUT}"
     local output exit_code=0
     local start_ns end_ns
+    local perf_output_file
+    perf_output_file=$(mktemp /tmp/bench-perf.XXXXXX)
+
     start_ns=$(date +%s%N)
-    output=$(timeout "$test_timeout" bash -c \
-        "'$WRAPPER' --class '$class' --iterations '$iters' '$testfile' | $full_cmd 2>&1") || exit_code=$?
+    output=$(timeout "$test_timeout" perf stat -e instructions,cycles,cache-misses,branch-misses \
+        -o "$perf_output_file" \
+        bash -c "'$WRAPPER' --class '$class' --iterations '$iters' '$testfile' | $full_cmd 2>&1") || exit_code=$?
     end_ns=$(date +%s%N)
 
     local warmup_cpu_us=0
@@ -260,6 +264,10 @@ benchmark_test() {
     local wall_us=0
     local ext_wall_ns=$(( end_ns - start_ns ))
     local clean="yes"
+    local instructions=0
+    local cycles=0
+    local cache_misses=0
+    local branch_misses=0
 
     if [[ $exit_code -ne 0 ]]; then
         clean="no"
@@ -286,12 +294,32 @@ benchmark_test() {
     cpu_us=$(extract_timer "BENCH_CPU")
     wall_us=$(extract_timer "BENCH_WALL")
 
+    # Extract perf stat counters
+    extract_perf_counter() {
+        local counter="$1"
+        local val
+        val=$(grep "$counter" "$perf_output_file" | head -1 | \
+            sed 's/^[[:space:]]*//' | cut -d' ' -f1 | tr -d ',') || true
+        if [[ -n "$val" && "$val" =~ ^[0-9]+$ ]]; then
+            echo "$val"
+        else
+            echo "0"
+        fi
+    }
+
+    instructions=$(extract_perf_counter "instructions")
+    cycles=$(extract_perf_counter "cycles")
+    cache_misses=$(extract_perf_counter "cache-misses")
+    branch_misses=$(extract_perf_counter "branch-misses")
+
+    rm -f "$perf_output_file"
+
     # Check for crashes only (not Singular runtime errors, which some tests produce deliberately)
     if echo "$output" | grep -qi 'SIGSEGV\|Segmentation fault\|Abort'; then
         clean="no"
     fi
 
-    echo "${build_name},${testfile},${class},${iters},${run_num},${warmup_cpu_us},${warmup_wall_us},${cpu_us},${wall_us},${ext_wall_ns},${clean},${listfile}"
+    echo "${build_name},${testfile},${class},${iters},${run_num},${warmup_cpu_us},${warmup_wall_us},${cpu_us},${wall_us},${ext_wall_ns},${clean},${listfile},${instructions},${cycles},${cache_misses},${branch_misses}"
 }
 
 # Load classification from file (keys are filenames, not paths)
