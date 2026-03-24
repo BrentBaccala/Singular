@@ -108,6 +108,10 @@ def main():
             fig_height = max(6, n_tests * 0.28 + 1.5)
             fig, ax = plt.subplots(figsize=(14, fig_height))
 
+            # Draw thin gray horizontal lines for each test
+            for yi in range(n_tests):
+                ax.axhline(y=yi, color='gray', linewidth=0.3, zorder=1)
+
             for yi, test in enumerate(page_tests):
                 for build in builds:
                     vals = data.get((build, test), [])
@@ -133,8 +137,9 @@ def main():
             ax.set_xlabel(metric_label, fontsize=10)
             ax.grid(axis='x', alpha=0.3)
 
-            # x-axis: auto-scale per page with small padding
+            # x-axis: auto-scale per page, never show negative time
             ax.margins(x=0.05)
+            ax.set_xlim(left=max(0, ax.get_xlim()[0]))
 
             page_title = f'{title}  (page {page+1}/{n_pages})'
             ax.set_title(page_title, fontsize=11, fontweight='bold')
