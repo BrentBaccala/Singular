@@ -14,6 +14,10 @@
 #include "gfops.h"
 #include "imm.h"
 
+#ifdef HAVE_NTL
+#include <NTL/ZZ.h>
+#endif
+
 #ifdef HAVE_FLINT
 #ifndef __GMP_BITS_PER_MP_LIMB
 #define __GMP_BITS_PER_MP_LIMB GMP_LIMB_BITS
@@ -193,5 +197,9 @@ void factoryseed ( int s )
 #else
     flint_randinit(FLINTrandom);
 #endif
+    flint_randseed(FLINTrandom, (ulong)s, (ulong)s);
+#endif
+#ifdef HAVE_NTL
+    NTL::SetSeed(NTL::ZZ(NTL::INIT_VAL, (long)s));
 #endif
 }
