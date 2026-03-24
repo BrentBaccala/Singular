@@ -112,13 +112,24 @@ def main():
             for yi in range(n_tests):
                 ax.axhline(y=yi, color='gray', linewidth=0.3, zorder=1)
 
+            # Offset builds vertically so dots sit above/below the guide line
+            # First build: shifted up (bottom touches line)
+            # Second build: shifted down (top touches line)
+            n_builds = len(builds)
+            if n_builds == 1:
+                offsets = {builds[0]: 0}
+            else:
+                offsets = {builds[i]: -0.12 + i * 0.24 / (n_builds - 1)
+                           for i in range(n_builds)}
+
             for yi, test in enumerate(page_tests):
                 for build in builds:
                     vals = data.get((build, test), [])
                     if not vals:
                         continue
-                    ax.scatter(vals, [yi] * len(vals),
-                               s=8, color=build_colors[build],
+                    y_pos = [yi + offsets[build]] * len(vals)
+                    ax.scatter(vals, y_pos,
+                               s=16, color=build_colors[build],
                                label=build if yi == 0 else None,
                                alpha=0.8, zorder=5, edgecolors='none')
 
@@ -145,7 +156,7 @@ def main():
             ax.set_title(page_title, fontsize=11, fontweight='bold')
 
             if len(builds) > 1:
-                ax.legend(loc='lower right', markerscale=2, fontsize=8)
+                ax.legend(loc='upper right', markerscale=2, fontsize=8)
 
             plt.tight_layout()
             pdf.savefig(fig, dpi=150)
