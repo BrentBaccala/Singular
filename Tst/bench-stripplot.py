@@ -30,14 +30,30 @@ import math
 from collections import defaultdict
 
 
-def format_time(us, _pos=None):
-    """Format microseconds into a human-readable string."""
-    if us >= 1e6:
-        return f'{us/1e6:.1f}s'
-    elif us >= 1e3:
-        return f'{us/1e3:.1f}ms'
+def make_time_formatter(max_us, tick_values):
+    """Return a formatter that uses consistent units based on the max value.
+
+    Uses integer format if all tick values are whole numbers in the
+    chosen unit, otherwise uses one decimal place.
+    """
+    if max_us >= 1e6:
+        unit, divisor, suffix = 's', 1e6, 's'
+    elif max_us >= 1e3:
+        unit, divisor, suffix = 'ms', 1e3, 'ms'
     else:
-        return f'{us:.0f}µs'
+        unit, divisor, suffix = 'µs', 1, 'µs'
+
+    # Check if all ticks are whole numbers in this unit
+    all_integer = all(abs(v / divisor - round(v / divisor)) < 0.01
+                      for v in tick_values if v >= 0)
+
+    if all_integer:
+        def fmt(us, _pos=None):
+            return f'{us/divisor:.0f} {suffix}'
+    else:
+        def fmt(us, _pos=None):
+            return f'{us/divisor:.1f} {suffix}'
+    return fmt
 
 
 def main():
@@ -144,13 +160,18 @@ def main():
             ax.set_yticklabels(labels, fontsize=7, family='monospace')
             ax.invert_yaxis()  # shortest at top
 
-            ax.xaxis.set_major_formatter(ticker.FuncFormatter(format_time))
             ax.set_xlabel(metric_label, fontsize=10)
             ax.grid(axis='x', alpha=0.3)
 
             # x-axis: auto-scale per page, never show negative time
             ax.margins(x=0.05)
             ax.set_xlim(left=max(0, ax.get_xlim()[0]))
+
+            # Set consistent time units based on the page's max value
+            # Get the auto-generated tick positions to decide on decimal format
+            tick_vals = ax.get_xticks()
+            ax.xaxis.set_major_formatter(
+                ticker.FuncFormatter(make_time_formatter(ax.get_xlim()[1], tick_vals)))
 
             page_title = f'{title}  (page {page+1}/{n_pages})'
             ax.set_title(page_title, fontsize=11, fontweight='bold')
