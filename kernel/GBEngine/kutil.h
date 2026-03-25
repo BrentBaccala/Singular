@@ -308,16 +308,14 @@ class LSet : public writable_set<LObject, CompareLObject> {
 private:
   unsigned seq = 0;   // increments by one on every insertion; used to determine ordering
 
-  // Index mapping canonicalized (p1,p2) pairs to iterators for fast lookup
-  // Pairs are canonicalized such that first <= second (by pointer comparison)
-  std::unordered_multimap<std::pair<poly, poly>, iterator, PolyPairHash> pair_index;
+public:
+  std::unordered_map<std::pair<poly, poly>, iterator, PolyPairHash> pair_index;
 
-  // Helper to canonicalize a (p1,p2) pair
+  // Helper to canonicalize a (p1,p2) pair by pointer value
   static std::pair<poly, poly> canonicalize_pair(poly p1, poly p2) {
     return (p1 <= p2) ? std::make_pair(p1, p2) : std::make_pair(p2, p1);
   }
 
-public:
   using writable_set<LObject, CompareLObject>::iterator;
   using writable_set<LObject, CompareLObject>::begin;
   using writable_set<LObject, CompareLObject>::end;
@@ -330,19 +328,42 @@ public:
   using writable_set<LObject, CompareLObject>::unordered_iterator;
   using writable_set<LObject, CompareLObject>::ubegin;
   using writable_set<LObject, CompareLObject>::uend;
-  void reorder();
-  KINLINE iterator push(LObject& lobject);
+
+  // Override insert to maintain pair_index
+  iterator insert(const LObject& lobject) {
+    iterator it = writable_set<LObject, CompareLObject>::insert(lobject);
+    if (it->p1 != NULL && it->p2 != NULL) {
+      auto key = canonicalize_pair(it->p1, it->p2);
+      pair_index.emplace(key, it);
+    }
+    return it;
+  }
+
+  // Override clear to also clear pair_index
+  void clear() {
+    pair_index.clear();
+    writable_set<LObject, CompareLObject>::clear();
+  }
+
+  // Override reorder to rebuild pair_index with new iterators
+  void reorder() {
+    writable_set<LObject, CompareLObject>::reorder();
+    pair_index.clear();
+    for (iterator it = begin(); it != end(); ++it) {
+      if (it->p1 != NULL && it->p2 != NULL) {
+        auto key = canonicalize_pair(it->p1, it->p2);
+        pair_index.emplace(key, it);
+      }
+    }
+  }
+
+  KINLINE void push(LObject& lobject);
   KINLINE bool would_be_top(LObject& lobject);
   KINLINE void pop(void);
   KINLINE void pop_and_erase(void);
   KINLINE const LObject& top(void);
-  KINLINE iterator insert(LObject& lobject);
   iterator erase(iterator it);
   unordered_iterator erase(unordered_iterator it);
-
-  // Fast lookup: find an iterator >= it where (p1,p2) or (p2,p1) matches
-  // Returns true if found, and updates it to point to the match
-  bool find_pair(poly p1, poly p2, iterator& it);
 };
 
 class skStrategy

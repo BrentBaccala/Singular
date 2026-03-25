@@ -30,7 +30,6 @@
 
 #include <stdlib.h>
 #include <string.h>
-#include <algorithm>
 
 #ifdef KDEBUG
 #undef KDEBUG
@@ -673,16 +672,19 @@ void initPairtest(kStrategy strat)
 
 
 /*2
-*test whether (p1,p2) or (p2,p1) is in L at or after an iterator
-*it returns TRUE if yes and modifies the iterator to point to the match
+*test whether (p1,p2) or (p2,p1) is in L
+*it returns TRUE if yes and sets the iterator to point to the match
 */
 BOOLEAN isInPairsetL(LSet::iterator &it,poly p1,poly p2,kStrategy strat)
 {
-  // Use the fast hash-based lookup
-  if (it != strat->L.end())
-    return strat->L.find_pair(p1, p2, it);
-  else
-    return FALSE;
+  if (p1 == NULL || p2 == NULL) return FALSE;
+  auto key = LSet::canonicalize_pair(p1, p2);
+  auto found = strat->L.pair_index.find(key);
+  if (found != strat->L.pair_index.end()) {
+    it = found->second;
+    return TRUE;
+  }
+  return FALSE;
 }
 
 int kFindInT(poly p, TSet T, int tlength)
@@ -1188,6 +1190,12 @@ LSet::iterator LSet::erase(LSet::iterator it) {
   LObject& Lp = *it;
   const kStrategy strat = key_comp().strat;
 
+  // Remove from pair_index
+  if (Lp.p1 != NULL && Lp.p2 != NULL) {
+    auto key = canonicalize_pair(Lp.p1, Lp.p2);
+    pair_index.erase(key);
+  }
+
   if (Lp.lcm!=NULL)
   {
     kDeleteLcm(&Lp);
@@ -1229,28 +1237,18 @@ LSet::iterator LSet::erase(LSet::iterator it) {
     strat->P.p1=NULL;
   }
   #endif
-
-  // Remove from pair_index before erasing from the set
-  if (Lp.p1 != NULL && Lp.p2 != NULL)
-  {
-    auto key = canonicalize_pair(Lp.p1, Lp.p2);
-    auto range = pair_index.equal_range(key);
-    for (auto pit = range.first; pit != range.second; ++pit)
-    {
-      if (pit->second == it)
-      {
-        pair_index.erase(pit);
-        break;
-      }
-    }
-  }
-
   return writable_set<LObject, CompareLObject>::erase(it);
 }
 
 LSet::unordered_iterator LSet::erase(LSet::unordered_iterator it) {
   LObject& Lp = *it;
   const kStrategy strat = key_comp().strat;
+
+  // Remove from pair_index
+  if (Lp.p1 != NULL && Lp.p2 != NULL) {
+    auto key = canonicalize_pair(Lp.p1, Lp.p2);
+    pair_index.erase(key);
+  }
 
   if (Lp.lcm!=NULL)
   {
@@ -1291,73 +1289,7 @@ LSet::unordered_iterator LSet::erase(LSet::unordered_iterator it) {
     strat->P.p1=NULL;
   }
   #endif
-
-  // Remove from pair_index before erasing from the set
-  if (Lp.p1 != NULL && Lp.p2 != NULL)
-  {
-    auto key = canonicalize_pair(Lp.p1, Lp.p2);
-    // For unordered_iterator, match by comparing the pointed-to LObject address
-    auto range = pair_index.equal_range(key);
-    for (auto pit = range.first; pit != range.second; ++pit)
-    {
-      if (&(*pit->second) == &Lp)
-      {
-        pair_index.erase(pit);
-        break;
-      }
-    }
-  }
-
   return writable_set<LObject, CompareLObject>::erase(it);
-}
-
-/*2
-* Reorder L and rebuild pair_index with new iterators
-*/
-void LSet::reorder()
-{
-  // Call base class reorder - this invalidates all iterators
-  writable_set<LObject, CompareLObject>::reorder();
-
-  // Rebuild pair_index with new iterators
-  pair_index.clear();
-  for (iterator it = begin(); it != end(); ++it)
-  {
-    if (it->p1 != NULL && it->p2 != NULL)
-    {
-      auto key = canonicalize_pair(it->p1, it->p2);
-      pair_index.insert(std::make_pair(key, it));
-    }
-  }
-}
-
-/*2
-* Fast lookup for (p1,p2) pair in L starting from iterator it
-* Returns true if found, with it updated to point to the match
-* The pair can match in either order: (p1,p2) or (p2,p1)
-*/
-bool LSet::find_pair(poly p1, poly p2, iterator& it)
-{
-  if (p1 == NULL || p2 == NULL)
-    return FALSE;
-
-  auto key = canonicalize_pair(p1, p2);
-  auto range = pair_index.equal_range(key);
-
-  // Search through all iterators with this key
-  for (auto pit = range.first; pit != range.second; ++pit)
-  {
-    iterator candidate = pit->second;
-    // Check if candidate is at or after it in the ordering
-    // candidate >= it means NOT (candidate < it)
-    if (candidate == it || !key_comp()(*candidate, *it))
-    {
-      it = candidate;
-      return TRUE;
-    }
-  }
-
-  return FALSE;
 }
 
 /*2
@@ -3229,31 +3161,6 @@ void kMergeBintoL(kStrategy strat)
   }
 }
 
-/* merge set B into L, and return a vector of iterators pointing to the new
- * elements in L, guaranteed to be in the same order they appear in L
- *
- * The ordering is done to mimic previous versions of Singular so as
- * to ensure that regression tests pass.  I know of no other reason to
- * sort these iterators.
- */
-
-std::vector<LSet::iterator> kMergeBintoL_and_return_iterators(kStrategy strat)
-{
-  std::vector<LSet::iterator> iterators(strat->B.size());
-  int i = 0;
-  while (!strat->B.empty()) {
-    auto Lobj = strat->B.top();
-    strat->B.pop();
-    iterators[i++] = strat->L.push(Lobj);
-  }
-  // Sort iterators to match the ordering of their objects in L
-  std::sort(iterators.begin(), iterators.end(),
-    [&strat](LSet::iterator a, LSet::iterator b) {
-      return strat->L.key_comp()(*a, *b);
-    });
-  return iterators;
-}
-
 /*2
 *the pairset B of pairs of type (s[i],p) is complete now. It will be updated
 *using the chain-criterion in B and L and enters B to L
@@ -3446,69 +3353,54 @@ void chainCritNormal (poly p,int ecart,kStrategy strat)
     }
     /*
     *this is our MODIFICATION of GEBAUER-MOELLER:
-    *First the elements of B enter L,
-    *then we fix a lcm and the "best" element in L
-    *(i.e the last in L with this lcm and of type (s,p))
-    *and cancel all the other elements of type (r,p) with this lcm
-    *except the case the element (s,r) has also the same lcm
-    *and is on the worst position with respect to (s,p) and (r,p)
+    *Deduplicate B against itself: find same-lcm pairs within B
+    *and do triangle checks via pair_index in L (O(1) lookup).
+    *Then merge surviving B pairs into L.
     */
-    /*
-    *B enters to L/their order with respect to B is permutated for elements
-    *B[i].p with the same leading term
-    */
-    kMergeBintoL(strat);
-    for (auto jt = strat->L.begin(); jt != strat->L.end(); )
+    for (auto jt = strat->B.begin(); jt != strat->B.end(); )
     {
-      if (jt + 1 == strat->L.end())
+      bool j_deleted = false;
+      for (auto it = jt + 1; it != strat->B.end(); )
       {
-        /*now L[0] cannot be canceled any more and the tail can be removed*/
-        if (jt->p2 == strat->tail) jt->p2 = p;
-        break;
-      }
-      if (jt->p2 == p)
-      {
-        for (auto it = jt + 1; it != strat->L.end(); )
+        if (pLmEqual(jt->lcm, it->lcm))
         {
-          bool i_deleted = false;
-          if ((it->p2 == p) && pLmEqual(jt->lcm,it->lcm))
+          /*B[i] could be canceled but we search for a better one to cancel*/
+          strat->c3++;
+          LSet::iterator lt = strat->L.begin();
+          if (isInPairsetL(lt, jt->p1, it->p1, strat)
+          && (pNext(lt->p) == strat->tail)
+          && (!pLmEqual(it->p, lt->p))
+          && pDivisibleBy(p, lt->lcm))
           {
-            /*L[i] could be canceled but we search for a better one to cancel*/
-            strat->c3++;
-            auto lt = it + 1;
-            if (isInPairsetL(lt,jt->p1,it->p1,strat)
-            && (pNext(lt->p) == strat->tail)
-            && (!pLmEqual(it->p,lt->p))
-            && pDivisibleBy(p,lt->lcm))
-            {
-              /*
-              *"NOT equal(...)" because in case of "equal" the element L[l]
-              *is "older" and has to be from theoretical point of view behind
-              *L[i], but we do not want to reorder L
-              */
-              it->p2 = strat->tail;
-              /*
-              *L[l] will be canceled, we cannot cancel L[i] later on,
-              *so we mark it with "tail"
-              */
-              strat->L.erase(lt);
-            }
-            else
-            {
-              i_deleted = true;
-              it = strat->L.erase(it);
-            }
-          }
-          if (!i_deleted)
+            /*
+            *"NOT equal(...)" because in case of "equal" the element L[l]
+            *is "older" and has to be from theoretical point of view behind
+            *B[i], but we do not want to reorder L
+            */
+            it->p2 = strat->tail;
+            /*
+            *L[l] will be canceled, we cannot cancel B[i] later on,
+            *so we mark it with "tail"
+            */
+            strat->L.erase(lt);
             ++it;
+          }
+          else
+          {
+            it = strat->B.erase(it);
+          }
         }
+        else
+          ++it;
       }
-      else if (jt->p2 == strat->tail)
-      {
-        /*now L[j] cannot be canceled any more and the tail can be removed*/
-        jt->p2 = p;
-      }
-      ++jt;
+      if (!j_deleted) ++jt;
+    }
+    kMergeBintoL(strat);
+    /* Fix up tail markers: pairs marked with strat->tail during
+     * deduplication need their p2 restored to p */
+    for (auto jt = strat->L.begin(); jt != strat->L.end(); ++jt)
+    {
+      if (jt->p2 == strat->tail) jt->p2 = p;
     }
   }
 }

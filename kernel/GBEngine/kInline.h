@@ -989,7 +989,7 @@ KINLINE bool CompareLObject::operator()(const LObject &lhs, const LObject &rhs) 
   }
 };
 
-KINLINE LSet::iterator LSet::push(LObject& lobject) {
+KINLINE void LSet::push(LObject& lobject) {
   /* We track a sequence number to allow FIFO or LIFO ordering to be selected for equal objects */
   lobject.seq = seq;
   seq ++;
@@ -1009,21 +1009,7 @@ KINLINE LSet::iterator LSet::push(LObject& lobject) {
     if (lobject.t_p != NULL)
       pSetCoeff0(lobject.t_p, pGetCoeff(lobject.p));
   }
-  return insert(lobject);
-}
-
-KINLINE LSet::iterator LSet::insert(LObject& lobject) {
-  // Insert into the base writable_set
-  iterator it = writable_set<LObject, CompareLObject>::insert(lobject);
-
-  // Add to pair_index if both p1 and p2 are non-null
-  if (it->p1 != NULL && it->p2 != NULL)
-  {
-    auto key = canonicalize_pair(it->p1, it->p2);
-    pair_index.insert(std::make_pair(key, it));
-  }
-
-  return it;
+  insert(lobject);  // calls LSet::insert which maintains pair_index
 }
 
 KINLINE bool LSet::would_be_top(LObject& lobject) {
@@ -1050,22 +1036,10 @@ KINLINE void LSet::pop(void) {
    */
   iterator it = begin();
   const LObject& Lp = *it;
-
-  // Remove from pair_index before erasing from the set
-  if (Lp.p1 != NULL && Lp.p2 != NULL)
-  {
+  if (Lp.p1 != NULL && Lp.p2 != NULL) {
     auto key = canonicalize_pair(Lp.p1, Lp.p2);
-    auto range = pair_index.equal_range(key);
-    for (auto pit = range.first; pit != range.second; ++pit)
-    {
-      if (pit->second == it)
-      {
-        pair_index.erase(pit);
-        break;
-      }
-    }
+    pair_index.erase(key);
   }
-
   writable_set<LObject, CompareLObject>::erase(it);
 }
 
