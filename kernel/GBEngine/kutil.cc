@@ -3395,7 +3395,7 @@ void chainCritNormal (poly p,int ecart,kStrategy strat)
     for (size_t ji = 0; ji < bvec.size(); ji++)
     {
       if (bvec[ji] == endL) continue;
-      for (size_t ii = ji + 1; ii < bvec.size(); )
+      for (size_t ii = ji + 1; ii < bvec.size(); ii++)
       {
         if (bvec[ii] != endL && pLmEqual(bvec[ji]->lcm, bvec[ii]->lcm))
         {
@@ -3418,17 +3418,13 @@ void chainCritNormal (poly p,int ecart,kStrategy strat)
             *so we null it out in bvec to prevent re-processing
             */
             bvec[ii] = endL;
-            ii++;
           }
           else
           {
             strat->L.erase(bvec[ii]);
             bvec[ii] = endL;
-            ii++;
           }
         }
-        else
-          ii++;
       }
     }
   }
