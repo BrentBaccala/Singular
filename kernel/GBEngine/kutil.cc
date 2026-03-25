@@ -30,6 +30,7 @@
 
 #include <stdlib.h>
 #include <string.h>
+#include <algorithm>
 
 #ifdef KDEBUG
 #undef KDEBUG
@@ -678,15 +679,14 @@ void initPairtest(kStrategy strat)
 */
 BOOLEAN isInPairsetL(LSet::iterator &it,poly p1,poly p2,kStrategy strat)
 {
+  if (it == strat->L.end()) return FALSE;
   if (p1 == NULL || p2 == NULL) return FALSE;
   auto key = LSet::canonicalize_pair(p1, p2);
   auto found = strat->L.pair_index.find(key);
   if (found != strat->L.pair_index.end()) {
     LSet::iterator candidate = found->second;
     // Check position constraint: candidate must be at or after 'it'
-    // i.e., candidate >= it in sorted order (NOT strictly less than it)
-    if (it == strat->L.end() || candidate == it
-        || !strat->L.key_comp()(*candidate, *it)) {
+    if (candidate == it || !strat->L.key_comp()(*candidate, *it)) {
       it = candidate;
       return TRUE;
     }
@@ -3360,54 +3360,84 @@ void chainCritNormal (poly p,int ecart,kStrategy strat)
     }
     /*
     *this is our MODIFICATION of GEBAUER-MOELLER:
-    *Deduplicate B against itself: find same-lcm pairs within B
-    *and do triangle checks via pair_index in L (O(1) lookup).
-    *Then merge surviving B pairs into L.
+    *Merge B into L, then deduplicate the B-origin elements using
+    *pair_index for O(1) triangle checks.  We collect B-origin L
+    *iterators into a vector (already in L-order) to avoid scanning
+    *all of L.
     */
-    for (auto jt = strat->B.begin(); jt != strat->B.end(); )
+    /* Merge B into L, collecting iterators to the new elements */
+    std::vector<LSet::iterator> bvec;
+    bvec.reserve(strat->B.size());
+    while (!strat->B.empty()) {
+      auto Lobj = strat->B.top();
+      strat->B.pop();
+      strat->L.push(Lobj);
+      /* push inserts at the position determined by compareL + seq.
+       * The just-pushed element can be found via pair_index. */
+      if (Lobj.p1 != NULL && Lobj.p2 != NULL) {
+        auto key = LSet::canonicalize_pair(Lobj.p1, Lobj.p2);
+        auto found = strat->L.pair_index.find(key);
+        if (found != strat->L.pair_index.end())
+          bvec.push_back(found->second);
+      }
+    }
+    /* bvec now holds L iterators to B-origin elements, but they may
+     * not be in L-order because pair_index doesn't preserve insertion
+     * order. Sort them by L's comparator. */
+    std::sort(bvec.begin(), bvec.end(),
+      [&strat](LSet::iterator a, LSet::iterator b) {
+        return strat->L.key_comp()(*a, *b);
+      });
+    /* Deduplicate: for each pair of B-origin elements with the same lcm,
+     * do the triangle check via isInPairsetL (O(1) pair_index lookup). */
+    for (size_t ji = 0; ji < bvec.size(); ji++)
     {
-      bool j_deleted = false;
-      for (auto it = jt + 1; it != strat->B.end(); )
+      if (bvec[ji]->p2 != p) continue;
+      for (size_t ii = ji + 1; ii < bvec.size(); )
       {
-        if (pLmEqual(jt->lcm, it->lcm))
+        if (bvec[ii]->p2 == p && pLmEqual(bvec[ji]->lcm, bvec[ii]->lcm))
         {
           /*B[i] could be canceled but we search for a better one to cancel*/
           strat->c3++;
-          LSet::iterator lt = strat->L.begin();
-          if (isInPairsetL(lt, jt->p1, it->p1, strat)
+          auto lt = bvec[ii] + 1;
+          if (isInPairsetL(lt,bvec[ji]->p1,bvec[ii]->p1,strat)
           && (pNext(lt->p) == strat->tail)
-          && (!pLmEqual(it->p, lt->p))
-          && pDivisibleBy(p, lt->lcm))
+          && (!pLmEqual(bvec[ii]->p,lt->p))
+          && pDivisibleBy(p,lt->lcm))
           {
             /*
             *"NOT equal(...)" because in case of "equal" the element L[l]
             *is "older" and has to be from theoretical point of view behind
-            *B[i], but we do not want to reorder L
+            *L[i], but we do not want to reorder L
             */
-            it->p2 = strat->tail;
+            bvec[ii]->p2 = strat->tail;
             /*
-            *L[l] will be canceled, we cannot cancel B[i] later on,
+            *L[l] will be canceled, we cannot cancel L[i] later on,
             *so we mark it with "tail"
             */
             strat->L.erase(lt);
-            ++it;
+            ii++;
           }
           else
           {
-            it = strat->B.erase(it);
+            strat->L.erase(bvec[ii]);
+            bvec.erase(bvec.begin() + ii);
           }
         }
         else
-          ++it;
+          ii++;
       }
-      if (!j_deleted) ++jt;
     }
-    kMergeBintoL(strat);
-    /* Fix up tail markers: pairs marked with strat->tail during
-     * deduplication need their p2 restored to p */
-    for (auto jt = strat->L.begin(); jt != strat->L.end(); ++jt)
+    /* Fix up tail markers */
+    for (size_t i = 0; i < bvec.size(); i++)
     {
-      if (jt->p2 == strat->tail) jt->p2 = p;
+      if (bvec[i]->p2 == strat->tail) bvec[i]->p2 = p;
+    }
+    /* Also fix the last element in L if needed (matches original behavior) */
+    if (!strat->L.empty()) {
+      auto last = strat->L.end();
+      --last;
+      if (last->p2 == strat->tail) last->p2 = p;
     }
   }
 }
