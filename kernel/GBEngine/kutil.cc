@@ -672,8 +672,9 @@ void initPairtest(kStrategy strat)
 
 
 /*2
-*test whether (p1,p2) or (p2,p1) is in L
-*it returns TRUE if yes and sets the iterator to point to the match
+*test whether (p1,p2) or (p2,p1) is in L at or after iterator it
+*it returns TRUE if yes and modifies the iterator to point to the match
+*Uses pair_index for O(1) lookup, then checks position constraint
 */
 BOOLEAN isInPairsetL(LSet::iterator &it,poly p1,poly p2,kStrategy strat)
 {
@@ -681,8 +682,14 @@ BOOLEAN isInPairsetL(LSet::iterator &it,poly p1,poly p2,kStrategy strat)
   auto key = LSet::canonicalize_pair(p1, p2);
   auto found = strat->L.pair_index.find(key);
   if (found != strat->L.pair_index.end()) {
-    it = found->second;
-    return TRUE;
+    LSet::iterator candidate = found->second;
+    // Check position constraint: candidate must be at or after 'it'
+    // i.e., candidate >= it in sorted order (NOT strictly less than it)
+    if (it == strat->L.end() || candidate == it
+        || !strat->L.key_comp()(*candidate, *it)) {
+      it = candidate;
+      return TRUE;
+    }
   }
   return FALSE;
 }
