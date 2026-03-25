@@ -3168,6 +3168,27 @@ void kMergeBintoL(kStrategy strat)
   }
 }
 
+/* merge set B into L, and return a vector of iterators pointing to the new
+ * elements in L, guaranteed to be in the same order they appear in L
+ */
+
+std::vector<LSet::iterator> kMergeBintoL_and_return_iterators(kStrategy strat)
+{
+  std::vector<LSet::iterator> iterators;
+  iterators.reserve(strat->B.size());
+  while (!strat->B.empty()) {
+    auto Lobj = strat->B.top();
+    strat->B.pop();
+    iterators.push_back(strat->L.push(Lobj));
+  }
+  // Sort iterators to match the ordering of their objects in L
+  std::sort(iterators.begin(), iterators.end(),
+    [&strat](LSet::iterator a, LSet::iterator b) {
+      return strat->L.key_comp()(*a, *b);
+    });
+  return iterators;
+}
+
 /*2
 *the pairset B of pairs of type (s[i],p) is complete now. It will be updated
 *using the chain-criterion in B and L and enters B to L
@@ -3361,33 +3382,11 @@ void chainCritNormal (poly p,int ecart,kStrategy strat)
     /*
     *this is our MODIFICATION of GEBAUER-MOELLER:
     *Merge B into L, then deduplicate the B-origin elements using
-    *pair_index for O(1) triangle checks.  We collect B-origin L
-    *iterators into a vector (already in L-order) to avoid scanning
-    *all of L.
+    *pair_index for O(1) triangle checks.  kMergeBintoL_and_return_iterators
+    *gives us iterators to the new elements in L-order, avoiding a full
+    *scan of L.
     */
-    /* Merge B into L, collecting iterators to the new elements */
-    std::vector<LSet::iterator> bvec;
-    bvec.reserve(strat->B.size());
-    while (!strat->B.empty()) {
-      auto Lobj = strat->B.top();
-      strat->B.pop();
-      strat->L.push(Lobj);
-      /* push inserts at the position determined by compareL + seq.
-       * The just-pushed element can be found via pair_index. */
-      if (Lobj.p1 != NULL && Lobj.p2 != NULL) {
-        auto key = LSet::canonicalize_pair(Lobj.p1, Lobj.p2);
-        auto found = strat->L.pair_index.find(key);
-        if (found != strat->L.pair_index.end())
-          bvec.push_back(found->second);
-      }
-    }
-    /* bvec now holds L iterators to B-origin elements, but they may
-     * not be in L-order because pair_index doesn't preserve insertion
-     * order. Sort them by L's comparator. */
-    std::sort(bvec.begin(), bvec.end(),
-      [&strat](LSet::iterator a, LSet::iterator b) {
-        return strat->L.key_comp()(*a, *b);
-      });
+    std::vector<LSet::iterator> bvec = kMergeBintoL_and_return_iterators(strat);
     /* Deduplicate: for each pair of B-origin elements with the same lcm,
      * do the triangle check via isInPairsetL (O(1) pair_index lookup).
      * Elements removed from consideration are nulled out (set to end())
