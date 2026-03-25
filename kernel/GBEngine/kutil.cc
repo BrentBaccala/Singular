@@ -3389,13 +3389,16 @@ void chainCritNormal (poly p,int ecart,kStrategy strat)
         return strat->L.key_comp()(*a, *b);
       });
     /* Deduplicate: for each pair of B-origin elements with the same lcm,
-     * do the triangle check via isInPairsetL (O(1) pair_index lookup). */
+     * do the triangle check via isInPairsetL (O(1) pair_index lookup).
+     * Elements removed from consideration are nulled out (set to end())
+     * in bvec rather than erased, to avoid memmove. */
+    LSet::iterator endL = strat->L.end();
     for (size_t ji = 0; ji < bvec.size(); ji++)
     {
-      if (bvec[ji]->p2 != p) continue;
+      if (bvec[ji] == endL) continue;
       for (size_t ii = ji + 1; ii < bvec.size(); )
       {
-        if (bvec[ii]->p2 == p && pLmEqual(bvec[ji]->lcm, bvec[ii]->lcm))
+        if (bvec[ii] != endL && pLmEqual(bvec[ji]->lcm, bvec[ii]->lcm))
         {
           /*B[i] could be canceled but we search for a better one to cancel*/
           strat->c3++;
@@ -3410,34 +3413,24 @@ void chainCritNormal (poly p,int ecart,kStrategy strat)
             *is "older" and has to be from theoretical point of view behind
             *L[i], but we do not want to reorder L
             */
-            bvec[ii]->p2 = strat->tail;
+            strat->L.erase(lt);
             /*
             *L[l] will be canceled, we cannot cancel L[i] later on,
-            *so we mark it with "tail"
+            *so we null it out in bvec to prevent re-processing
             */
-            strat->L.erase(lt);
+            bvec[ii] = endL;
             ii++;
           }
           else
           {
             strat->L.erase(bvec[ii]);
-            bvec.erase(bvec.begin() + ii);
+            bvec[ii] = endL;
+            ii++;
           }
         }
         else
           ii++;
       }
-    }
-    /* Fix up tail markers */
-    for (size_t i = 0; i < bvec.size(); i++)
-    {
-      if (bvec[i]->p2 == strat->tail) bvec[i]->p2 = p;
-    }
-    /* Also fix the last element in L if needed (matches original behavior) */
-    if (!strat->L.empty()) {
-      auto last = strat->L.end();
-      --last;
-      if (last->p2 == strat->tail) last->p2 = p;
     }
   }
 }
