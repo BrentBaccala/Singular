@@ -3170,6 +3170,10 @@ void kMergeBintoL(kStrategy strat)
 
 /* merge set B into L, and return a vector of iterators pointing to the new
  * elements in L, guaranteed to be in the same order they appear in L
+ *
+ * The ordering is done to mimic previous versions of Singular so as
+ * to ensure that regression tests pass.  I know of no other reason to
+ * sort these iterators.
  */
 
 std::vector<LSet::iterator> kMergeBintoL_and_return_iterators(kStrategy strat)
