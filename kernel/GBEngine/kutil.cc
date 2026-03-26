@@ -1244,6 +1244,8 @@ LSet::iterator LSet::erase(LSet::iterator it) {
     strat->P.p1=NULL;
   }
   #endif
+  // Mark the sev_flat_ entry as sentinel (0) so cache-friendly scans skip it
+  sev_flat_invalidate(Lp.flat_index);
   return writable_set<LObject, CompareLObject>::erase(it);
 }
 
@@ -1296,6 +1298,8 @@ LSet::unordered_iterator LSet::erase(LSet::unordered_iterator it) {
     strat->P.p1=NULL;
   }
   #endif
+  // Mark the sev_flat_ entry as sentinel (0) so cache-friendly scans skip it
+  sev_flat_invalidate(Lp.flat_index);
   return writable_set<LObject, CompareLObject>::erase(it);
 }
 
@@ -3213,6 +3217,9 @@ void chainCritNormal (poly p,int ecart,kStrategy strat)
   int j;
   unsigned long sev_p = p_GetShortExpVector(p, currRing);
 
+  // Rebuild the contiguous sev_lcm array for cache-friendly scanning.
+  strat->L.rebuild_sev_flat();
+
   /*
   *pairtest[i] is TRUE if spoly(S[i],p) == 0.
   *In this case all elements in B such
@@ -3275,23 +3282,29 @@ void chainCritNormal (poly p,int ecart,kStrategy strat)
     *and lcm(s,r)#lcm(s,p) and lcm(s,r)#lcm(r,p)
     *and in case the sugar is o.k. then L[j] can be canceled
     */
-      for (auto it = strat->L.ubegin(); it != strat->L.uend(); )
       {
-        if (!(sev_p & ~it->sev_lcm)
-        && sugarDivisibleBy(ecart,it->ecart)
-        && ((it->p == strat->tail) || (rHasGlobalOrdering(currRing)))
-        && pCompareChain(p,it->p1,it->p2,it->lcm))
+        // Scan sev_flat_ contiguously for cache-friendly pre-filtering.
+        // Only chase pointers to LObjects for entries that pass the sev check.
+        const unsigned long* sev_arr = strat->L.sev_flat().data();
+        const size_t sev_sz = strat->L.sev_flat_size();
+        for (size_t ui = 0; ui < sev_sz; ui++)
         {
-          if (it->p == strat->tail)
+          if (!(sev_p & ~sev_arr[ui]))  // cache-friendly sev pre-filter
           {
-            it = strat->L.erase(it);
-            strat->c3++;
+            LObject* Lp = strat->L.flat_ptr(ui);
+            if (Lp == NULL) continue;
+            if (sugarDivisibleBy(ecart,Lp->ecart)
+            && ((Lp->p == strat->tail) || (rHasGlobalOrdering(currRing)))
+            && pCompareChain(p,Lp->p1,Lp->p2,Lp->lcm))
+            {
+              if (Lp->p == strat->tail)
+              {
+                strat->L.erase(strat->L.uiter_at(ui));
+                strat->c3++;
+              }
+            }
           }
-          else
-            ++it;
         }
-        else
-          ++it;
       }
       /*
       *this is GEBAUER-MOELLER:
@@ -3330,21 +3343,25 @@ void chainCritNormal (poly p,int ecart,kStrategy strat)
       *and lcm(s,r)#lcm(s,p) and lcm(s,r)#lcm(r,p)
       *and in case the sugar is o.k. then L[j] can be canceled
       */
-      for (auto jt = strat->L.ubegin(); jt != strat->L.uend(); )
       {
-        if (!(sev_p & ~jt->sev_lcm)
-        && pCompareChain(p,jt->p1,jt->p2,jt->lcm))
+        const unsigned long* sev_arr = strat->L.sev_flat().data();
+        const size_t sev_sz = strat->L.sev_flat_size();
+        for (size_t ui = 0; ui < sev_sz; ui++)
         {
-          if ((pNext(jt->p) == strat->tail)||(rHasGlobalOrdering(currRing)))
+          if (!(sev_p & ~sev_arr[ui]))
           {
-            jt = strat->L.erase(jt);
-            strat->c3++;
+            LObject* Lp = strat->L.flat_ptr(ui);
+            if (Lp == NULL) continue;
+            if (pCompareChain(p,Lp->p1,Lp->p2,Lp->lcm))
+            {
+              if ((pNext(Lp->p) == strat->tail)||(rHasGlobalOrdering(currRing)))
+              {
+                strat->L.erase(strat->L.uiter_at(ui));
+                strat->c3++;
+              }
+            }
           }
-          else
-            ++jt;
         }
-        else
-          ++jt;
       }
       /*
       *this is GEBAUER-MOELLER:
@@ -3372,27 +3389,30 @@ void chainCritNormal (poly p,int ecart,kStrategy strat)
   }
   else
   {
-    for (auto jt = strat->L.ubegin(); jt != strat->L.uend(); )
     {
-      #ifdef HAVE_SHIFTBBA
-      if (!(sev_p & ~jt->sev_lcm)
-      && (jt->p1!=NULL) &&
-      pCompareChain(p,jt->p1,jt->p2,jt->lcm))
-      #else
-      if (!(sev_p & ~jt->sev_lcm)
-      && pCompareChain(p,jt->p1,jt->p2,jt->lcm))
-      #endif
+      const unsigned long* sev_arr = strat->L.sev_flat().data();
+      const size_t sev_sz = strat->L.sev_flat_size();
+      for (size_t ui = 0; ui < sev_sz; ui++)
       {
-        if ((pNext(jt->p) == strat->tail)||(rHasGlobalOrdering(currRing)))
+        if (!(sev_p & ~sev_arr[ui]))
         {
-          jt = strat->L.erase(jt);
-          strat->c3++;
+          LObject* Lp = strat->L.flat_ptr(ui);
+          if (Lp == NULL) continue;
+          #ifdef HAVE_SHIFTBBA
+          if ((Lp->p1!=NULL) &&
+          pCompareChain(p,Lp->p1,Lp->p2,Lp->lcm))
+          #else
+          if (pCompareChain(p,Lp->p1,Lp->p2,Lp->lcm))
+          #endif
+          {
+            if ((pNext(Lp->p) == strat->tail)||(rHasGlobalOrdering(currRing)))
+            {
+              strat->L.erase(strat->L.uiter_at(ui));
+              strat->c3++;
+            }
+          }
         }
-        else
-          ++jt;
       }
-      else
-        ++jt;
     }
     /*
     *this is our MODIFICATION of GEBAUER-MOELLER:

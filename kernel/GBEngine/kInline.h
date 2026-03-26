@@ -1032,7 +1032,7 @@ KINLINE void LSet::pop(void) {
   /* We don't call our erase() method because it would deallocate
    * stuff in the LObject and we don't want that done here because we
    * copied top() (typically to strat->P) before we called pop().
-   * But we still need to remove from pair_index.
+   * But we still need to remove from pair_index and invalidate sev_flat_.
    */
   iterator it = begin();
   const LObject& Lp = *it;
@@ -1040,6 +1040,8 @@ KINLINE void LSet::pop(void) {
     auto key = canonicalize_pair(Lp.p1, Lp.p2);
     pair_index.erase(key);
   }
+  // Mark sev_flat_ entry as sentinel (0) so cache-friendly scans skip it
+  sev_flat_invalidate(Lp.flat_index);
   writable_set<LObject, CompareLObject>::erase(it);
 }
 

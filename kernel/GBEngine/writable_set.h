@@ -263,6 +263,19 @@ public:
     unordered_iterator ubegin() { return unordered_iterator(this, 0); }
     unordered_iterator uend() { return unordered_iterator(this, flat_.size()); }
 
+    // Direct flat array access by index.
+    // Returns pointer to element at flat index i, or nullptr if deleted.
+    T* flat_ptr(size_t i) {
+        if (i >= flat_.size() || flat_[i] == data_.end()) return nullptr;
+        return *flat_[i];
+    }
+
+    // Construct an unordered_iterator at a specific flat index (no skip_deleted).
+    unordered_iterator uiter_at(size_t i) { return unordered_iterator(this, i); }
+
+    // Size of the flat array (including deleted entries)
+    size_t flat_size() const { return flat_.size(); }
+
     reverse_iterator rbegin() { return reverse_iterator(end()); }
     reverse_iterator rend() { return reverse_iterator(begin()); }
     const_reverse_iterator rbegin() const { return const_reverse_iterator(end()); }

@@ -307,6 +307,12 @@ struct PolyPairHash {
 class LSet : public writable_set<LObject, CompareLObject> {
 private:
   unsigned seq = 0;   // increments by one on every insertion; used to determine ordering
+  // Parallel flat array of sev_lcm values for cache-friendly scanning.
+  // Same indexing as the flat_ vector in writable_set: sev_flat_[i] holds
+  // the sev_lcm of the element at flat_[i].  Erased entries are set to 0
+  // (sentinel: causes !(sev_p & ~0UL) == false, so erased entries always
+  // fail the pre-filter).
+  std::vector<unsigned long> sev_flat_;
 
 public:
   std::unordered_map<std::pair<poly, poly>, iterator, PolyPairHash> pair_index;
@@ -328,10 +334,14 @@ public:
   using writable_set<LObject, CompareLObject>::unordered_iterator;
   using writable_set<LObject, CompareLObject>::ubegin;
   using writable_set<LObject, CompareLObject>::uend;
+  using writable_set<LObject, CompareLObject>::flat_ptr;
+  using writable_set<LObject, CompareLObject>::uiter_at;
+  using writable_set<LObject, CompareLObject>::flat_size;
 
-  // Override insert to maintain pair_index
+  // Override insert to maintain pair_index and sev_flat_
   iterator insert(const LObject& lobject) {
     iterator it = writable_set<LObject, CompareLObject>::insert(lobject);
+    sev_flat_.push_back(it->sev_lcm);
     if (it->p1 != NULL && it->p2 != NULL) {
       auto key = canonicalize_pair(it->p1, it->p2);
       pair_index.emplace(key, it);
@@ -339,21 +349,42 @@ public:
     return it;
   }
 
-  // Override clear to also clear pair_index
+  // Override clear to also clear pair_index and sev_flat_
   void clear() {
     pair_index.clear();
+    sev_flat_.clear();
     writable_set<LObject, CompareLObject>::clear();
   }
 
-  // Override reorder to rebuild pair_index with new iterators
+  // Override reorder to rebuild pair_index and sev_flat_ with new iterators
   void reorder() {
     writable_set<LObject, CompareLObject>::reorder();
+    // After reorder, flat_ has no gaps and flat_index is reassigned 0..size()-1
+    rebuild_sev_flat();
     pair_index.clear();
     for (iterator it = begin(); it != end(); ++it) {
       if (it->p1 != NULL && it->p2 != NULL) {
         auto key = canonicalize_pair(it->p1, it->p2);
         pair_index.emplace(key, it);
       }
+    }
+  }
+
+  // Access to the flat sev_lcm array for cache-friendly scanning
+  const std::vector<unsigned long>& sev_flat() const { return sev_flat_; }
+  size_t sev_flat_size() const { return sev_flat_.size(); }
+  // Mark a sev_flat_ entry as sentinel (0) for deleted elements
+  void sev_flat_invalidate(size_t idx) {
+    if (idx < sev_flat_.size()) sev_flat_[idx] = 0;
+  }
+  // Rebuild sev_flat_ from the current flat_ array.
+  // Deleted entries get sentinel 0, valid entries get their sev_lcm.
+  void rebuild_sev_flat() {
+    const size_t n = flat_size();
+    sev_flat_.resize(n);
+    for (size_t i = 0; i < n; i++) {
+      LObject* p = flat_ptr(i);
+      sev_flat_[i] = (p != NULL) ? p->sev_lcm : 0;
     }
   }
 
