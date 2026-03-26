@@ -61,6 +61,40 @@ VAR long sba_interreduction_operations;
 ***********************************************/
 
 #include "kernel/GBEngine/kutil.h"
+#if defined(__x86_64__) && defined(__GNUC__)
+#define HAVE_AVX2_TARGET 1
+#include <immintrin.h>
+
+// AVX2-optimized sev pre-filter scan: find the next index j (starting from j)
+// where sevT[j] & not_sev == 0, or return -1 if j > tl.
+// Uses AVX2 to test 4 entries at a time, skipping batches where all fail.
+__attribute__((target("avx2")))
+static inline int kSevScanAVX2(const unsigned long* sevT, unsigned long not_sev,
+                                int j, int tl)
+{
+  const __m256i vnot_sev = _mm256_set1_epi64x((long long)not_sev);
+  const __m256i vzero = _mm256_setzero_si256();
+  while (j + 3 <= tl)
+  {
+    // Load 4 consecutive sevT values
+    __m256i vsev = _mm256_loadu_si256((const __m256i*)(sevT + j));
+    // AND with not_sev: non-zero means this entry fails the pre-filter
+    __m256i vand = _mm256_and_si256(vsev, vnot_sev);
+    // Compare each 64-bit lane to zero: all-ones if candidate (passes filter)
+    __m256i vcmp = _mm256_cmpeq_epi64(vand, vzero);
+    int mask = _mm256_movemask_epi8(vcmp);
+    if (mask != 0)
+    {
+      // At least one candidate in this batch — return the batch start
+      // so the caller can check them individually
+      return j;
+    }
+    j += 4;
+  }
+  // Return current j for scalar remainder handling
+  return j;
+}
+#endif
 #include "misc/options.h"
 #include "kernel/polys.h"
 #include "kernel/ideals.h"
@@ -351,6 +385,34 @@ int kFindDivisibleByInT(const kStrategy strat, const LObject* L, const int start
     }
     else
     {
+#if defined(HAVE_AVX2_TARGET) && !defined(PDEBUG) && !defined(PDIV_DEBUG)
+      // AVX2 fast path: scan sevT 4 entries at a time to skip non-candidates.
+      // kSevScanAVX2 advances j past batches of 4 where all entries fail
+      // the sev pre-filter, returning the start of the first batch with
+      // at least one potential candidate (or past the aligned range).
+      {
+        const int tl = strat->tl;
+        loop
+        {
+          // Skip batches of 4 where all entries fail the sev pre-filter
+          j = kSevScanAVX2(sevT, not_sev, j, tl);
+          // Check up to 4 entries from the batch that had a candidate,
+          // plus any scalar remainder at the end
+          int batch_end = j + 3;
+          if (batch_end > tl) batch_end = tl;
+          for (; j <= batch_end; j++)
+          {
+            if (!(sevT[j] & not_sev)
+            && (T[j].p != NULL)
+            && p_LmDivisibleBy(T[j].p, p, r))
+            {
+              return j;
+            }
+          }
+          if (j > tl) return -1;
+        }
+      }
+#else
       loop
       {
         if (j > strat->tl) return -1;
@@ -367,6 +429,7 @@ int kFindDivisibleByInT(const kStrategy strat, const LObject* L, const int start
         }
         j++;
       }
+#endif
     }
   }
   else
