@@ -390,6 +390,7 @@ int kFindDivisibleByInT(const kStrategy strat, const LObject* L, const int start
       // kSevScanAVX2 advances j past batches of 4 where all entries fail
       // the sev pre-filter, returning the start of the first batch with
       // at least one potential candidate (or past the aligned range).
+      if (__builtin_cpu_supports("avx2"))
       {
         const int tl = strat->tl;
         loop
@@ -412,7 +413,9 @@ int kFindDivisibleByInT(const kStrategy strat, const LObject* L, const int start
           if (j > tl) return -1;
         }
       }
-#else
+      else
+#endif
+      {
       loop
       {
         if (j > strat->tl) return -1;
@@ -429,7 +432,7 @@ int kFindDivisibleByInT(const kStrategy strat, const LObject* L, const int start
         }
         j++;
       }
-#endif
+      }
     }
   }
   else
