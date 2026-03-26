@@ -1950,26 +1950,12 @@ void enterOnePairNormal (int i,poly p,int ecart, int isFromQ,kStrategy strat, in
 #ifdef KDEBUG
   Lp.ecart=0; Lp.length=0;
 #endif
-  /*- computes the lcm(s[i],p) -*/
-  Lp.lcm = pInit();
 
-#ifndef HAVE_RATGRING
-  pLcm(p,strat->S[i],Lp.lcm);
-#elif defined(HAVE_RATGRING)
-  if (rIsRatGRing(currRing))
-    pLcmRat(p,strat->S[i],Lp.lcm, currRing->real_var_start); // int rat_shift
-  else
-    pLcm(p,strat->S[i],Lp.lcm);
-#endif
-  pSetm(Lp.lcm);
-  Lp.sev_lcm = p_GetShortExpVector(Lp.lcm, currRing);
-
-
+  /*- check product criterion and ecart BEFORE computing the lcm -*/
   if (strat->sugarCrit && ALLOW_PROD_CRIT(strat))
   {
     if (strat->fromT && (strat->ecartS[i]>ecart))
     {
-      pLmFree(Lp.lcm);
       return;
       /*the pair is (s[i],t[.]), discard it if the ecart is too big*/
     }
@@ -1991,9 +1977,57 @@ void enterOnePairNormal (int i,poly p,int ecart, int isFromQ,kStrategy strat, in
     *Moreover, skipping (s,r) holds also for the noncommutative case.
     */
       strat->cp++;
-      pLmFree(Lp.lcm);
       return;
     }
+  }
+  else /*sugarcrit*/
+  {
+    if (ALLOW_PROD_CRIT(strat))
+    {
+      if (strat->fromT && (strat->ecartS[i]>ecart))
+      {
+        return;
+        /*the pair is (s[i],t[.]), discard it if the ecart is too big*/
+      }
+      // if currRing->nc_type!=quasi (or skew)
+      // TODO: enable productCrit for super commutative algebras...
+      if(/*(strat->ak==0) && productCrit(p,strat->S[i])*/
+      pHasNotCF(p,strat->S[i]))
+      {
+      /*
+      *the product criterion has applied for (s,p),
+      *i.e. lcm(s,p)=product of the leading terms of s and p.
+      *Suppose (s,r) is in L and the leading term
+      *of p divides lcm(s,r)
+      *(==> the leading term of p divides the leading term of r)
+      *but the leading term of s does not divide the leading term of r
+      *(notice that tis condition is automatically satisfied if r is still
+      *in S), then (s,r) can be canceled.
+      *This should be done here because the
+      *case lcm(s,r)=lcm(s,p) is not covered by chainCrit.
+      */
+          strat->cp++;
+          return;
+      }
+    }
+  }
+
+  /*- computes the lcm(s[i],p) -*/
+  Lp.lcm = pInit();
+
+#ifndef HAVE_RATGRING
+  pLcm(p,strat->S[i],Lp.lcm);
+#elif defined(HAVE_RATGRING)
+  if (rIsRatGRing(currRing))
+    pLcmRat(p,strat->S[i],Lp.lcm, currRing->real_var_start); // int rat_shift
+  else
+    pLcm(p,strat->S[i],Lp.lcm);
+#endif
+  pSetm(Lp.lcm);
+  Lp.sev_lcm = p_GetShortExpVector(Lp.lcm, currRing);
+
+  if (strat->sugarCrit && ALLOW_PROD_CRIT(strat))
+  {
     Lp.ecart = si_max(ecart,strat->ecartS[i]);
     /*
     *the set B collects the pairs of type (S[j],p)
@@ -2032,33 +2066,6 @@ void enterOnePairNormal (int i,poly p,int ecart, int isFromQ,kStrategy strat, in
   {
     if (ALLOW_PROD_CRIT(strat))
     {
-      if (strat->fromT && (strat->ecartS[i]>ecart))
-      {
-        pLmFree(Lp.lcm);
-        return;
-        /*the pair is (s[i],t[.]), discard it if the ecart is too big*/
-      }
-      // if currRing->nc_type!=quasi (or skew)
-      // TODO: enable productCrit for super commutative algebras...
-      if(/*(strat->ak==0) && productCrit(p,strat->S[i])*/
-      pHasNotCF(p,strat->S[i]))
-      {
-      /*
-      *the product criterion has applied for (s,p),
-      *i.e. lcm(s,p)=product of the leading terms of s and p.
-      *Suppose (s,r) is in L and the leading term
-      *of p divides lcm(s,r)
-      *(==> the leading term of p divides the leading term of r)
-      *but the leading term of s does not divide the leading term of r
-      *(notice that tis condition is automatically satisfied if r is still
-      *in S), then (s,r) can be canceled.
-      *This should be done here because the
-      *case lcm(s,r)=lcm(s,p) is not covered by chainCrit.
-      */
-          strat->cp++;
-          pLmFree(Lp.lcm);
-          return;
-      }
       /*
       *the set B collects the pairs of type (S[j],p)
       *suppose (r,p) is in B and (s,p) is the new pair and lcm(s,p)#lcm(r,p)
