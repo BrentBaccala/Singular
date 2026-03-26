@@ -2024,7 +2024,11 @@ void enterOnePairNormal (int i,poly p,int ecart, int isFromQ,kStrategy strat, in
     pLcm(p,strat->S[i],Lp.lcm);
 #endif
   pSetm(Lp.lcm);
-  Lp.sev_lcm = p_GetShortExpVector(Lp.lcm, currRing);
+  // sev(lcm(a,b)) ⊇ sev(a) | sev(b): the OR is a safe overapproximation
+  // (more bits set = fewer pre-filter rejections in chainCritNormal, but
+  // no false rejections since sev is only used for pre-filtering).
+  // This avoids walking the LCM exponent vector via p_GetShortExpVector.
+  Lp.sev_lcm = p_GetShortExpVector(p, currRing) | strat->sevS[i];
 
   if (strat->sugarCrit && ALLOW_PROD_CRIT(strat))
   {
