@@ -95,6 +95,8 @@ def main():
                         help='Tests per page (default: 45)')
     parser.add_argument('--title', type=str, default=None,
                         help='Plot title (default: auto from metric)')
+    parser.add_argument('--group-by-list', action='store_true',
+                        help='Group pages by list file (Short, Buch, Long, etc.)')
     args = parser.parse_args()
 
     metric = args.metric
@@ -109,6 +111,8 @@ def main():
     # Read all data
     # Key: (build, test_name) -> list of metric values
     data = defaultdict(list)
+    # Key: test_name -> list_file (for grouping)
+    test_list = {}
     for fname in args.files:
         with open(fname) as f:
             for row in csv.DictReader(f):
@@ -118,6 +122,8 @@ def main():
                 test = row['test_name']
                 val = int(row[metric])
                 data[(build, test)].append(val)
+                if test not in test_list:
+                    test_list[test] = row.get('list_file', '')
 
     # Get unique builds and tests
     builds = sorted(set(b for b, t in data.keys()))
@@ -134,91 +140,121 @@ def main():
     # Sort tests by mean time (shortest first)
     tests_sorted = sorted(tests, key=lambda t: test_means[t])
 
+    # Group by list file if requested
+    if args.group_by_list:
+        from collections import OrderedDict
+        groups = OrderedDict()
+        for test in tests_sorted:
+            lst = test_list.get(test, 'unknown')
+            # Use Dir/file.lst format; shorten absolute paths to just dir/file.lst
+            parts = lst.rsplit('/', 1)
+            if len(parts) == 2 and '/' in parts[0]:
+                # Absolute or long path — use last two components
+                parent = parts[0].rsplit('/', 1)[-1]
+                group_name = f'{parent}/{parts[1]}'
+            else:
+                group_name = lst
+            if group_name not in groups:
+                groups[group_name] = []
+            groups[group_name].append(test)
+    else:
+        groups = {'all': tests_sorted}
+
     # Build colors
     build_colors = {b: f'C{i}' for i, b in enumerate(builds)}
 
-    # Split into pages, balanced so last page is similar size to others
     max_per_page = args.per_page
-    n_tests_total = len(tests_sorted)
-    n_pages = max(1, math.ceil(n_tests_total / max_per_page))
-    base = n_tests_total // n_pages
-    extra = n_tests_total % n_pages  # first 'extra' pages get base+1
 
     with PdfPages(args.output) as pdf:
-        offset = 0
-        for page in range(n_pages):
-            count = base + (1 if page < extra else 0)
-            page_tests = tests_sorted[offset:offset + count]
-            offset += count
-            n_tests = len(page_tests)
+        total_pages = 0
+        for group_name, group_tests in groups.items():
+            # Split this group into pages, balanced
+            n_group = len(group_tests)
+            n_pages = max(1, math.ceil(n_group / max_per_page))
+            base = n_group // n_pages
+            extra = n_group % n_pages
 
-            fig_height = max(6, n_tests * 0.28 + 1.5)
-            fig, ax = plt.subplots(figsize=(14, fig_height))
+            offset = 0
+            for page in range(n_pages):
+                count = base + (1 if page < extra else 0)
+                page_tests = group_tests[offset:offset + count]
+                offset += count
+                n_tests = len(page_tests)
+                total_pages += 1
 
-            # Draw thin gray horizontal lines for each test
-            for yi in range(n_tests):
-                ax.axhline(y=yi, color='gray', linewidth=0.3, zorder=1)
+                fig_height = max(6, n_tests * 0.28 + 1.5)
+                fig, ax = plt.subplots(figsize=(14, fig_height))
 
-            # Offset builds vertically so dots sit above/below the guide line
-            # First build: shifted up (bottom touches line)
-            # Second build: shifted down (top touches line)
-            n_builds = len(builds)
-            if n_builds == 1:
-                offsets = {builds[0]: 0}
-            else:
-                offsets = {builds[i]: -0.12 + i * 0.24 / (n_builds - 1)
-                           for i in range(n_builds)}
+                # Draw thin gray horizontal lines for each test
+                for yi in range(n_tests):
+                    ax.axhline(y=yi, color='gray', linewidth=0.3, zorder=1)
 
-            for yi, test in enumerate(page_tests):
-                for build in builds:
-                    vals = data.get((build, test), [])
-                    if not vals:
-                        continue
-                    y_pos = [yi + offsets[build]] * len(vals)
-                    ax.scatter(vals, y_pos,
-                               s=16, color=build_colors[build],
-                               label=build if yi == 0 else None,
-                               alpha=0.8, zorder=5, edgecolors='none')
+                # Offset builds vertically so dot edges graze the guide line.
+                # Compute marker radius in data coords from figure geometry.
+                marker_size = 16  # scatter s parameter (area in points²)
+                marker_radius_pts = math.sqrt(marker_size) / 2  # radius in points
+                # y-axis: n_tests data units over the plot height in points
+                plot_height_inches = fig_height - 1.5  # approx after tight_layout
+                y_range = max(n_tests, 1)
+                pts_per_data_unit = 72 * plot_height_inches / y_range
+                marker_radius_data = marker_radius_pts / pts_per_data_unit
 
-            ax.set_ylim(-0.7, n_tests - 1 + 0.7)
-            ax.set_yticks(range(n_tests))
-            # Strip common path prefixes for readability
-            labels = []
-            for t in page_tests:
-                # Strip leading path components that are in list_file
-                label = t.split('/')[-1] if '/' in t else t
-                labels.append(label)
-            ax.set_yticklabels(labels, fontsize=7, family='monospace')
-            ax.invert_yaxis()  # shortest at top
+                n_builds = len(builds)
+                if n_builds == 1:
+                    offsets = {builds[0]: 0}
+                else:
+                    # First build above line, last build below line
+                    offsets = {builds[i]: -marker_radius_data + i * 2 * marker_radius_data / (n_builds - 1)
+                               for i in range(n_builds)}
 
-            ax.set_xlabel(metric_label, fontsize=10)
-            ax.grid(axis='x', alpha=0.3)
+                for yi, test in enumerate(page_tests):
+                    for build in builds:
+                        vals = data.get((build, test), [])
+                        if not vals:
+                            continue
+                        y_pos = [yi + offsets[build]] * len(vals)
+                        ax.scatter(vals, y_pos,
+                                   s=marker_size, color=build_colors[build],
+                                   label=build if yi == 0 else None,
+                                   alpha=0.8, zorder=5, edgecolors='none')
 
-            # x-axis: auto-scale per page, never show negative time
-            ax.margins(x=0.05)
-            ax.set_xlim(left=max(0, ax.get_xlim()[0]))
+                ax.set_ylim(-0.7, n_tests - 1 + 0.7)
+                ax.set_yticks(range(n_tests))
+                labels = []
+                for t in page_tests:
+                    label = t.split('/')[-1] if '/' in t else t
+                    labels.append(label)
+                ax.set_yticklabels(labels, fontsize=7, family='monospace')
+                ax.invert_yaxis()
 
-            # Set consistent units based on the page's max value
-            # Get the auto-generated tick positions to decide on decimal format
-            tick_vals = ax.get_xticks()
-            if metric in ('instructions', 'cycles', 'cache_misses', 'branch_misses'):
-                ax.xaxis.set_major_formatter(
-                    ticker.FuncFormatter(make_count_formatter(ax.get_xlim()[1], tick_vals)))
-            else:
-                ax.xaxis.set_major_formatter(
-                    ticker.FuncFormatter(make_time_formatter(ax.get_xlim()[1], tick_vals)))
+                ax.set_xlabel(metric_label, fontsize=10)
+                ax.grid(axis='x', alpha=0.3)
 
-            page_title = f'{title}  (page {page+1}/{n_pages})'
-            ax.set_title(page_title, fontsize=11, fontweight='bold')
+                ax.margins(x=0.05)
+                ax.set_xlim(left=max(0, ax.get_xlim()[0]))
 
-            if len(builds) > 1:
-                ax.legend(loc='upper right', markerscale=2, fontsize=8)
+                tick_vals = ax.get_xticks()
+                if metric in ('instructions', 'cycles', 'cache_misses', 'branch_misses'):
+                    ax.xaxis.set_major_formatter(
+                        ticker.FuncFormatter(make_count_formatter(ax.get_xlim()[1], tick_vals)))
+                else:
+                    ax.xaxis.set_major_formatter(
+                        ticker.FuncFormatter(make_time_formatter(ax.get_xlim()[1], tick_vals)))
 
-            plt.tight_layout()
-            pdf.savefig(fig, dpi=150)
-            plt.close(fig)
+                if args.group_by_list and group_name != 'all':
+                    page_title = f'{title}  —  {group_name}  (page {page+1}/{n_pages})'
+                else:
+                    page_title = f'{title}  (page {page+1}/{n_pages})'
+                ax.set_title(page_title, fontsize=11, fontweight='bold')
 
-    print(f'Wrote {n_pages} pages to {args.output}')
+                if len(builds) > 1:
+                    ax.legend(loc='upper right', markerscale=2, fontsize=8)
+
+                plt.tight_layout()
+                pdf.savefig(fig, dpi=150)
+                plt.close(fig)
+
+    print(f'Wrote {total_pages} pages to {args.output}')
     print(f'{len(tests_sorted)} tests, {len(builds)} build(s): {", ".join(builds)}')
 
 
