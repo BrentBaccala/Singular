@@ -2048,6 +2048,12 @@ void enterOnePairNormal (int i,poly p,int ecart, int isFromQ,kStrategy strat, in
     {
       for (auto jt = strat->B.begin(); jt != strat->B.end(); )
       {
+        // sev pre-filter: if neither LCM can divide the other, skip pDivComp
+        if ((jt->sev_lcm & ~Lp.sev_lcm) && (Lp.sev_lcm & ~jt->sev_lcm))
+        {
+          ++jt;
+          continue;
+        }
         compare=pDivComp(jt->lcm,Lp.lcm);
         if ((compare==1)
         &&(sugarDivisibleBy(jt->ecart,Lp.ecart)))
@@ -2084,6 +2090,12 @@ void enterOnePairNormal (int i,poly p,int ecart, int isFromQ,kStrategy strat, in
       */
       for(auto jt = strat->B.begin(); jt != strat->B.end(); )
       {
+        // sev pre-filter: if neither LCM can divide the other, skip pDivComp
+        if ((jt->sev_lcm & ~Lp.sev_lcm) && (Lp.sev_lcm & ~jt->sev_lcm))
+        {
+          ++jt;
+          continue;
+        }
         compare=pDivComp(jt->lcm,Lp.lcm);
         if (compare==1)
         {
