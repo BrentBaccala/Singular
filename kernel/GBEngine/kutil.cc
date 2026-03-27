@@ -4173,128 +4173,68 @@ void chainCritRing (poly p,int, kStrategy strat)
   }
   /*
   *this is our MODIFICATION of GEBAUER-MOELLER:
-  *First the elements of B enter L,
-  *then we fix a lcm and the "best" element in L
-  *(i.e the last in L with this lcm and of type (s,p))
-  *and cancel all the other elements of type (r,p) with this lcm
-  *except the case the element (s,r) has also the same lcm
-  *and is on the worst position with respect to (s,p) and (r,p)
+  *Merge B into L, then deduplicate the B-origin elements using
+  *pair_index for O(1) triangle checks.  kMergeBintoL_and_return_iterators
+  *gives us iterators to the new elements in L-order, avoiding a full
+  *scan of L.
+  *
+  *The outer loop iterates worst-to-first (ji = high index = worse position).
+  *For each pair with the same LCM, the inner element ii (better position)
+  *gets canceled, matching the original Ring semantics where the worse-
+  *positioned element survives.  The n_DivBy coefficient check is preserved.
   */
-  /*
-  *B enters to L/their order with respect to B is permutated for elements
-  *B[i].p with the same leading term
-  */
-  kMergeBintoL(strat);
-  if (strat->L.empty()) return;
-  // j iterates from last (worst) to first (best), matching spielwiese j=Ll..0
-  auto jt = strat->L.end();
-  --jt;
-  loop  /*cannot be changed into a for !!! */
+  std::vector<LSet::iterator> bvec = kMergeBintoL_and_return_iterators(strat);
+  LSet::iterator endL = strat->L.end();
+  /* Iterate worst-to-first: bvec is sorted best(0) to worst(size-1),
+   * so ji starts at the end and works backward */
+  for (int ji = (int)bvec.size() - 1; ji >= 0; ji--)
   {
-    if (jt == strat->L.begin())
+    if (bvec[ji] == endL) continue;
+    for (int ii = ji - 1; ii >= 0; ii--)
     {
-      /*now L[0] cannot be canceled any more and the tail can be removed*/
-      if (jt->p2 == strat->tail) jt->p2 = p;
-      break;
-    }
-    if (jt->p2 == p) // Was the element added from B?
-    {
-      auto it = jt;
-      --it;
-      loop
+      if (bvec[ii] == endL) continue;
+      /* bvec[ji] is worse (outer), bvec[ii] is better (inner) */
+      if (n_DivBy(pGetCoeff(bvec[ji]->lcm), pGetCoeff(bvec[ii]->lcm), currRing->cf)
+          && pLmEqual(bvec[ji]->lcm, bvec[ii]->lcm))
       {
-        // In a multiset, we track "went past begin" via end() sentinel
-        if (it == strat->L.end())  break;
-        // Element is from B and has the same lcm as jt
-        if ((it->p2 == p) && n_DivBy(pGetCoeff(jt->lcm), pGetCoeff(it->lcm), currRing->cf)
-             && pLmEqual(jt->lcm,it->lcm))
-        {
-          /*it could be canceled but we search for a better one to cancel*/
-          strat->c3++;
+        /*bvec[ii] could be canceled but we search for a better one to cancel*/
+        strat->c3++;
 #ifdef KDEBUG
-          if (TEST_OPT_DEBUG)
-          {
-            PrintS("--- chain criterion func chainCritRing type 3\n");
-            PrintS("strat->L[j].lcm:");
-            wrp(jt->lcm);
-            PrintS("  strat->L[i].lcm:");
-            wrp(it->lcm);
-            PrintLn();
-          }
+        if (TEST_OPT_DEBUG)
+        {
+          PrintS("--- chain criterion func chainCritRing type 3\n");
+          PrintS("strat->L[j].lcm:");
+          wrp(bvec[ji]->lcm);
+          PrintS("  strat->L[i].lcm:");
+          wrp(bvec[ii]->lcm);
+          PrintLn();
+        }
 #endif
-          // Search backward from it for a pair (jt->p1, it->p1)
-          LSet::iterator lt;
-          BOOLEAN found = FALSE;
-          if (it != strat->L.begin())
-          {
-            lt = it;
-            --lt;
-            while (TRUE)
-            {
-              if (((jt->p1 == lt->p1) && (it->p1 == lt->p2))
-              ||  ((jt->p1 == lt->p2) && (it->p1 == lt->p1)))
-              {
-                found = TRUE;
-                break;
-              }
-              if (lt == strat->L.begin()) break;
-              --lt;
-            }
-          }
-          if (found
-          && (pNext(lt->p) == strat->tail)
-          && (!pLmEqual(it->p,lt->p))
-          && pDivisibleBy(p,lt->lcm))
-          {
-            /*
-            *"NOT equal(...)" because in case of "equal" the element lt
-            *is "older" and has to be from theoretical point of view behind
-            *it, but we do not want to reorder L
-            */
-            it->p2 = strat->tail;
-            /*
-            *lt will be canceled, we cannot cancel it later on,
-            *so we mark it with "tail"
-            */
-            strat->L.erase(lt);
-            // In a multiset, erasing lt does not invalidate jt or it.
-            // Move it backward to continue checking.
-            if (it == strat->L.begin())
-              it = strat->L.end(); // sentinel: went past begin
-            else
-              --it;
-          }
-          else
-          {
-            // Erase it; jt is still valid in a multiset.
-            // Save position before it so we can continue.
-            auto prev = it;
-            if (prev != strat->L.begin())
-              --prev;
-            else
-              prev = strat->L.end(); // sentinel: went past begin
-            strat->L.erase(it);
-            it = prev;
-            // prev is already the next candidate, continue loop
-            // without extra decrement
-            continue;
-          }
+        auto lt = bvec[ii] + 1;
+        if (isInPairsetL(lt,bvec[ji]->p1,bvec[ii]->p1,strat)
+        && (pNext(lt->p) == strat->tail)
+        && (!pLmEqual(bvec[ii]->p,lt->p))
+        && pDivisibleBy(p,lt->lcm))
+        {
+          /*
+          *"NOT equal(...)" because in case of "equal" the element L[l]
+          *is "older" and has to be from theoretical point of view behind
+          *L[i], but we do not want to reorder L
+          */
+          strat->L.erase(lt);
+          /*
+          *L[l] will be canceled, we cannot cancel L[i] later on,
+          *so we null it out in bvec to prevent re-processing
+          */
+          bvec[ii] = endL;
         }
         else
         {
-          if (it == strat->L.begin())
-            break;
-          --it;
+          strat->L.erase(bvec[ii]);
+          bvec[ii] = endL;
         }
       }
     }
-    else if (jt->p2 == strat->tail)
-    {
-      /*now jt cannot be canceled any more and the tail can be removed*/
-      jt->p2 = p;
-    }
-    if (jt == strat->L.begin()) break;
-    --jt;
   }
 }
 
