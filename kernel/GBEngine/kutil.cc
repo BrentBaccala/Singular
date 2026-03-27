@@ -1245,7 +1245,7 @@ LSet::iterator LSet::erase(LSet::iterator it) {
   }
   #endif
   // Mark the sev_flat_ entry as sentinel (0) so cache-friendly scans skip it
-  sev_flat_invalidate(Lp.flat_index);
+  if (Lp.flat_index < sev_flat_.size()) sev_flat_[Lp.flat_index] = 0;
   return writable_set<LObject, CompareLObject>::erase(it);
 }
 
@@ -1299,8 +1299,18 @@ LSet::unordered_iterator LSet::erase(LSet::unordered_iterator it) {
   }
   #endif
   // Mark the sev_flat_ entry as sentinel (0) so cache-friendly scans skip it
-  sev_flat_invalidate(Lp.flat_index);
+  if (Lp.flat_index < sev_flat_.size()) sev_flat_[Lp.flat_index] = 0;
   return writable_set<LObject, CompareLObject>::erase(it);
+}
+
+LSet::filtered_iterator LSet::erase(LSet::filtered_iterator fit) {
+  // Delegate cleanup to the unordered_iterator erase, then rebuild
+  // a filtered_iterator at the next position.
+  size_t pos = fit.pos_;
+  unsigned long sev1 = fit.sev1_;
+  unsigned long sev2 = fit.sev2_;
+  erase(writable_set<LObject, CompareLObject>::uiter_at(pos));
+  return filtered_iterator(this, pos, sev1, sev2);
 }
 
 /*2
@@ -2046,20 +2056,12 @@ void enterOnePairNormal (int i,poly p,int ecart, int isFromQ,kStrategy strat, in
     *if the leading term of r divides lcm(s,p) then (s,p) will not enter B
     */
     {
-      // Scan contiguous sev_flat array for cache-friendly pre-filtering
-      const unsigned long* sev_arr = strat->B.sev_flat().data();
-      const size_t sev_sz = strat->B.sev_flat_size();
       const unsigned long sev_lp = Lp.sev_lcm;
-      for (size_t k = 0; k < sev_sz; k++)
+      for (auto it = strat->B.ufbegin(sev_lp, sev_lp); it != strat->B.ufend(); )
       {
-        // sev pre-filter: skip deleted entries (0) and incomparable pairs
-        if ((sev_arr[k] & ~sev_lp) && (sev_lp & ~sev_arr[k]))
-          continue;
-        LObject* Bk = strat->B.flat_ptr(k);
-        if (Bk == NULL) continue;  // deleted entry
-        compare=pDivComp(Bk->lcm,Lp.lcm);
+        compare=pDivComp(it->lcm,Lp.lcm);
         if ((compare==1)
-        &&(sugarDivisibleBy(Bk->ecart,Lp.ecart)))
+        &&(sugarDivisibleBy(it->ecart,Lp.ecart)))
         {
           strat->c3++;
           if ((strat->fromQ==NULL) || (isFromQ==0) || (strat->fromQ[i]==0))
@@ -2071,11 +2073,13 @@ void enterOnePairNormal (int i,poly p,int ecart, int isFromQ,kStrategy strat, in
         }
         else
         if ((compare ==-1)
-        && sugarDivisibleBy(Lp.ecart,Bk->ecart))
+        && sugarDivisibleBy(Lp.ecart,it->ecart))
         {
-          strat->B.erase(strat->B.uiter_at(k));
+          it = strat->B.erase(it);
           strat->c3++;
         }
+        else
+          ++it;
       }
     }
   }
@@ -2089,18 +2093,10 @@ void enterOnePairNormal (int i,poly p,int ecart, int isFromQ,kStrategy strat, in
       *if the leading term of s divides lcm(r,p) then (r,p) will be canceled
       *if the leading term of r divides lcm(s,p) then (s,p) will not enter B
       */
-      // Scan contiguous sev_flat array for cache-friendly pre-filtering
-      const unsigned long* sev_arr = strat->B.sev_flat().data();
-      const size_t sev_sz = strat->B.sev_flat_size();
       const unsigned long sev_lp = Lp.sev_lcm;
-      for (size_t k = 0; k < sev_sz; k++)
+      for (auto it = strat->B.ufbegin(sev_lp, sev_lp); it != strat->B.ufend(); )
       {
-        // sev pre-filter: skip deleted entries (0) and incomparable pairs
-        if ((sev_arr[k] & ~sev_lp) && (sev_lp & ~sev_arr[k]))
-          continue;
-        LObject* Bk = strat->B.flat_ptr(k);
-        if (Bk == NULL) continue;  // deleted entry
-        compare=pDivComp(Bk->lcm,Lp.lcm);
+        compare=pDivComp(it->lcm,Lp.lcm);
         if (compare==1)
         {
           strat->c3++;
@@ -2114,9 +2110,11 @@ void enterOnePairNormal (int i,poly p,int ecart, int isFromQ,kStrategy strat, in
         else
         if (compare ==-1)
         {
-          strat->B.erase(strat->B.uiter_at(k));
+          it = strat->B.erase(it);
           strat->c3++;
         }
+        else
+          ++it;
       }
     }
   }
@@ -3301,27 +3299,18 @@ void chainCritNormal (poly p,int ecart,kStrategy strat)
     *and in case the sugar is o.k. then L[j] can be canceled
     */
       {
-        // Scan sev_flat_ contiguously for cache-friendly pre-filtering.
-        // Only chase pointers to LObjects for entries that pass the sev check.
-        const unsigned long* sev_arr = strat->L.sev_flat().data();
-        const size_t sev_sz = strat->L.sev_flat_size();
-        for (size_t ui = 0; ui < sev_sz; ui++)
+        for (auto it = strat->L.ufbegin(sev_p); it != strat->L.ufend(); )
         {
-          if (!(sev_p & ~sev_arr[ui]))  // cache-friendly sev pre-filter
+          if (sugarDivisibleBy(ecart,it->ecart)
+          && ((it->p == strat->tail) || (rHasGlobalOrdering(currRing)))
+          && pCompareChain(p,it->p1,it->p2,it->lcm)
+          && (it->p == strat->tail))
           {
-            LObject* Lp = strat->L.flat_ptr(ui);
-            if (Lp == NULL) continue;
-            if (sugarDivisibleBy(ecart,Lp->ecart)
-            && ((Lp->p == strat->tail) || (rHasGlobalOrdering(currRing)))
-            && pCompareChain(p,Lp->p1,Lp->p2,Lp->lcm))
-            {
-              if (Lp->p == strat->tail)
-              {
-                strat->L.erase(strat->L.uiter_at(ui));
-                strat->c3++;
-              }
-            }
+            it = strat->L.erase(it);
+            strat->c3++;
           }
+          else
+            ++it;
         }
       }
       /*
@@ -3362,23 +3351,16 @@ void chainCritNormal (poly p,int ecart,kStrategy strat)
       *and in case the sugar is o.k. then L[j] can be canceled
       */
       {
-        const unsigned long* sev_arr = strat->L.sev_flat().data();
-        const size_t sev_sz = strat->L.sev_flat_size();
-        for (size_t ui = 0; ui < sev_sz; ui++)
+        for (auto it = strat->L.ufbegin(sev_p); it != strat->L.ufend(); )
         {
-          if (!(sev_p & ~sev_arr[ui]))
+          if (pCompareChain(p,it->p1,it->p2,it->lcm)
+          && ((pNext(it->p) == strat->tail)||(rHasGlobalOrdering(currRing))))
           {
-            LObject* Lp = strat->L.flat_ptr(ui);
-            if (Lp == NULL) continue;
-            if (pCompareChain(p,Lp->p1,Lp->p2,Lp->lcm))
-            {
-              if ((pNext(Lp->p) == strat->tail)||(rHasGlobalOrdering(currRing)))
-              {
-                strat->L.erase(strat->L.uiter_at(ui));
-                strat->c3++;
-              }
-            }
+            it = strat->L.erase(it);
+            strat->c3++;
           }
+          else
+            ++it;
         }
       }
       /*
@@ -3408,28 +3390,23 @@ void chainCritNormal (poly p,int ecart,kStrategy strat)
   else
   {
     {
-      const unsigned long* sev_arr = strat->L.sev_flat().data();
-      const size_t sev_sz = strat->L.sev_flat_size();
-      for (size_t ui = 0; ui < sev_sz; ui++)
+      for (auto it = strat->L.ufbegin(sev_p); it != strat->L.ufend(); )
       {
-        if (!(sev_p & ~sev_arr[ui]))
+        #ifdef HAVE_SHIFTBBA
+        if ((it->p1!=NULL) &&
+        pCompareChain(p,it->p1,it->p2,it->lcm))
+        #else
+        if (pCompareChain(p,it->p1,it->p2,it->lcm))
+        #endif
         {
-          LObject* Lp = strat->L.flat_ptr(ui);
-          if (Lp == NULL) continue;
-          #ifdef HAVE_SHIFTBBA
-          if ((Lp->p1!=NULL) &&
-          pCompareChain(p,Lp->p1,Lp->p2,Lp->lcm))
-          #else
-          if (pCompareChain(p,Lp->p1,Lp->p2,Lp->lcm))
-          #endif
+          if ((pNext(it->p) == strat->tail)||(rHasGlobalOrdering(currRing)))
           {
-            if ((pNext(Lp->p) == strat->tail)||(rHasGlobalOrdering(currRing)))
-            {
-              strat->L.erase(strat->L.uiter_at(ui));
-              strat->c3++;
-            }
+            it = strat->L.erase(it);
+            strat->c3++;
+            continue;
           }
         }
+        ++it;
       }
     }
     /*
@@ -4145,35 +4122,26 @@ void chainCritRing (poly p,int, kStrategy strat)
   assume(!(strat->Gebauer || strat->fromT));
   {
     unsigned long sev_p = p_GetShortExpVector(p, currRing);
-    const unsigned long* sev_arr = strat->L.sev_flat().data();
-    const size_t sev_sz = strat->L.sev_flat_size();
-    for (size_t ui = 0; ui < sev_sz; ui++)
+    for (auto it = strat->L.ufbegin(sev_p); it != strat->L.ufend(); )
     {
-      if (!(sev_p & ~sev_arr[ui]))  // cache-friendly sev pre-filter
+      if ((it->lcm != NULL) && n_DivBy(pGetCoeff(it->lcm), pGetCoeff(p), currRing->cf)
+      && pCompareChain(p,it->p1,it->p2,it->lcm)
+      && ((pNext(it->p) == strat->tail)||(rHasGlobalOrdering(currRing))))
       {
-        LObject* Lp = strat->L.flat_ptr(ui);
-        if (Lp == NULL) continue;
-        if ((Lp->lcm != NULL) && n_DivBy(pGetCoeff(Lp->lcm), pGetCoeff(p), currRing->cf))
-        {
-          if (pCompareChain(p,Lp->p1,Lp->p2,Lp->lcm))
-          {
-            if ((pNext(Lp->p) == strat->tail)||(rHasGlobalOrdering(currRing)))
-            {
-              strat->L.erase(strat->L.uiter_at(ui));
-              strat->c3++;
+        it = strat->L.erase(it);
+        strat->c3++;
 #ifdef KDEBUG
-              if (TEST_OPT_DEBUG)
-              {
-                PrintS("--- chain criterion func chainCritRing type 2\n");
-                PrintS("  p:");
-                wrp(p);
-                PrintLn();
-              }
-#endif
-            }
-          }
+        if (TEST_OPT_DEBUG)
+        {
+          PrintS("--- chain criterion func chainCritRing type 2\n");
+          PrintS("  p:");
+          wrp(p);
+          PrintLn();
         }
+#endif
       }
+      else
+        ++it;
     }
   }
   /*

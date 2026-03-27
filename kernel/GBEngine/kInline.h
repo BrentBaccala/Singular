@@ -1041,7 +1041,7 @@ KINLINE void LSet::pop(void) {
     pair_index.erase(key);
   }
   // Mark sev_flat_ entry as sentinel (0) so cache-friendly scans skip it
-  sev_flat_invalidate(Lp.flat_index);
+  if (Lp.flat_index < sev_flat_.size()) sev_flat_[Lp.flat_index] = 0;
   writable_set<LObject, CompareLObject>::erase(it);
 }
 

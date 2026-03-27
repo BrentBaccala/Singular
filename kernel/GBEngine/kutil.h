@@ -334,9 +334,76 @@ public:
   using writable_set<LObject, CompareLObject>::unordered_iterator;
   using writable_set<LObject, CompareLObject>::ubegin;
   using writable_set<LObject, CompareLObject>::uend;
-  using writable_set<LObject, CompareLObject>::flat_ptr;
-  using writable_set<LObject, CompareLObject>::uiter_at;
-  using writable_set<LObject, CompareLObject>::flat_size;
+
+  // Filtered unordered iterator: scans the contiguous sev_flat_ array
+  // for cache-friendly pre-filtering, only visiting elements whose sev
+  // passes the filter.  Two filter modes:
+  //   sev2_=0: divisibility — skip where (sev1_ & ~sev_flat_[i]) != 0
+  //   sev2_!=0: incomparability — skip where both
+  //     (sev_flat_[i] & ~sev1_) and (sev2_ & ~sev_flat_[i]) are nonzero
+  class filtered_iterator {
+    LSet* owner_;
+    size_t pos_;
+    unsigned long sev1_;
+    unsigned long sev2_;
+    friend class LSet;
+
+    void advance() {
+      const unsigned long* sev = owner_->sev_flat_.data();
+      const size_t sz = owner_->sev_flat_.size();
+      while (pos_ < sz) {
+        unsigned long s = sev[pos_];
+        if (s == 0) { ++pos_; continue; }              // deleted sentinel
+        if (sev2_ == 0) {
+          if (sev1_ & ~s) { ++pos_; continue; }       // divisibility: skip
+        } else {
+          if ((s & ~sev1_) && (sev2_ & ~s)) { ++pos_; continue; }  // incomp: skip
+        }
+        break;
+      }
+    }
+
+  public:
+    using iterator_category = std::forward_iterator_tag;
+    using value_type = LObject;
+    using difference_type = std::ptrdiff_t;
+    using pointer = LObject*;
+    using reference = LObject&;
+
+    filtered_iterator() : owner_(nullptr), pos_(0), sev1_(0), sev2_(0) {}
+    filtered_iterator(LSet* owner, size_t pos, unsigned long sev1, unsigned long sev2)
+      : owner_(owner), pos_(pos), sev1_(sev1), sev2_(sev2) {
+      advance();
+    }
+
+    reference operator*() const { return *owner_->flat_ptr(pos_); }
+    pointer operator->() const { return owner_->flat_ptr(pos_); }
+
+    filtered_iterator& operator++() { ++pos_; advance(); return *this; }
+    filtered_iterator operator++(int) {
+      filtered_iterator tmp = *this;
+      ++(*this);
+      return tmp;
+    }
+
+    bool operator==(const filtered_iterator& other) const { return pos_ == other.pos_; }
+    bool operator!=(const filtered_iterator& other) const { return pos_ != other.pos_; }
+  };
+
+  // Filtered unordered iteration: divisibility filter
+  filtered_iterator ufbegin(unsigned long sev) {
+    return filtered_iterator(this, 0, sev, 0);
+  }
+  // Filtered unordered iteration: incomparability filter
+  filtered_iterator ufbegin(unsigned long sev1, unsigned long sev2) {
+    return filtered_iterator(this, 0, sev1, sev2);
+  }
+  // Sentinel for filtered iteration (compares by pos_)
+  filtered_iterator ufend() {
+    return filtered_iterator(this, sev_flat_.size(), 0, 0);
+  }
+  // Erase via filtered_iterator; returns next valid filtered position
+  filtered_iterator erase(filtered_iterator it);
 
   // Default constructor
   LSet() = default;
@@ -410,20 +477,13 @@ public:
     }
   }
 
-  // Access to the flat sev_lcm array for cache-friendly scanning
-  const std::vector<unsigned long>& sev_flat() const { return sev_flat_; }
-  size_t sev_flat_size() const { return sev_flat_.size(); }
-  // Mark a sev_flat_ entry as sentinel (0) for deleted elements
-  void sev_flat_invalidate(size_t idx) {
-    if (idx < sev_flat_.size()) sev_flat_[idx] = 0;
-  }
   // Rebuild sev_flat_ from the current flat_ array.
   // Deleted entries get sentinel 0, valid entries get their sev_lcm.
   void rebuild_sev_flat() {
-    const size_t n = flat_size();
+    const size_t n = this->flat_size();
     sev_flat_.resize(n);
     for (size_t i = 0; i < n; i++) {
-      LObject* p = flat_ptr(i);
+      LObject* p = this->flat_ptr(i);
       sev_flat_[i] = (p != NULL) ? p->sev_lcm : 0;
     }
   }
