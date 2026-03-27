@@ -2046,17 +2046,20 @@ void enterOnePairNormal (int i,poly p,int ecart, int isFromQ,kStrategy strat, in
     *if the leading term of r divides lcm(s,p) then (s,p) will not enter B
     */
     {
-      for (auto jt = strat->B.ubegin(); jt != strat->B.uend(); )
+      // Scan contiguous sev_flat array for cache-friendly pre-filtering
+      const unsigned long* sev_arr = strat->B.sev_flat().data();
+      const size_t sev_sz = strat->B.sev_flat_size();
+      const unsigned long sev_lp = Lp.sev_lcm;
+      for (size_t k = 0; k < sev_sz; k++)
       {
-        // sev pre-filter: if neither LCM can divide the other, skip pDivComp
-        if ((jt->sev_lcm & ~Lp.sev_lcm) && (Lp.sev_lcm & ~jt->sev_lcm))
-        {
-          ++jt;
+        // sev pre-filter: skip deleted entries (0) and incomparable pairs
+        if ((sev_arr[k] & ~sev_lp) && (sev_lp & ~sev_arr[k]))
           continue;
-        }
-        compare=pDivComp(jt->lcm,Lp.lcm);
+        LObject* Bk = strat->B.flat_ptr(k);
+        if (Bk == NULL) continue;  // deleted entry
+        compare=pDivComp(Bk->lcm,Lp.lcm);
         if ((compare==1)
-        &&(sugarDivisibleBy(jt->ecart,Lp.ecart)))
+        &&(sugarDivisibleBy(Bk->ecart,Lp.ecart)))
         {
           strat->c3++;
           if ((strat->fromQ==NULL) || (isFromQ==0) || (strat->fromQ[i]==0))
@@ -2068,13 +2071,11 @@ void enterOnePairNormal (int i,poly p,int ecart, int isFromQ,kStrategy strat, in
         }
         else
         if ((compare ==-1)
-        && sugarDivisibleBy(Lp.ecart,jt->ecart))
+        && sugarDivisibleBy(Lp.ecart,Bk->ecart))
         {
-          jt = strat->B.erase(jt);
+          strat->B.erase(strat->B.uiter_at(k));
           strat->c3++;
         }
-        else
-          ++jt;
       }
     }
   }
@@ -2088,15 +2089,18 @@ void enterOnePairNormal (int i,poly p,int ecart, int isFromQ,kStrategy strat, in
       *if the leading term of s divides lcm(r,p) then (r,p) will be canceled
       *if the leading term of r divides lcm(s,p) then (s,p) will not enter B
       */
-      for(auto jt = strat->B.ubegin(); jt != strat->B.uend(); )
+      // Scan contiguous sev_flat array for cache-friendly pre-filtering
+      const unsigned long* sev_arr = strat->B.sev_flat().data();
+      const size_t sev_sz = strat->B.sev_flat_size();
+      const unsigned long sev_lp = Lp.sev_lcm;
+      for (size_t k = 0; k < sev_sz; k++)
       {
-        // sev pre-filter: if neither LCM can divide the other, skip pDivComp
-        if ((jt->sev_lcm & ~Lp.sev_lcm) && (Lp.sev_lcm & ~jt->sev_lcm))
-        {
-          ++jt;
+        // sev pre-filter: skip deleted entries (0) and incomparable pairs
+        if ((sev_arr[k] & ~sev_lp) && (sev_lp & ~sev_arr[k]))
           continue;
-        }
-        compare=pDivComp(jt->lcm,Lp.lcm);
+        LObject* Bk = strat->B.flat_ptr(k);
+        if (Bk == NULL) continue;  // deleted entry
+        compare=pDivComp(Bk->lcm,Lp.lcm);
         if (compare==1)
         {
           strat->c3++;
@@ -2110,11 +2114,9 @@ void enterOnePairNormal (int i,poly p,int ecart, int isFromQ,kStrategy strat, in
         else
         if (compare ==-1)
         {
-          jt = strat->B.erase(jt);
+          strat->B.erase(strat->B.uiter_at(k));
           strat->c3++;
         }
-        else
-          ++jt;
       }
     }
   }
