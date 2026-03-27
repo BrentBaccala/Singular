@@ -1948,12 +1948,6 @@ void enterOnePairNormal (int i,poly p,int ecart, int isFromQ,kStrategy strat, in
   assume(i<=strat->sl);
 
   int      compare;
-  LObject  Lp;
-  Lp.i_r = -1;
-
-#ifdef KDEBUG
-  Lp.ecart=0; Lp.length=0;
-#endif
 
   /*- check product criterion and ecart BEFORE computing the lcm -*/
   if (strat->sugarCrit && ALLOW_PROD_CRIT(strat))
@@ -2015,6 +2009,14 @@ void enterOnePairNormal (int i,poly p,int ecart, int isFromQ,kStrategy strat, in
       }
     }
   }
+
+  /*- Only initialize Lp for pairs that survive the product criterion -*/
+  LObject  Lp;
+  Lp.i_r = -1;
+
+#ifdef KDEBUG
+  Lp.ecart=0; Lp.length=0;
+#endif
 
   /*- computes the lcm(s[i],p) -*/
   Lp.lcm = pInit();
