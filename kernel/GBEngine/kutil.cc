@@ -2046,7 +2046,7 @@ void enterOnePairNormal (int i,poly p,int ecart, int isFromQ,kStrategy strat, in
     *if the leading term of r divides lcm(s,p) then (s,p) will not enter B
     */
     {
-      for (auto jt = strat->B.begin(); jt != strat->B.end(); )
+      for (auto jt = strat->B.ubegin(); jt != strat->B.uend(); )
       {
         // sev pre-filter: if neither LCM can divide the other, skip pDivComp
         if ((jt->sev_lcm & ~Lp.sev_lcm) && (Lp.sev_lcm & ~jt->sev_lcm))
@@ -2088,7 +2088,7 @@ void enterOnePairNormal (int i,poly p,int ecart, int isFromQ,kStrategy strat, in
       *if the leading term of s divides lcm(r,p) then (r,p) will be canceled
       *if the leading term of r divides lcm(s,p) then (s,p) will not enter B
       */
-      for(auto jt = strat->B.begin(); jt != strat->B.end(); )
+      for(auto jt = strat->B.ubegin(); jt != strat->B.uend(); )
       {
         // sev pre-filter: if neither LCM can divide the other, skip pDivComp
         if ((jt->sev_lcm & ~Lp.sev_lcm) && (Lp.sev_lcm & ~jt->sev_lcm))
