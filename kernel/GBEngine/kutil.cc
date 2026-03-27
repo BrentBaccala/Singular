@@ -3516,7 +3516,10 @@ void chainCritSig (poly p,int /*ecart*/,kStrategy strat)
       for (auto it = jt + 1; it != strat->L.end(); )
       {
         bool i_deleted = false;
-        if ((it->p2 == p) && pLmEqual(jt->lcm,it->lcm))
+        /* sev equality pre-filter: if sev_lcm values differ, LCMs can't
+         * be equal, so skip the expensive pLmEqual call */
+        if ((it->p2 == p) && (jt->sev_lcm == it->sev_lcm)
+            && pLmEqual(jt->lcm,it->lcm))
         {
           /*L[i] could be canceled but we search for a better one to cancel*/
           strat->c3++;
