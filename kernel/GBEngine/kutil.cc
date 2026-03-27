@@ -4138,36 +4138,38 @@ void chainCritRing (poly p,int, kStrategy strat)
     strat->pairtest=NULL;
   }
   assume(!(strat->Gebauer || strat->fromT));
-  for (auto jt = strat->L.begin(); jt != strat->L.end(); )
   {
-    if ((jt->lcm != NULL) && n_DivBy(pGetCoeff(jt->lcm), pGetCoeff(p), currRing->cf))
+    unsigned long sev_p = p_GetShortExpVector(p, currRing);
+    const unsigned long* sev_arr = strat->L.sev_flat().data();
+    const size_t sev_sz = strat->L.sev_flat_size();
+    for (size_t ui = 0; ui < sev_sz; ui++)
     {
-      if (pCompareChain(p,jt->p1,jt->p2,jt->lcm))
+      if (!(sev_p & ~sev_arr[ui]))  // cache-friendly sev pre-filter
       {
-        if ((pNext(jt->p) == strat->tail)||(rHasGlobalOrdering(currRing)))
+        LObject* Lp = strat->L.flat_ptr(ui);
+        if (Lp == NULL) continue;
+        if ((Lp->lcm != NULL) && n_DivBy(pGetCoeff(Lp->lcm), pGetCoeff(p), currRing->cf))
         {
-          jt = strat->L.erase(jt);
-          strat->c3++;
-#ifdef KDEBUG
-          if (TEST_OPT_DEBUG)
+          if (pCompareChain(p,Lp->p1,Lp->p2,Lp->lcm))
           {
-            PrintS("--- chain criterion func chainCritRing type 2\n");
-            PrintS("strat->L[j].p:");
-            wrp(jt->p);
-            PrintS("  p:");
-            wrp(p);
-            PrintLn();
-          }
+            if ((pNext(Lp->p) == strat->tail)||(rHasGlobalOrdering(currRing)))
+            {
+              strat->L.erase(strat->L.uiter_at(ui));
+              strat->c3++;
+#ifdef KDEBUG
+              if (TEST_OPT_DEBUG)
+              {
+                PrintS("--- chain criterion func chainCritRing type 2\n");
+                PrintS("  p:");
+                wrp(p);
+                PrintLn();
+              }
 #endif
+            }
+          }
         }
-        else
-          ++jt;
       }
-      else
-        ++jt;
     }
-    else
-      ++jt;
   }
   /*
   *this is our MODIFICATION of GEBAUER-MOELLER:
