@@ -338,6 +338,46 @@ public:
   using writable_set<LObject, CompareLObject>::uiter_at;
   using writable_set<LObject, CompareLObject>::flat_size;
 
+  // Default constructor
+  LSet() = default;
+
+  // Copy constructor: base class copy rebuilds flat_ with new indices,
+  // so we must rebuild sev_flat_ and pair_index to match.
+  LSet(const LSet& other)
+    : writable_set<LObject, CompareLObject>(other), seq(other.seq) {
+    rebuild_sev_flat();
+    rebuild_pair_index();
+  }
+
+  // Move constructor: base class move rebuilds flat_ with new indices.
+  LSet(LSet&& other) noexcept
+    : writable_set<LObject, CompareLObject>(std::move(other)), seq(other.seq) {
+    rebuild_sev_flat();
+    rebuild_pair_index();
+  }
+
+  // Copy assignment: same issue — base class rebuilds flat_ from scratch.
+  LSet& operator=(const LSet& other) {
+    if (this != &other) {
+      writable_set<LObject, CompareLObject>::operator=(other);
+      seq = other.seq;
+      rebuild_sev_flat();
+      rebuild_pair_index();
+    }
+    return *this;
+  }
+
+  // Move assignment
+  LSet& operator=(LSet&& other) noexcept {
+    if (this != &other) {
+      writable_set<LObject, CompareLObject>::operator=(std::move(other));
+      seq = other.seq;
+      rebuild_sev_flat();
+      rebuild_pair_index();
+    }
+    return *this;
+  }
+
   // Override insert to maintain pair_index and sev_flat_
   iterator insert(const LObject& lobject) {
     iterator it = writable_set<LObject, CompareLObject>::insert(lobject);
@@ -385,6 +425,16 @@ public:
     for (size_t i = 0; i < n; i++) {
       LObject* p = flat_ptr(i);
       sev_flat_[i] = (p != NULL) ? p->sev_lcm : 0;
+    }
+  }
+  // Rebuild pair_index from all live elements.
+  void rebuild_pair_index() {
+    pair_index.clear();
+    for (iterator it = begin(); it != end(); ++it) {
+      if (it->p1 != NULL && it->p2 != NULL) {
+        auto key = canonicalize_pair(it->p1, it->p2);
+        pair_index.emplace(key, it);
+      }
     }
   }
 

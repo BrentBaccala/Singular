@@ -3217,8 +3217,8 @@ void chainCritNormal (poly p,int ecart,kStrategy strat)
   int j;
   unsigned long sev_p = p_GetShortExpVector(p, currRing);
 
-  // Rebuild the contiguous sev_lcm array for cache-friendly scanning.
-  strat->L.rebuild_sev_flat();
+  // sev_flat_ is now maintained incrementally by LSet's insert/erase/pop/
+  // reorder/copy/move methods.  No rebuild needed here.
 
   /*
   *pairtest[i] is TRUE if spoly(S[i],p) == 0.
