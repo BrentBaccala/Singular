@@ -120,11 +120,12 @@ classify_file_for() {
 }
 
 # Build a command string with optional numactl/taskset prefix
+# ASLR is always disabled for deterministic instruction counts
 build_full_cmd() {
     local base_cmd="$1"
-    local cmd=""
+    local cmd="setarch $(uname -m) -R "
     if [[ -n "$NUMACTL_ARGS" ]]; then
-        cmd="numactl $NUMACTL_ARGS "
+        cmd="${cmd}numactl $NUMACTL_ARGS "
     fi
     if [[ -n "$TASKSET_ARGS" ]]; then
         cmd="${cmd}taskset $TASKSET_ARGS "
