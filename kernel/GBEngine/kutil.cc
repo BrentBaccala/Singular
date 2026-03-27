@@ -3197,6 +3197,7 @@ void kMergeBintoL(kStrategy strat)
     strat->B.pop();
     strat->L.push(Lobj);
   }
+  strat->B.clear();  // reset flat_ array to prevent unbounded growth
 }
 
 /* merge set B into L, and return a vector of iterators pointing to the new
@@ -3221,6 +3222,7 @@ std::vector<LSet::iterator> kMergeBintoL_and_return_iterators(kStrategy strat)
     [&strat](LSet::iterator a, LSet::iterator b) {
       return strat->L.key_comp()(*a, *b);
     });
+  strat->B.clear();  // reset flat_ array to prevent unbounded growth
   return iterators;
 }
 
