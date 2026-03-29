@@ -3318,29 +3318,33 @@ void chainCritNormal (poly p,int ecart,kStrategy strat)
       *in B all elements with the same lcm except the "best"
       *(i.e. the last one in B with this property) will be canceled
       */
-      for (auto jt = strat->B.begin(); jt != strat->B.end(); )
       {
-        bool j_deleted = false;
-        for (auto it = jt + 1; it != strat->B.end(); )
+        const unsigned long* sev = strat->B.sev_flat_data();
+        const size_t n = strat->B.sev_flat_size();
+        for (size_t i = 0; i < n; i++)
         {
-          if (pLmEqual(jt->lcm,it->lcm))
+          if (sev[i] == 0) continue;
+          for (size_t j = i + 1; j < n; j++)
           {
-            strat->c3++;
-            if (sugarDivisibleBy(jt->ecart,it->ecart))
+            if (sev[j] == 0 || sev[i] != sev[j]) continue;
+            LObject* a = strat->B.flat_ptr(i);
+            LObject* b = strat->B.flat_ptr(j);
+            if (a == NULL || b == NULL) continue;
+            if (pLmEqual(a->lcm,b->lcm))
             {
-              it = strat->B.erase(it);
-            }
-            else
-            {
-              jt = strat->B.erase(jt);
-              j_deleted = true;
-              break;
+              strat->c3++;
+              if (sugarDivisibleBy(a->ecart,b->ecart))
+              {
+                strat->B.erase(strat->B.uiter_at(j));
+              }
+              else
+              {
+                strat->B.erase(strat->B.uiter_at(i));
+                break;  // i is gone, move to next i
+              }
             }
           }
-          else
-            ++it;
         }
-        if (!j_deleted) ++jt;
       }
     }
     else /*sugarCrit*/
@@ -3368,17 +3372,24 @@ void chainCritNormal (poly p,int ecart,kStrategy strat)
       *in B all elements with the same lcm except the "best"
       *(i.e. the last one in B with this property) will be canceled
       */
-      for (auto jt = strat->B.begin(); jt != strat->B.end(); ++jt)
       {
-        for (auto it = jt + 1; it != strat->B.end(); )
+        const unsigned long* sev = strat->B.sev_flat_data();
+        const size_t n = strat->B.sev_flat_size();
+        for (size_t i = 0; i < n; i++)
         {
-          if (pLmEqual(jt->lcm,it->lcm))
+          if (sev[i] == 0) continue;
+          for (size_t j = i + 1; j < n; j++)
           {
-            strat->c3++;
-            it = strat->B.erase(it);
+            if (sev[j] == 0 || sev[i] != sev[j]) continue;
+            LObject* a = strat->B.flat_ptr(i);
+            LObject* b = strat->B.flat_ptr(j);
+            if (a == NULL || b == NULL) continue;
+            if (pLmEqual(a->lcm,b->lcm))
+            {
+              strat->c3++;
+              strat->B.erase(strat->B.uiter_at(j));
+            }
           }
-          else
-            ++it;
         }
       }
     }
@@ -3611,46 +3622,49 @@ void chainCritPart (poly p,int ecart,kStrategy strat)
       *in B all elements with the same lcm except the "best"
       *(i.e. the last one in B with this property) will be canceled
       */
-      for (auto jt = strat->B.begin(); jt != strat->B.end(); )
       {
-        bool j_deleted = false;
-        for (auto it = jt + 1; it != strat->B.end(); )
+        const unsigned long* sev = strat->B.sev_flat_data();
+        const size_t n = strat->B.sev_flat_size();
+        for (size_t i = 0; i < n; i++)
         {
-          if (pLmEqual(jt->lcm,it->lcm))
+          if (sev[i] == 0) continue;
+          for (size_t j = i + 1; j < n; j++)
           {
-            strat->c3++;
-            if (sugarDivisibleBy(jt->ecart,it->ecart))
+            if (sev[j] == 0 || sev[i] != sev[j]) continue;
+            LObject* a = strat->B.flat_ptr(i);
+            LObject* b = strat->B.flat_ptr(j);
+            if (a == NULL || b == NULL) continue;
+            if (pLmEqual(a->lcm,b->lcm))
             {
-              if(TEST_OPT_DEBUG)
+              strat->c3++;
+              if (sugarDivisibleBy(a->ecart,b->ecart))
               {
-                Print("chain-crit-part: sugar B[j].lcm=");
-                p_wrp(jt->lcm,currRing);
-                Print(" delete B[i]");
-                p_wrp(it->lcm,currRing);
-                PrintLn();
+                if(TEST_OPT_DEBUG)
+                {
+                  Print("chain-crit-part: sugar B[j].lcm=");
+                  p_wrp(a->lcm,currRing);
+                  Print(" delete B[i]");
+                  p_wrp(b->lcm,currRing);
+                  PrintLn();
+                }
+                strat->B.erase(strat->B.uiter_at(j));
               }
-              it = strat->B.erase(it);
-              ++jt;
-            }
-            else
-            {
-              if(TEST_OPT_DEBUG)
+              else
               {
-                Print("chain-crit-part: sugar B[i].lcm=");
-                p_wrp(it->lcm,currRing);
-                Print(" delete B[j]");
-                p_wrp(jt->lcm,currRing);
-                PrintLn();
+                if(TEST_OPT_DEBUG)
+                {
+                  Print("chain-crit-part: sugar B[i].lcm=");
+                  p_wrp(b->lcm,currRing);
+                  Print(" delete B[j]");
+                  p_wrp(a->lcm,currRing);
+                  PrintLn();
+                }
+                strat->B.erase(strat->B.uiter_at(i));
+                break;  // i is gone, move to next i
               }
-              jt = strat->B.erase(jt);
-              j_deleted = true;
-              break;
             }
           }
-          else
-            ++it;
         }
-        if (!j_deleted) ++jt;
       }
     }
     else /*sugarCrit*/
@@ -3686,23 +3700,30 @@ void chainCritPart (poly p,int ecart,kStrategy strat)
       *in B all elements with the same lcm except the "best"
       *(i.e. the last one in B with this property) will be canceled
       */
-      for (auto jt = strat->B.begin(); jt != strat->B.end(); ++jt)
       {
-        for (auto it = jt + 1; it != strat->B.end(); )
+        const unsigned long* sev = strat->B.sev_flat_data();
+        const size_t n = strat->B.sev_flat_size();
+        for (size_t i = 0; i < n; i++)
         {
-          if (pLmEqual(jt->lcm,it->lcm))
+          if (sev[i] == 0) continue;
+          for (size_t j = i + 1; j < n; j++)
           {
-            if(TEST_OPT_DEBUG)
+            if (sev[j] == 0 || sev[i] != sev[j]) continue;
+            LObject* a = strat->B.flat_ptr(i);
+            LObject* b = strat->B.flat_ptr(j);
+            if (a == NULL || b == NULL) continue;
+            if (pLmEqual(a->lcm,b->lcm))
             {
-              Print("chain-crit-part: equal lcm B[j].lcm=");
-              p_wrp(jt->lcm,currRing);
-              Print(" delete B[i]\n");
+              if(TEST_OPT_DEBUG)
+              {
+                Print("chain-crit-part: equal lcm B[j].lcm=");
+                p_wrp(a->lcm,currRing);
+                Print(" delete B[i]\n");
+              }
+              strat->c3++;
+              strat->B.erase(strat->B.uiter_at(j));
             }
-            strat->c3++;
-            it = strat->B.erase(it);
           }
-          else
-            ++it;
         }
       }
     }

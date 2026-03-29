@@ -405,6 +405,10 @@ public:
   // Erase via filtered_iterator; returns next valid filtered position
   filtered_iterator erase(filtered_iterator it);
 
+  // Direct access to sev_flat_ for index-based pair iteration (B dedup)
+  const unsigned long* sev_flat_data() const { return sev_flat_.data(); }
+  size_t sev_flat_size() const { return sev_flat_.size(); }
+
   // Default constructor
   LSet() = default;
 
