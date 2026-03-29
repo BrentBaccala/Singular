@@ -1412,7 +1412,7 @@ static void enterOnePairRing (int i,poly p,int /*ecart*/, int isFromQ,kStrategy 
   *if the leading term of r divides lcm(s,p) then (s,p) will not enter B
   */
 
-  for(auto jt = strat->B.begin(); jt != strat->B.end(); )
+  for(auto jt = strat->B.ubegin(); jt != strat->B.uend(); )
   {
     bool j_deleted = false;
     compare=pDivCompRing(jt->lcm,h.lcm);
@@ -2310,7 +2310,7 @@ static void enterOnePairLift (int i,poly p,int ecart, int isFromQ,kStrategy stra
     *if the leading term of r divides lcm(s,p) then (s,p) will not enter B
     */
     {
-      for (auto jt = strat->B.begin(); jt != strat->B.end(); )
+      for (auto jt = strat->B.ubegin(); jt != strat->B.uend(); )
       {
         compare=pDivComp(jt->lcm,Lp.lcm);
         if ((compare==1)
@@ -2369,7 +2369,7 @@ static void enterOnePairLift (int i,poly p,int ecart, int isFromQ,kStrategy stra
     *if the leading term of s divides lcm(r,p) then (r,p) will be canceled
     *if the leading term of r divides lcm(s,p) then (s,p) will not enter B
     */
-    for(auto jt = strat->B.begin(); jt != strat->B.end(); )
+    for(auto jt = strat->B.ubegin(); jt != strat->B.uend(); )
     {
       compare=pDivComp(jt->lcm,Lp.lcm);
       if (compare==1)
@@ -3251,7 +3251,7 @@ void chainCritNormal (poly p,int ecart,kStrategy strat)
       {
         if (strat->pairtest[j])
         {
-          for (auto it = strat->B.begin(); it != strat->B.end(); )
+          for (auto it = strat->B.ubegin(); it != strat->B.uend(); )
           {
             if (pLPDivisibleBy(strat->S[j],it->lcm))
             {
@@ -3272,7 +3272,7 @@ void chainCritNormal (poly p,int ecart,kStrategy strat)
       {
         if (strat->pairtest[j])
         {
-          for (auto it = strat->B.begin(); it != strat->B.end(); )
+          for (auto it = strat->B.ubegin(); it != strat->B.uend(); )
           {
             if (!(strat->sevS[j] & ~it->sev_lcm)
             && pDivisibleBy(strat->S[j],it->lcm))
@@ -3549,7 +3549,7 @@ void chainCritPart (poly p,int ecart,kStrategy strat)
     {
       if (strat->pairtest[j])
       {
-        for (auto it = strat->B.begin(); it != strat->B.end(); )
+        for (auto it = strat->B.ubegin(); it != strat->B.uend(); )
         {
           if (_p_LmDivisibleByPart(strat->S[j],currRing,
              it->lcm,currRing,
@@ -4007,7 +4007,7 @@ void chainCritRing (poly p,int, kStrategy strat)
       {
         if (strat->pairtest[j])
         {
-          for (auto it = strat->B.begin(); it != strat->B.end(); )
+          for (auto it = strat->B.ubegin(); it != strat->B.uend(); )
           {
             if (pDivisibleBy(strat->S[j],it->lcm) && n_DivBy(pGetCoeff(it->lcm), pGetCoeff(strat->S[j]),currRing->cf))
             {
@@ -6074,8 +6074,8 @@ BOOLEAN arriRewCriterionPre(poly sig, unsigned long not_sevSig, poly lm, kStrate
   //Over Rings, there are still some changes to do: considering coeffs
   if(rField_is_Ring(currRing))
     return FALSE;
-  auto found = strat->B.end();
-  for (auto it = strat->B.begin(); it != strat->B.end(); ++it)
+  auto found = strat->B.uend();
+  for (auto it = strat->B.ubegin(); it != strat->B.uend(); ++it)
   {
     if (pLmEqual(it->sig,sig))
     {
@@ -6083,7 +6083,7 @@ BOOLEAN arriRewCriterionPre(poly sig, unsigned long not_sevSig, poly lm, kStrate
       break;
     }
   }
-  if (found != strat->B.end())
+  if (found != strat->B.uend())
   {
     if (pLmCmp(lm,found->GetLmCurrRing()) == -1)
     {
@@ -11239,7 +11239,7 @@ static void enterOnePairRingShift (poly q, poly p, int /*ecart*/, int isFromQ, k
   *if the leading term of r divides lcm(s,p) then (s,p) will not enter B
   */
 
-  for(auto jt = strat->B.begin(); jt != strat->B.end(); )
+  for(auto jt = strat->B.ubegin(); jt != strat->B.uend(); )
   {
     bool j_deleted = false;
     compare=pDivCompRing(jt->lcm,h.lcm);
@@ -11627,7 +11627,7 @@ BOOLEAN enterOnePairShift (poly q, poly p, int ecart, int isFromQ, kStrategy str
     *if the leading term of r divides lcm(s,p) then (s,p) will not enter B
     */
     {
-      for (auto jt = strat->B.begin(); jt != strat->B.end(); )
+      for (auto jt = strat->B.ubegin(); jt != strat->B.uend(); )
       {
         compare=pLPDivComp(jt->lcm,Lp.lcm);
         if ((compare==1)
@@ -11708,7 +11708,7 @@ BOOLEAN enterOnePairShift (poly q, poly p, int ecart, int isFromQ, kStrategy str
       *if the leading term of s divides lcm(r,p) then (r,p) will be canceled
       *if the leading term of r divides lcm(s,p) then (s,p) will not enter B
       */
-      for(auto jt = strat->B.begin(); jt != strat->B.end(); )
+      for(auto jt = strat->B.ubegin(); jt != strat->B.uend(); )
       {
         compare=pLPDivComp(jt->lcm,Lp.lcm);
         if (compare==1)
