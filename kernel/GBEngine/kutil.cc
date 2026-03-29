@@ -3481,61 +3481,54 @@ void chainCritOpt_1 (poly,int,kStrategy strat)
 */
 void chainCritSig (poly p,int /*ecart*/,kStrategy strat)
 {
-  kMergeBintoL(strat);
-  for (auto jt = strat->L.begin(); jt != strat->L.end(); )
+  /*
+  *Merge B into L, then deduplicate B-origin elements with the same LCM.
+  *Uses kMergeBintoL_and_return_iterators + pair_index for O(1) triangle
+  *checks, iterating only over B-origin elements via bvec.
+  *
+  *Only B-origin elements have p2==p; no tail-marking needed since bvec
+  *nulling (bvec[ii]=endL) prevents re-processing.
+  */
+  std::vector<LSet::iterator> bvec = kMergeBintoL_and_return_iterators(strat);
+  LSet::iterator endL = strat->L.end();
+  for (size_t ji = 0; ji < bvec.size(); ji++)
   {
-    if (jt + 1 == strat->L.end())
+    if (bvec[ji] == endL) continue;
+    for (size_t ii = ji + 1; ii < bvec.size(); ii++)
     {
-      /*now L[0] cannot be canceled any more and the tail can be removed*/
-      if (jt->p2 == strat->tail) jt->p2 = p;
-      break;
-    }
-    if (jt->p2 == p)
-    {
-      for (auto it = jt + 1; it != strat->L.end(); )
+      if (bvec[ii] == endL) continue;
+      /* sev equality pre-filter: if sev_lcm values differ, LCMs can't
+       * be equal, so skip the expensive pLmEqual call */
+      if ((bvec[ji]->sev_lcm == bvec[ii]->sev_lcm)
+          && pLmEqual(bvec[ji]->lcm, bvec[ii]->lcm))
       {
-        bool i_deleted = false;
-        /* sev equality pre-filter: if sev_lcm values differ, LCMs can't
-         * be equal, so skip the expensive pLmEqual call */
-        if ((it->p2 == p) && (jt->sev_lcm == it->sev_lcm)
-            && pLmEqual(jt->lcm,it->lcm))
+        /*bvec[ii] could be canceled but we search for a better one to cancel*/
+        strat->c3++;
+        auto lt = bvec[ii] + 1;
+        if (isInPairsetL(lt,bvec[ji]->p1,bvec[ii]->p1,strat)
+        && (pNext(lt->p) == strat->tail)
+        && (!pLmEqual(bvec[ii]->p,lt->p))
+        && pDivisibleBy(p,lt->lcm))
         {
-          /*L[i] could be canceled but we search for a better one to cancel*/
-          strat->c3++;
-          auto lt = it + 1;
-          if (isInPairsetL(lt,jt->p1,it->p1,strat)
-              && (pNext(lt->p) == strat->tail)
-              && (!pLmEqual(it->p,lt->p))
-              && pDivisibleBy(p,lt->lcm))
-          {
-            /*
-             *"NOT equal(...)" because in case of "equal" the element L[l]
-             *is "older" and has to be from theoretical point of view behind
-             *L[i], but we do not want to reorder L
-             */
-            it->p2 = strat->tail;
-            /*
-             *L[l] will be canceled, we cannot cancel L[i] later on,
-             *so we mark it with "tail"
-             */
-            strat->L.erase(lt);
-          }
-          else
-          {
-            i_deleted = true;
-            it = strat->L.erase(it);
-          }
+          /*
+          *"NOT equal(...)" because in case of "equal" the element L[l]
+          *is "older" and has to be from theoretical point of view behind
+          *L[i], but we do not want to reorder L
+          */
+          strat->L.erase(lt);
+          /*
+          *L[l] will be canceled, we cannot cancel L[i] later on,
+          *so we null it out in bvec to prevent re-processing
+          */
+          bvec[ii] = endL;
         }
-        if (!i_deleted)
-          ++it;
+        else
+        {
+          strat->L.erase(bvec[ii]);
+          bvec[ii] = endL;
+        }
       }
     }
-    else if (jt->p2 == strat->tail)
-    {
-      /*now L[j] cannot be canceled any more and the tail can be removed*/
-      jt->p2 = p;
-    }
-    ++jt;
   }
 }
 #ifdef HAVE_RATGRING
