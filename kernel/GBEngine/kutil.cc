@@ -3534,7 +3534,8 @@ void chainCritSig (poly p,int /*ecart*/,kStrategy strat)
 #ifdef HAVE_RATGRING
 void chainCritPart (poly p,int ecart,kStrategy strat)
 {
-  int i,j,l;
+  int j;
+  unsigned long sev_p = p_GetShortExpVector(p, currRing);
 
   /*
   *pairtest[i] is TRUE if spoly(S[i],p) == 0.
@@ -3582,30 +3583,28 @@ void chainCritPart (poly p,int ecart,kStrategy strat)
     *and lcm(s,r)#lcm(s,p) and lcm(s,r)#lcm(r,p)
     *and in case the sugar is o.k. then L[j] can be canceled
     */
-      for (auto jt = strat->L.begin(); jt != strat->L.end(); )
       {
-        if (sugarDivisibleBy(ecart,jt->ecart)
-        && ((pNext(jt->p) == strat->tail) || (rHasGlobalOrdering(currRing)))
-        && pCompareChainPart(p,jt->p1,jt->p2,jt->lcm))
+        for (auto it = strat->L.ufbegin(sev_p); it != strat->L.ufend(); )
         {
-          if (jt->p == strat->tail)
+          if (sugarDivisibleBy(ecart,it->ecart)
+          && ((pNext(it->p) == strat->tail) || (rHasGlobalOrdering(currRing)))
+          && pCompareChainPart(p,it->p1,it->p2,it->lcm)
+          && (it->p == strat->tail))
           {
             if(TEST_OPT_DEBUG)
             {
                PrintS("chain-crit-part: pCompareChainPart p=");
                p_wrp(p,currRing);
                Print(" delete L");
-               p_wrp(jt->lcm,currRing);
+               p_wrp(it->lcm,currRing);
                PrintLn();
             }
-            jt = strat->L.erase(jt);
+            it = strat->L.erase(it);
             strat->c3++;
           }
           else
-            ++jt;
+            ++it;
         }
-        else
-          ++jt;
       }
       /*
       *this is GEBAUER-MOELLER:
@@ -3661,28 +3660,26 @@ void chainCritPart (poly p,int ecart,kStrategy strat)
       *and lcm(s,r)#lcm(s,p) and lcm(s,r)#lcm(r,p)
       *and in case the sugar is o.k. then L[j] can be canceled
       */
-      for (auto jt = strat->L.begin(); jt != strat->L.end(); )
       {
-        if (pCompareChainPart(p,jt->p1,jt->p2,jt->lcm))
+        for (auto it = strat->L.ufbegin(sev_p); it != strat->L.ufend(); )
         {
-          if ((pNext(jt->p) == strat->tail)||(rHasGlobalOrdering(currRing)))
+          if (pCompareChainPart(p,it->p1,it->p2,it->lcm)
+          && ((pNext(it->p) == strat->tail)||(rHasGlobalOrdering(currRing))))
           {
             if(TEST_OPT_DEBUG)
             {
               PrintS("chain-crit-part: sugar:pCompareChainPart p=");
               p_wrp(p,currRing);
               Print(" delete L[j]");
-              p_wrp(jt->lcm,currRing);
+              p_wrp(it->lcm,currRing);
               PrintLn();
             }
-            jt = strat->L.erase(jt);
+            it = strat->L.erase(it);
             strat->c3++;
           }
           else
-            ++jt;
+            ++it;
         }
-        else
-          ++jt;
       }
       /*
       *this is GEBAUER-MOELLER:
@@ -3716,160 +3713,89 @@ void chainCritPart (poly p,int ecart,kStrategy strat)
   }
   else
   {
-    for (auto jt = strat->L.begin(); jt != strat->L.end(); )
     {
-      if (pCompareChainPart(p,jt->p1,jt->p2,jt->lcm))
+      for (auto it = strat->L.ufbegin(sev_p); it != strat->L.ufend(); )
       {
-        if ((pNext(jt->p) == strat->tail)||(rHasGlobalOrdering(currRing)))
+        if (pCompareChainPart(p,it->p1,it->p2,it->lcm)
+        && ((pNext(it->p) == strat->tail)||(rHasGlobalOrdering(currRing))))
         {
           if(TEST_OPT_DEBUG)
           {
             PrintS("chain-crit-part: pCompareChainPart p=");
             p_wrp(p,currRing);
             Print(" delete L[j]");
-            p_wrp(jt->lcm,currRing);
+            p_wrp(it->lcm,currRing);
             PrintLn();
           }
-          jt = strat->L.erase(jt);
+          it = strat->L.erase(it);
           strat->c3++;
         }
         else
-          ++jt;
+          ++it;
       }
-      else
-        ++jt;
     }
     /*
     *this is our MODIFICATION of GEBAUER-MOELLER:
-    *First the elements of B enter L,
-    *then we fix a lcm and the "best" element in L
-    *(i.e the last in L with this lcm and of type (s,p))
-    *and cancel all the other elements of type (r,p) with this lcm
-    *except the case the element (s,r) has also the same lcm
-    *and is on the worst position with respect to (s,p) and (r,p)
+    *Merge B into L, then deduplicate B-origin elements using
+    *pair_index for O(1) triangle checks via bvec.
+    *Uses _p_LmDivisibleByPart instead of pDivisibleBy.
     */
-    /*
-    *B enters to L/their order with respect to B is permutated for elements
-    *B[i].p with the same leading term
-    */
-    kMergeBintoL(strat);
-    if (!strat->L.empty())
+    std::vector<LSet::iterator> bvec = kMergeBintoL_and_return_iterators(strat);
+    LSet::iterator endL = strat->L.end();
+    for (size_t ji = 0; ji < bvec.size(); ji++)
     {
-    // j iterates from last (worst) to first (best), matching spielwiese j=Ll..0
-    auto jt = strat->L.end();
-    --jt;
-    loop  /*cannot be changed into a for !!! */
-    {
-      if (jt == strat->L.begin())
+      if (bvec[ji] == endL) continue;
+      for (size_t ii = ji + 1; ii < bvec.size(); ii++)
       {
-        /*now L[0] cannot be canceled any more and the tail can be removed*/
-        if (jt->p2 == strat->tail) jt->p2 = p;
-        break;
-      }
-      if (jt->p2 == p) // Was the element added from B?
-      {
-        auto it = jt;
-        --it;
-        loop
+        if (bvec[ii] == endL) continue;
+        if ((bvec[ji]->sev_lcm == bvec[ii]->sev_lcm)
+            && pLmEqual(bvec[ji]->lcm, bvec[ii]->lcm))
         {
-          // In a multiset, we track "went past begin" via end() sentinel
-          if (it == strat->L.end())  break;
-          if ((it->p2 == p) && pLmEqual(jt->lcm,it->lcm))
+          /*bvec[ii] could be canceled but we search for a better one to cancel*/
+          strat->c3++;
+          auto lt = bvec[ii] + 1;
+          if (isInPairsetL(lt,bvec[ji]->p1,bvec[ii]->p1,strat)
+          && (pNext(lt->p) == strat->tail)
+          && (!pLmEqual(bvec[ii]->p,lt->p))
+          && _p_LmDivisibleByPart(p,currRing,
+                         lt->lcm,currRing,
+                         currRing->real_var_start, currRing->real_var_end))
           {
-            /*it could be canceled but we search for a better one to cancel*/
-            strat->c3++;
-            // Search backward from it for a pair (jt->p1, it->p1)
-            LSet::iterator lt;
-            BOOLEAN found = FALSE;
-            if (it != strat->L.begin())
+            /*
+            *"NOT equal(...)" because in case of "equal" the element L[l]
+            *is "older" and has to be from theoretical point of view behind
+            *L[i], but we do not want to reorder L
+            */
+            if(TEST_OPT_DEBUG)
             {
-              lt = it;
-              --lt;
-              while (TRUE)
-              {
-                if (((jt->p1 == lt->p1) && (it->p1 == lt->p2))
-                ||  ((jt->p1 == lt->p2) && (it->p1 == lt->p1)))
-                {
-                  found = TRUE;
-                  break;
-                }
-                if (lt == strat->L.begin()) break;
-                --lt;
-              }
+              PrintS("chain-crit-part: divisible_by p=");
+              p_wrp(p,currRing);
+              Print(" delete L[l]");
+              p_wrp(lt->lcm,currRing);
+              PrintLn();
             }
-            if (found
-            && (pNext(lt->p) == strat->tail)
-            && (!pLmEqual(it->p,lt->p))
-            && _p_LmDivisibleByPart(p,currRing,
-                           lt->lcm,currRing,
-                           currRing->real_var_start, currRing->real_var_end))
-            {
-              /*
-              *"NOT equal(...)" because in case of "equal" the element lt
-              *is "older" and has to be from theoretical point of view behind
-              *it, but we do not want to reorder L
-              */
-              it->p2 = strat->tail;
-              /*
-              *lt will be canceled, we cannot cancel it later on,
-              *so we mark it with "tail"
-              */
-              if(TEST_OPT_DEBUG)
-              {
-                PrintS("chain-crit-part: divisible_by p=");
-                p_wrp(p,currRing);
-                Print(" delete L[l]");
-                p_wrp(lt->lcm,currRing);
-                PrintLn();
-              }
-              strat->L.erase(lt);
-              // In a multiset, erasing lt does not invalidate jt or it.
-              // Move it backward to continue checking.
-              if (it == strat->L.begin())
-                it = strat->L.end(); // sentinel: went past begin
-              else
-                --it;
-            }
-            else
-            {
-              if(TEST_OPT_DEBUG)
-              {
-                PrintS("chain-crit-part: divisible_by(2) p=");
-                p_wrp(p,currRing);
-                Print(" delete L[i]");
-                p_wrp(it->lcm,currRing);
-                PrintLn();
-              }
-              // Erase it; jt is still valid in a multiset.
-              // Save position before it so we can continue.
-              auto prev = it;
-              if (prev != strat->L.begin())
-                --prev;
-              else
-                prev = strat->L.end(); // sentinel: went past begin
-              strat->L.erase(it);
-              it = prev;
-              // prev is already the next candidate, continue loop
-              // without extra decrement
-              continue;
-            }
+            strat->L.erase(lt);
+            /*
+            *L[l] will be canceled, we cannot cancel L[i] later on,
+            *so we null it out in bvec to prevent re-processing
+            */
+            bvec[ii] = endL;
           }
           else
           {
-            if (it == strat->L.begin())
-              break;
-            --it;
+            if(TEST_OPT_DEBUG)
+            {
+              PrintS("chain-crit-part: divisible_by(2) p=");
+              p_wrp(p,currRing);
+              Print(" delete L[i]");
+              p_wrp(bvec[ii]->lcm,currRing);
+              PrintLn();
+            }
+            strat->L.erase(bvec[ii]);
+            bvec[ii] = endL;
           }
         }
       }
-      else if (jt->p2 == strat->tail)
-      {
-        /*now jt cannot be canceled any more and the tail can be removed*/
-        jt->p2 = p;
-      }
-      if (jt == strat->L.begin()) break;
-      --jt;
-    }
     }
   }
 }
