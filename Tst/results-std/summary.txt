@@ -1,0 +1,12 @@
+bug_orderM PASS
+bug_qring PASS
+bug_ring_quot PASS
+bug_tr132 PASS
+bug_tr159 PASS
+bug_tr288 PASS
+bug_tr559 PASS
+bug_tr873 PASS
+bug_tr874 PASS
+hilb_weights PASS
+intersect_q PASS
+ALGORITHM=std PASS=11 FAIL=0 ERROR=0 SKIP=0 TOTAL=11
