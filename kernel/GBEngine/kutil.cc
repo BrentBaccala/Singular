@@ -3333,14 +3333,25 @@ void chainCritNormal (poly p,int ecart,kStrategy strat)
             if (pLmEqual(a->lcm,b->lcm))
             {
               strat->c3++;
-              if (sugarDivisibleBy(a->ecart,b->ecart))
+              if (a->ecart < b->ecart)
               {
                 strat->B.erase(strat->B.uiter_at(j));
               }
-              else
+              else if (a->ecart > b->ecart)
               {
                 strat->B.erase(strat->B.uiter_at(i));
                 break;  // i is gone, move to next i
+              }
+              else
+              {
+                // Equal ecart: use key_comp() tiebreaker for determinism
+                if (strat->B.key_comp()(*a, *b))
+                  strat->B.erase(strat->B.uiter_at(j));
+                else
+                {
+                  strat->B.erase(strat->B.uiter_at(i));
+                  break;
+                }
               }
             }
           }
@@ -3644,7 +3655,7 @@ void chainCritPart (poly p,int ecart,kStrategy strat)
             if (pLmEqual(a->lcm,b->lcm))
             {
               strat->c3++;
-              if (sugarDivisibleBy(a->ecart,b->ecart))
+              if (a->ecart < b->ecart)
               {
                 if(TEST_OPT_DEBUG)
                 {
@@ -3656,7 +3667,7 @@ void chainCritPart (poly p,int ecart,kStrategy strat)
                 }
                 strat->B.erase(strat->B.uiter_at(j));
               }
-              else
+              else if (a->ecart > b->ecart)
               {
                 if(TEST_OPT_DEBUG)
                 {
@@ -3668,6 +3679,17 @@ void chainCritPart (poly p,int ecart,kStrategy strat)
                 }
                 strat->B.erase(strat->B.uiter_at(i));
                 break;  // i is gone, move to next i
+              }
+              else
+              {
+                // Equal ecart: use key_comp() tiebreaker for determinism
+                if (strat->B.key_comp()(*a, *b))
+                  strat->B.erase(strat->B.uiter_at(j));
+                else
+                {
+                  strat->B.erase(strat->B.uiter_at(i));
+                  break;
+                }
               }
             }
           }
