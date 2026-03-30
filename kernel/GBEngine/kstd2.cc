@@ -68,12 +68,43 @@ VAR long sba_interreduction_operations;
 // AVX2-optimized sev pre-filter scan: test 4 entries at a time (256-bit).
 // Returns the start of the first batch of 4 with at least one candidate,
 // or j past the aligned range if none found.
+//
+// Manually unrolled 4x: processes 16 entries per loop body, ORs all four
+// masks together for one branch in the common (all-miss) case.
 __attribute__((target("avx2")))
 static inline int kSevScanAVX2(const unsigned long* sevT, unsigned long not_sev,
                                 int j, int tl)
 {
   const __m256i vnot_sev = _mm256_set1_epi64x((long long)not_sev);
   const __m256i vzero = _mm256_setzero_si256();
+  // Main loop: 16 entries (4 batches of 4) per iteration
+  while (j + 15 <= tl)
+  {
+    __builtin_prefetch(sevT + j + 16, 0, 1);
+    __m256i vand1 = _mm256_and_si256(_mm256_loadu_si256((const __m256i*)(sevT + j)), vnot_sev);
+    __m256i vand2 = _mm256_and_si256(_mm256_loadu_si256((const __m256i*)(sevT + j + 4)), vnot_sev);
+    __m256i vand3 = _mm256_and_si256(_mm256_loadu_si256((const __m256i*)(sevT + j + 8)), vnot_sev);
+    __m256i vand4 = _mm256_and_si256(_mm256_loadu_si256((const __m256i*)(sevT + j + 12)), vnot_sev);
+    __m256i vcmp1 = _mm256_cmpeq_epi64(vand1, vzero);
+    __m256i vcmp2 = _mm256_cmpeq_epi64(vand2, vzero);
+    __m256i vcmp3 = _mm256_cmpeq_epi64(vand3, vzero);
+    __m256i vcmp4 = _mm256_cmpeq_epi64(vand4, vzero);
+    int mask1 = _mm256_movemask_epi8(vcmp1);
+    int mask2 = _mm256_movemask_epi8(vcmp2);
+    int mask3 = _mm256_movemask_epi8(vcmp3);
+    int mask4 = _mm256_movemask_epi8(vcmp4);
+    int combined = mask1 | mask2 | mask3 | mask4;
+    if (__builtin_expect(combined != 0, 0))
+    {
+      // Rare path: find which batch matched first
+      if (mask1) return j;
+      if (mask2) return j + 4;
+      if (mask3) return j + 8;
+      return j + 12;
+    }
+    j += 16;
+  }
+  // Tail: process remaining entries in batches of 4
   while (j + 3 <= tl)
   {
     // Prefetch 8 entries (2 iterations) ahead
@@ -91,19 +122,47 @@ static inline int kSevScanAVX2(const unsigned long* sevT, unsigned long not_sev,
 
 // SSE4.1-optimized sev pre-filter scan: test 2 entries at a time (128-bit).
 // Same interface as kSevScanAVX2 but works on CPUs without AVX2.
+// Manually unrolled 4x: processes 8 entries per loop body.
 __attribute__((target("sse4.1")))
 static inline int kSevScanSSE4(const unsigned long* sevT, unsigned long not_sev,
                                 int j, int tl)
 {
   const __m128i vnot_sev = _mm_set1_epi64x((long long)not_sev);
   const __m128i vzero = _mm_setzero_si128();
+  // Main loop: 8 entries (4 batches of 2) per iteration
+  while (j + 7 <= tl)
+  {
+    __builtin_prefetch(sevT + j + 8, 0, 1);
+    __m128i vand1 = _mm_and_si128(_mm_loadu_si128((const __m128i*)(sevT + j)), vnot_sev);
+    __m128i vand2 = _mm_and_si128(_mm_loadu_si128((const __m128i*)(sevT + j + 2)), vnot_sev);
+    __m128i vand3 = _mm_and_si128(_mm_loadu_si128((const __m128i*)(sevT + j + 4)), vnot_sev);
+    __m128i vand4 = _mm_and_si128(_mm_loadu_si128((const __m128i*)(sevT + j + 6)), vnot_sev);
+    __m128i vcmp1 = _mm_cmpeq_epi64(vand1, vzero);
+    __m128i vcmp2 = _mm_cmpeq_epi64(vand2, vzero);
+    __m128i vcmp3 = _mm_cmpeq_epi64(vand3, vzero);
+    __m128i vcmp4 = _mm_cmpeq_epi64(vand4, vzero);
+    int mask1 = _mm_movemask_epi8(vcmp1);
+    int mask2 = _mm_movemask_epi8(vcmp2);
+    int mask3 = _mm_movemask_epi8(vcmp3);
+    int mask4 = _mm_movemask_epi8(vcmp4);
+    int combined = mask1 | mask2 | mask3 | mask4;
+    if (__builtin_expect(combined != 0, 0))
+    {
+      if (mask1) return j;
+      if (mask2) return j + 2;
+      if (mask3) return j + 4;
+      return j + 6;
+    }
+    j += 8;
+  }
+  // Tail: process remaining entries in batches of 2
   while (j + 1 <= tl)
   {
     // Prefetch 4 entries (2 iterations) ahead
     __builtin_prefetch(sevT + j + 4, 0, 1);
     __m128i vsev = _mm_loadu_si128((const __m128i*)(sevT + j));
     __m128i vand = _mm_and_si128(vsev, vnot_sev);
-    __m128i vcmp = _mm_cmpeq_epi64(vand, vzero);  // SSE4.1
+    __m128i vcmp = _mm_cmpeq_epi64(vand, vzero);
     int mask = _mm_movemask_epi8(vcmp);
     if (mask != 0)
       return j;
