@@ -3326,7 +3326,7 @@ void chainCritNormal (poly p,int ecart,kStrategy strat)
           if (sev[i] == 0) continue;
           for (size_t j = i + 1; j < n; j++)
           {
-            if (sev[j] == 0 || sev[i] != sev[j]) continue;
+            if (sev[j] == 0) continue;
             LObject* a = strat->B.flat_ptr(i);
             LObject* b = strat->B.flat_ptr(j);
             if (a == NULL || b == NULL) continue;
@@ -3380,14 +3380,21 @@ void chainCritNormal (poly p,int ecart,kStrategy strat)
           if (sev[i] == 0) continue;
           for (size_t j = i + 1; j < n; j++)
           {
-            if (sev[j] == 0 || sev[i] != sev[j]) continue;
+            if (sev[j] == 0) continue;
             LObject* a = strat->B.flat_ptr(i);
             LObject* b = strat->B.flat_ptr(j);
             if (a == NULL || b == NULL) continue;
             if (pLmEqual(a->lcm,b->lcm))
             {
               strat->c3++;
-              strat->B.erase(strat->B.uiter_at(j));
+              // Erase the worse element; keep the one that sorts first
+              if (strat->B.key_comp()(*a, *b))
+                strat->B.erase(strat->B.uiter_at(j));
+              else
+              {
+                strat->B.erase(strat->B.uiter_at(i));
+                break;  // i is gone
+              }
             }
           }
         }
@@ -3630,7 +3637,7 @@ void chainCritPart (poly p,int ecart,kStrategy strat)
           if (sev[i] == 0) continue;
           for (size_t j = i + 1; j < n; j++)
           {
-            if (sev[j] == 0 || sev[i] != sev[j]) continue;
+            if (sev[j] == 0) continue;
             LObject* a = strat->B.flat_ptr(i);
             LObject* b = strat->B.flat_ptr(j);
             if (a == NULL || b == NULL) continue;
@@ -3708,7 +3715,7 @@ void chainCritPart (poly p,int ecart,kStrategy strat)
           if (sev[i] == 0) continue;
           for (size_t j = i + 1; j < n; j++)
           {
-            if (sev[j] == 0 || sev[i] != sev[j]) continue;
+            if (sev[j] == 0) continue;
             LObject* a = strat->B.flat_ptr(i);
             LObject* b = strat->B.flat_ptr(j);
             if (a == NULL || b == NULL) continue;
@@ -3721,7 +3728,14 @@ void chainCritPart (poly p,int ecart,kStrategy strat)
                 Print(" delete B[i]\n");
               }
               strat->c3++;
-              strat->B.erase(strat->B.uiter_at(j));
+              // Erase the worse element; keep the one that sorts first
+              if (strat->B.key_comp()(*a, *b))
+                strat->B.erase(strat->B.uiter_at(j));
+              else
+              {
+                strat->B.erase(strat->B.uiter_at(i));
+                break;  // i is gone
+              }
             }
           }
         }
