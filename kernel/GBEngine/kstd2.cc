@@ -76,6 +76,8 @@ static inline int kSevScanAVX2(const unsigned long* sevT, unsigned long not_sev,
   const __m256i vzero = _mm256_setzero_si256();
   while (j + 3 <= tl)
   {
+    // Prefetch 8 entries (2 iterations) ahead
+    __builtin_prefetch(sevT + j + 8, 0, 1);
     __m256i vsev = _mm256_loadu_si256((const __m256i*)(sevT + j));
     __m256i vand = _mm256_and_si256(vsev, vnot_sev);
     __m256i vcmp = _mm256_cmpeq_epi64(vand, vzero);
@@ -97,6 +99,8 @@ static inline int kSevScanSSE4(const unsigned long* sevT, unsigned long not_sev,
   const __m128i vzero = _mm_setzero_si128();
   while (j + 1 <= tl)
   {
+    // Prefetch 4 entries (2 iterations) ahead
+    __builtin_prefetch(sevT + j + 4, 0, 1);
     __m128i vsev = _mm_loadu_si128((const __m128i*)(sevT + j));
     __m128i vand = _mm_and_si128(vsev, vnot_sev);
     __m128i vcmp = _mm_cmpeq_epi64(vand, vzero);  // SSE4.1
@@ -488,6 +492,49 @@ int kFindDivisibleByInT(const kStrategy strat, const LObject* L, const int start
     }
     else
     {
+#if defined(HAVE_SIMD_SEV_SCAN) && !defined(PDEBUG) && !defined(PDIV_DEBUG)
+      // SIMD fast path for t_p: scan sevT in batches to skip non-candidates.
+      if (__builtin_cpu_supports("avx2"))
+      {
+        const int tl = strat->tl;
+        loop
+        {
+          j = kSevScanAVX2(sevT, not_sev, j, tl);
+          int batch_end = j + 3;
+          if (batch_end > tl) batch_end = tl;
+          for (; j <= batch_end; j++)
+          {
+            if (!(sevT[j] & not_sev)
+            && p_LmDivisibleBy(T[j].t_p, p, r))
+            {
+              return j;
+            }
+          }
+          if (j > tl) return -1;
+        }
+      }
+      else if (__builtin_cpu_supports("sse4.1"))
+      {
+        const int tl = strat->tl;
+        loop
+        {
+          j = kSevScanSSE4(sevT, not_sev, j, tl);
+          int batch_end = j + 1;
+          if (batch_end > tl) batch_end = tl;
+          for (; j <= batch_end; j++)
+          {
+            if (!(sevT[j] & not_sev)
+            && p_LmDivisibleBy(T[j].t_p, p, r))
+            {
+              return j;
+            }
+          }
+          if (j > tl) return -1;
+        }
+      }
+      else
+#endif
+      {
       loop
       {
         if (j > strat->tl) return -1;
@@ -502,6 +549,7 @@ int kFindDivisibleByInT(const kStrategy strat, const LObject* L, const int start
           return j;
         }
         j++;
+      }
       }
     }
   }
