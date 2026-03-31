@@ -31,5 +31,6 @@ I;
 kill I;
 listvar();
 // -----------------------------
+system("sh","rm -f ideal1.ssi ideal2.ssi");
 tst_status(1);$
 

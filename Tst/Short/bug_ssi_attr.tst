@@ -7,5 +7,6 @@ ideal I = x+y;
 link l = "ssi:w test.ssi";
 write(l,I[1]);
 close(l);
+system("sh","rm -f test.ssi");
 
 tst_status(1);$

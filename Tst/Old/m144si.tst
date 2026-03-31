@@ -4,4 +4,5 @@
   int i=7;
   ideal I=f,x,y;
   monitor("");
+  system("sh","rm -f doe.tmp");
 LIB "tst.lib";tst_status(1);$

@@ -13,4 +13,5 @@ k;
 "-------------------------------";
 listvar(all);
 kill r1,r2;
+system("sh","rm -f save_j");
 LIB "tst.lib";tst_status(1);$;

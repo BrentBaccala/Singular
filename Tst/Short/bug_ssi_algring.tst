@@ -20,6 +20,7 @@ def r4=read(l); r4;
 l;
 def r5=read(l); r5;
 close(l);
+system("sh","rm -f ssi_rings");
 
 tst_status(1);$
 

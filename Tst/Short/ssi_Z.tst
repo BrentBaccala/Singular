@@ -36,5 +36,6 @@ def h4=read(l2);
 h4;
 basering;
 close(l2);
+system("sh","rm -f ss1.ssi");
 
 tst_status(1);$
