@@ -1244,8 +1244,9 @@ LSet::iterator LSet::erase(LSet::iterator it) {
     strat->P.p1=NULL;
   }
   #endif
-  // Mark the sev_flat_ entry as sentinel (0) so cache-friendly scans skip it
+  // Mark the sev_flat_ and sevSig_flat_ entries as sentinel (0)
   if (Lp.flat_index < sev_flat_.size()) sev_flat_[Lp.flat_index] = 0;
+  if (Lp.flat_index < sevSig_flat_.size()) sevSig_flat_[Lp.flat_index] = 0;
   return writable_set<LObject, CompareLObject>::erase(it);
 }
 
@@ -1298,8 +1299,9 @@ LSet::unordered_iterator LSet::erase(LSet::unordered_iterator it) {
     strat->P.p1=NULL;
   }
   #endif
-  // Mark the sev_flat_ entry as sentinel (0) so cache-friendly scans skip it
+  // Mark the sev_flat_ and sevSig_flat_ entries as sentinel (0)
   if (Lp.flat_index < sev_flat_.size()) sev_flat_[Lp.flat_index] = 0;
+  if (Lp.flat_index < sevSig_flat_.size()) sevSig_flat_[Lp.flat_index] = 0;
   return writable_set<LObject, CompareLObject>::erase(it);
 }
 
@@ -1309,8 +1311,9 @@ LSet::filtered_iterator LSet::erase(LSet::filtered_iterator fit) {
   size_t pos = fit.pos_;
   unsigned long sev1 = fit.sev1_;
   unsigned long sev2 = fit.sev2_;
+  const std::vector<unsigned long>* sev_array = fit.sev_array_;
   erase(writable_set<LObject, CompareLObject>::uiter_at(pos));
-  return filtered_iterator(this, pos, sev1, sev2);
+  return filtered_iterator(this, pos, sev1, sev2, sev_array);
 }
 
 /*2

@@ -313,6 +313,12 @@ private:
   // (sentinel: causes !(sev_p & ~0UL) == false, so erased entries always
   // fail the pre-filter).
   std::vector<unsigned long> sev_flat_;
+  // Parallel flat array of sevSig values for cache-friendly signature scanning.
+  // Same indexing as sev_flat_: sevSig_flat_[i] holds the sevSig of the
+  // element at flat_[i].  Erased entries are set to 0 (sentinel).
+  // In bba mode (non-signature), sevSig is uninitialized — that's fine,
+  // the array contains junk that is never queried.
+  std::vector<unsigned long> sevSig_flat_;
 
 public:
   std::unordered_map<std::pair<poly, poly>, iterator, PolyPairHash> pair_index;
@@ -335,22 +341,25 @@ public:
   using writable_set<LObject, CompareLObject>::ubegin;
   using writable_set<LObject, CompareLObject>::uend;
 
-  // Filtered unordered iterator: scans the contiguous sev_flat_ array
+  // Filtered unordered iterator: scans a contiguous sev array
   // for cache-friendly pre-filtering, only visiting elements whose sev
   // passes the filter.  Two filter modes:
-  //   sev2_=0: divisibility — skip where (sev1_ & ~sev_flat_[i]) != 0
+  //   sev2_=0: divisibility — skip where (sev1_ & ~sev_array[i]) != 0
   //   sev2_!=0: incomparability — skip where both
-  //     (sev_flat_[i] & ~sev1_) and (sev2_ & ~sev_flat_[i]) are nonzero
+  //     (sev_array[i] & ~sev1_) and (sev2_ & ~sev_array[i]) are nonzero
+  // The same iterator type is used for both sev_flat_ (lcm) and
+  // sevSig_flat_ (signature) scans — only the array pointer differs.
   class filtered_iterator {
     LSet* owner_;
     size_t pos_;
     unsigned long sev1_;
     unsigned long sev2_;
+    const std::vector<unsigned long>* sev_array_;
     friend class LSet;
 
     void advance() {
-      const unsigned long* sev = owner_->sev_flat_.data();
-      const size_t sz = owner_->sev_flat_.size();
+      const unsigned long* sev = sev_array_->data();
+      const size_t sz = sev_array_->size();
       while (pos_ < sz) {
         unsigned long s = sev[pos_];
         if (s == 0) { ++pos_; continue; }              // deleted sentinel
@@ -370,9 +379,10 @@ public:
     using pointer = LObject*;
     using reference = LObject&;
 
-    filtered_iterator() : owner_(nullptr), pos_(0), sev1_(0), sev2_(0) {}
-    filtered_iterator(LSet* owner, size_t pos, unsigned long sev1, unsigned long sev2)
-      : owner_(owner), pos_(pos), sev1_(sev1), sev2_(sev2) {
+    filtered_iterator() : owner_(nullptr), pos_(0), sev1_(0), sev2_(0), sev_array_(nullptr) {}
+    filtered_iterator(LSet* owner, size_t pos, unsigned long sev1, unsigned long sev2,
+                      const std::vector<unsigned long>* sev_array)
+      : owner_(owner), pos_(pos), sev1_(sev1), sev2_(sev2), sev_array_(sev_array) {
       advance();
     }
 
@@ -392,15 +402,23 @@ public:
 
   // Filtered unordered iteration over sev_flat_ (sev_lcm): divisibility filter
   filtered_iterator ufbegin_lcm(unsigned long sev) {
-    return filtered_iterator(this, 0, sev, 0);
+    return filtered_iterator(this, 0, sev, 0, &sev_flat_);
   }
   // Filtered unordered iteration over sev_flat_ (sev_lcm): incomparability filter
   filtered_iterator ufbegin_lcm(unsigned long sev1, unsigned long sev2) {
-    return filtered_iterator(this, 0, sev1, sev2);
+    return filtered_iterator(this, 0, sev1, sev2, &sev_flat_);
   }
-  // Sentinel for filtered iteration (compares by pos_)
+  // Sentinel for filtered lcm iteration (compares by pos_)
   filtered_iterator ufend_lcm() {
-    return filtered_iterator(this, sev_flat_.size(), 0, 0);
+    return filtered_iterator(this, sev_flat_.size(), 0, 0, &sev_flat_);
+  }
+  // Filtered unordered iteration over sevSig_flat_ (signature): divisibility filter
+  filtered_iterator ufbegin_sig(unsigned long sev) {
+    return filtered_iterator(this, 0, sev, 0, &sevSig_flat_);
+  }
+  // Sentinel for filtered sig iteration (compares by pos_)
+  filtered_iterator ufend_sig() {
+    return filtered_iterator(this, sevSig_flat_.size(), 0, 0, &sevSig_flat_);
   }
   // Erase via filtered_iterator; returns next valid filtered position
   filtered_iterator erase(filtered_iterator it);
@@ -413,10 +431,11 @@ public:
   LSet() = default;
 
   // Copy constructor: base class copy rebuilds flat_ with new indices,
-  // so we must rebuild sev_flat_ and pair_index to match.
+  // so we must rebuild sev_flat_, sevSig_flat_, and pair_index to match.
   LSet(const LSet& other)
     : writable_set<LObject, CompareLObject>(other), seq(other.seq) {
     rebuild_sev_flat();
+    rebuild_sevSig_flat();
     rebuild_pair_index();
   }
 
@@ -424,6 +443,7 @@ public:
   LSet(LSet&& other) noexcept
     : writable_set<LObject, CompareLObject>(std::move(other)), seq(other.seq) {
     rebuild_sev_flat();
+    rebuild_sevSig_flat();
     rebuild_pair_index();
   }
 
@@ -433,6 +453,7 @@ public:
       writable_set<LObject, CompareLObject>::operator=(other);
       seq = other.seq;
       rebuild_sev_flat();
+      rebuild_sevSig_flat();
       rebuild_pair_index();
     }
     return *this;
@@ -444,15 +465,17 @@ public:
       writable_set<LObject, CompareLObject>::operator=(std::move(other));
       seq = other.seq;
       rebuild_sev_flat();
+      rebuild_sevSig_flat();
       rebuild_pair_index();
     }
     return *this;
   }
 
-  // Override insert to maintain pair_index and sev_flat_
+  // Override insert to maintain pair_index, sev_flat_, and sevSig_flat_
   iterator insert(const LObject& lobject) {
     iterator it = writable_set<LObject, CompareLObject>::insert(lobject);
     sev_flat_.push_back(it->sev_lcm);
+    sevSig_flat_.push_back(it->sevSig);
     if (it->p1 != NULL && it->p2 != NULL) {
       auto key = canonicalize_pair(it->p1, it->p2);
       pair_index.emplace(key, it);
@@ -460,18 +483,20 @@ public:
     return it;
   }
 
-  // Override clear to also clear pair_index and sev_flat_
+  // Override clear to also clear pair_index, sev_flat_, and sevSig_flat_
   void clear() {
     pair_index.clear();
     sev_flat_.clear();
+    sevSig_flat_.clear();
     writable_set<LObject, CompareLObject>::clear();
   }
 
-  // Override reorder to rebuild pair_index and sev_flat_ with new iterators
+  // Override reorder to rebuild pair_index, sev_flat_, and sevSig_flat_
   void reorder() {
     writable_set<LObject, CompareLObject>::reorder();
     // After reorder, flat_ has no gaps and flat_index is reassigned 0..size()-1
     rebuild_sev_flat();
+    rebuild_sevSig_flat();
     pair_index.clear();
     for (iterator it = begin(); it != end(); ++it) {
       if (it->p1 != NULL && it->p2 != NULL) {
@@ -489,6 +514,16 @@ public:
     for (size_t i = 0; i < n; i++) {
       LObject* p = this->flat_ptr(i);
       sev_flat_[i] = (p != NULL) ? p->sev_lcm : 0;
+    }
+  }
+  // Rebuild sevSig_flat_ from the current flat_ array.
+  // Deleted entries get sentinel 0, valid entries get their sevSig.
+  void rebuild_sevSig_flat() {
+    const size_t n = this->flat_size();
+    sevSig_flat_.resize(n);
+    for (size_t i = 0; i < n; i++) {
+      LObject* p = this->flat_ptr(i);
+      sevSig_flat_[i] = (p != NULL) ? p->sevSig : 0;
     }
   }
   // Rebuild pair_index from all live elements.
