@@ -1,9 +1,0 @@
-string tst_status_file = "bug_dump.new.stat";
-list T0 = list();
-list T1 = list(1);
-list T2 = list(1,2);
-list T3 = list("a","b",3);
-option(set, intvec(0, 10256));
-load("standard.lib","try");
-load("tst.lib","try");
-RETURN();
