@@ -2057,7 +2057,7 @@ void enterOnePairNormal (int i,poly p,int ecart, int isFromQ,kStrategy strat, in
     */
     {
       const unsigned long sev_lp = Lp.sev_lcm;
-      for (auto it = strat->B.ufbegin(sev_lp, sev_lp); it != strat->B.ufend(); )
+      for (auto it = strat->B.ufbegin_lcm(sev_lp, sev_lp); it != strat->B.ufend_lcm(); )
       {
         compare=pDivComp(it->lcm,Lp.lcm);
         if ((compare==1)
@@ -2094,7 +2094,7 @@ void enterOnePairNormal (int i,poly p,int ecart, int isFromQ,kStrategy strat, in
       *if the leading term of r divides lcm(s,p) then (s,p) will not enter B
       */
       const unsigned long sev_lp = Lp.sev_lcm;
-      for (auto it = strat->B.ufbegin(sev_lp, sev_lp); it != strat->B.ufend(); )
+      for (auto it = strat->B.ufbegin_lcm(sev_lp, sev_lp); it != strat->B.ufend_lcm(); )
       {
         compare=pDivComp(it->lcm,Lp.lcm);
         if (compare==1)
@@ -3299,7 +3299,7 @@ void chainCritNormal (poly p,int ecart,kStrategy strat)
     *and in case the sugar is o.k. then L[j] can be canceled
     */
       {
-        for (auto it = strat->L.ufbegin(sev_p); it != strat->L.ufend(); )
+        for (auto it = strat->L.ufbegin_lcm(sev_p); it != strat->L.ufend_lcm(); )
         {
           if (sugarDivisibleBy(ecart,it->ecart)
           && ((it->p == strat->tail) || (rHasGlobalOrdering(currRing)))
@@ -3366,7 +3366,7 @@ void chainCritNormal (poly p,int ecart,kStrategy strat)
       *and in case the sugar is o.k. then L[j] can be canceled
       */
       {
-        for (auto it = strat->L.ufbegin(sev_p); it != strat->L.ufend(); )
+        for (auto it = strat->L.ufbegin_lcm(sev_p); it != strat->L.ufend_lcm(); )
         {
           if (pCompareChain(p,it->p1,it->p2,it->lcm)
           && ((pNext(it->p) == strat->tail)||(rHasGlobalOrdering(currRing))))
@@ -3419,7 +3419,7 @@ void chainCritNormal (poly p,int ecart,kStrategy strat)
   else
   {
     {
-      for (auto it = strat->L.ufbegin(sev_p); it != strat->L.ufend(); )
+      for (auto it = strat->L.ufbegin_lcm(sev_p); it != strat->L.ufend_lcm(); )
       {
         #ifdef HAVE_SHIFTBBA
         if ((it->p1!=NULL) &&
@@ -3613,7 +3613,7 @@ void chainCritPart (poly p,int ecart,kStrategy strat)
     *and in case the sugar is o.k. then L[j] can be canceled
     */
       {
-        for (auto it = strat->L.ufbegin(sev_p); it != strat->L.ufend(); )
+        for (auto it = strat->L.ufbegin_lcm(sev_p); it != strat->L.ufend_lcm(); )
         {
           if (sugarDivisibleBy(ecart,it->ecart)
           && ((pNext(it->p) == strat->tail) || (rHasGlobalOrdering(currRing)))
@@ -3704,7 +3704,7 @@ void chainCritPart (poly p,int ecart,kStrategy strat)
       *and in case the sugar is o.k. then L[j] can be canceled
       */
       {
-        for (auto it = strat->L.ufbegin(sev_p); it != strat->L.ufend(); )
+        for (auto it = strat->L.ufbegin_lcm(sev_p); it != strat->L.ufend_lcm(); )
         {
           if (pCompareChainPart(p,it->p1,it->p2,it->lcm)
           && ((pNext(it->p) == strat->tail)||(rHasGlobalOrdering(currRing))))
@@ -3771,7 +3771,7 @@ void chainCritPart (poly p,int ecart,kStrategy strat)
   else
   {
     {
-      for (auto it = strat->L.ufbegin(sev_p); it != strat->L.ufend(); )
+      for (auto it = strat->L.ufbegin_lcm(sev_p); it != strat->L.ufend_lcm(); )
       {
         if (pCompareChainPart(p,it->p1,it->p2,it->lcm)
         && ((pNext(it->p) == strat->tail)||(rHasGlobalOrdering(currRing))))
@@ -4098,7 +4098,7 @@ void chainCritRing (poly p,int, kStrategy strat)
   assume(!(strat->Gebauer || strat->fromT));
   {
     unsigned long sev_p = p_GetShortExpVector(p, currRing);
-    for (auto it = strat->L.ufbegin(sev_p); it != strat->L.ufend(); )
+    for (auto it = strat->L.ufbegin_lcm(sev_p); it != strat->L.ufend_lcm(); )
     {
       if ((it->lcm != NULL) && n_DivBy(pGetCoeff(it->lcm), pGetCoeff(p), currRing->cf)
       && pCompareChain(p,it->p1,it->p2,it->lcm)

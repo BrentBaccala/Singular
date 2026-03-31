@@ -390,16 +390,16 @@ public:
     bool operator!=(const filtered_iterator& other) const { return pos_ != other.pos_; }
   };
 
-  // Filtered unordered iteration: divisibility filter
-  filtered_iterator ufbegin(unsigned long sev) {
+  // Filtered unordered iteration over sev_flat_ (sev_lcm): divisibility filter
+  filtered_iterator ufbegin_lcm(unsigned long sev) {
     return filtered_iterator(this, 0, sev, 0);
   }
-  // Filtered unordered iteration: incomparability filter
-  filtered_iterator ufbegin(unsigned long sev1, unsigned long sev2) {
+  // Filtered unordered iteration over sev_flat_ (sev_lcm): incomparability filter
+  filtered_iterator ufbegin_lcm(unsigned long sev1, unsigned long sev2) {
     return filtered_iterator(this, 0, sev1, sev2);
   }
   // Sentinel for filtered iteration (compares by pos_)
-  filtered_iterator ufend() {
+  filtered_iterator ufend_lcm() {
     return filtered_iterator(this, sev_flat_.size(), 0, 0);
   }
   // Erase via filtered_iterator; returns next valid filtered position
