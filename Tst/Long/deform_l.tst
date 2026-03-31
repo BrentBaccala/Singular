@@ -107,4 +107,5 @@ list L=mod_versal(m(2),Io,4,"qq","W","dp","oo");
 def Px=L[1]; def Qx=L[2]; def So=L[3]; def Ox=L[4];
 listvar(ring);
 show(Qx);
+system("sh","rm -f oo_4");
 tst_status(1);$

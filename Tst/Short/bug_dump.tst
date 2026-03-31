@@ -10,5 +10,6 @@ dump(":w dump-list");
 read("dump-list");
 getdump("dump-list");
 T0;T1;
+system("sh","rm -f dump-list");
 
 tst_status(1);$

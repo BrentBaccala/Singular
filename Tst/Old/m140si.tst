@@ -6,4 +6,5 @@
   s;
   execute(s); // define the ideal k
   k;
+  system("sh","rm -f save_i");
 LIB "tst.lib";tst_status(1);$
