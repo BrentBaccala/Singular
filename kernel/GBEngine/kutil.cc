@@ -8865,22 +8865,24 @@ void enterSyz(LObject &p, kStrategy strat, int atT)
   Print("element in strat->syz: %d--%d  ",atT+1,strat->syzmax);
   pWrite(strat->syz[atT]);
 #endif
-  // recheck pairs in strat->L with new rule and delete correspondingly
-  for (auto it = strat->L.begin(); it != strat->L.end(); )
+  // recheck pairs in strat->L with new syzygy rule and delete correspondingly.
+  // Use the sevSig_flat_ array for cache-friendly pre-filtering: the filtered
+  // iterator only visits elements whose sevSig passes the divisibility sev check,
+  // then we do the full monomial divisibility test on those candidates.
   {
-    //printf("\nCheck if syz is div by L\n");pWrite(strat->syz[atT]);pWrite(it->sig);
-    //printf("\npLmShDivBy(syz,L) = %i\nn_DivBy(L,syz) = %i\n pLtCmp(L,syz) = %i",p_LmShortDivisibleBy( strat->syz[atT], strat->sevSyz[atT],it->sig, ~it->sevSig, currRing), n_DivBy(pGetCoeff(it->sig),pGetCoeff(strat->syz[atT]),currRing), pLtCmp(it->sig,strat->syz[atT])==1);
-    if (p_LmShortDivisibleBy( strat->syz[atT], strat->sevSyz[atT],
-                              it->sig, ~it->sevSig, currRing)
-                              &&((!rField_is_Ring(currRing))
-                              || (n_DivBy(pGetCoeff(it->sig),pGetCoeff(strat->syz[atT]),currRing->cf) && (pLtCmp(it->sig,strat->syz[atT])==1)))
-                              )
+    unsigned long sev_syz = strat->sevSyz[atT];
+    for (auto it = strat->L.ufbegin_sig(sev_syz); it != strat->L.ufend_sig(); )
     {
-      //printf("\nYES!\n");
-      it = strat->L.erase(it);
+      if (p_LmDivisibleBy(strat->syz[atT], it->sig, currRing)
+          &&((!rField_is_Ring(currRing))
+          || (n_DivBy(pGetCoeff(it->sig),pGetCoeff(strat->syz[atT]),currRing->cf) && (pLtCmp(it->sig,strat->syz[atT])==1)))
+          )
+      {
+        it = strat->L.erase(it);
+      }
+      else
+        ++it;
     }
-    else
-      it ++;
   }
 
 //#if 1

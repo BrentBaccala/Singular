@@ -358,11 +358,16 @@ public:
     friend class LSet;
 
     void advance() {
+      // Always use sev_flat_ to detect deleted entries (sev_lcm sentinel 0).
+      // Use sev_array_ (which may be sev_flat_ or sevSig_flat_) for the
+      // actual filter check. This avoids the problem that sevSig can
+      // legitimately be 0, which would be confused with the deleted sentinel.
+      const unsigned long* del = owner_->sev_flat_.data();
       const unsigned long* sev = sev_array_->data();
       const size_t sz = sev_array_->size();
       while (pos_ < sz) {
+        if (del[pos_] == 0) { ++pos_; continue; }     // deleted sentinel
         unsigned long s = sev[pos_];
-        if (s == 0) { ++pos_; continue; }              // deleted sentinel
         if (sev2_ == 0) {
           if (sev1_ & ~s) { ++pos_; continue; }       // divisibility: skip
         } else {
