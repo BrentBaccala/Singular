@@ -1,0 +1,26 @@
+; gb_invariant.lst - Tests that output only mathematical invariants
+; (dim, size, hilb, betti, reduce-to-zero, boolean checks)
+; These are unmodified originals safe for non-deterministic GB testing.
+;
+Zdim_s
+bug_51
+bug_hilb
+bug_liftstd2
+bug_liftstd4
+bug_mem_Z
+bug_sca
+bug_sres_betti
+bug_tr276
+bug_tr387
+bug_tr501
+bug_tr551
+bug_tr634
+bug_tr650
+bug_tr690
+bug_tr719
+bug_532_s
+bug_538_s
+bug_540
+dim-test_for_rings_over_integers
+libehv_s
+rootisolation

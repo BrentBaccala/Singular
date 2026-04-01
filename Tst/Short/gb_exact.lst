@@ -1,0 +1,36 @@
+; gb_exact.lst - Tests that output non-invariant results
+; (ideal generators, polynomial values, decomposition lists, etc.)
+; These compare exact output and may produce false negatives with
+; different-but-equivalent GB element orderings.
+;
+primdec3
+finduni_s
+reduce_s
+deform_s
+homalg
+methods
+divrem2
+bug_24
+bug_29
+bug_40
+bug_42
+bug_liftstd5
+bug_qslimgb1
+bug_quotient
+bug_tr239
+bug_tr380
+bug_tr489
+bug_tr587
+bug_tr641
+bug_tr662
+bug_tr778
+bug_division_2
+bug_printres
+bug_tr379
+bug_tr661
+bug_napMultT
+sheafcoh_s
+allres_s
+assprimeszerodim_s
+factorizeQa_s
+issue1285
