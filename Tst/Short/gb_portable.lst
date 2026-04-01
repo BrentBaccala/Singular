@@ -1,6 +1,7 @@
-; gb_portable.lst - Tests that check mathematical invariants only
-; (no raw GB output, no option(prot) trace output)
-; These tests should pass with any correct GB algorithm.
+; gb_portable.lst - Tests without protocol traces or direct raw GB printing
+; (no option(prot), no bare printing of std() output)
+; These tests may still print intermediate results that depend on GB element
+; ordering. For pure invariant-checking tests, see gb_portable/gb_portable2.lst.
 ;
 ; Category (c): result-only tests suitable for algorithm selection
 ;
