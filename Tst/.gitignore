@@ -1,7 +1,7 @@
-*/*.res
-*/*.diff
-*/*.new.res
-*/*.new.stat
+**/*.res
+**/*.diff
+**/*.new.res
+**/*.new.stat
 Singular
 Singularg
 SingularVersionDate
