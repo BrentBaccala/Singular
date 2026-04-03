@@ -215,18 +215,14 @@ BOOLEAN checkForMonomial(leftv res, leftv args)
   if ((u != NULL) && (u->Typ() == IDEAL_CMD))
   {
     ideal I; poly monom;
-    #ifdef HAVE_OMALLOC
     omUpdateInfo();
     Print("usedBytesBefore=%ld\n",om_Info.UsedBytes);
-    #endif
     I = (ideal) u->CopyD();
     monom = checkForMonomialViaSuddenSaturation(I,currRing);
     id_Delete(&I,currRing);
     p_Delete(&monom,currRing);
-    #ifdef HAVE_OMALLOC
     omUpdateInfo();
     Print("usedBytesAfter=%ld\n",om_Info.UsedBytes);
-    #endif
     I = (ideal) u->Data();
     res->rtyp = POLY_CMD;
     res->data = (char*) checkForMonomialViaSuddenSaturation(I,currRing);
