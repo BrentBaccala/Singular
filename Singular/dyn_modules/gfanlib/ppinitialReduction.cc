@@ -243,10 +243,8 @@ BOOLEAN ptNormalize(leftv res, leftv args)
     leftv v = u->next;
     if ((v!=NULL) && (v->Typ()==NUMBER_CMD))
     {
-      #ifdef HAVE_OMALLOC
       omUpdateInfo();
       Print("usedBytesBefore=%ld\n",om_Info.UsedBytes);
-      #endif
       ideal I = (ideal) u->CopyD();
       number p = (number) v->CopyD();
       ptNormalize(I,p,currRing);

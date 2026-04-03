@@ -702,10 +702,8 @@ BOOLEAN setOption(leftv res, leftv v)
   } while (v!=NULL);
 
    // set global variable to show memory usage
-  #ifdef HAVE_OMALLOC
   if (BVERBOSE(V_SHOW_MEM)) om_sing_opt_show_mem = 1;
   else om_sing_opt_show_mem = 0;
-  #endif
 
   return FALSE;
 }
@@ -1366,7 +1364,6 @@ static void callWerrorS(const char *s) { WerrorS(s); }
 void siInit(char *name)
 {
 // memory initialization: -----------------------------------------------
-#ifdef HAVE_OMALLOC    
     om_Opts.OutOfMemoryFunc = omSingOutOfMemoryFunc;
 #ifndef OM_NDEBUG
 #ifndef __OPTIMIZE__
@@ -1380,7 +1377,6 @@ void siInit(char *name)
     om_Opts.Keep = 0; /* OM_NDEBUG */
 #endif
     omInitInfo();
-#endif    
 // factory
 #ifndef HAVE_NTL
   extern void initPT();

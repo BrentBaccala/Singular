@@ -4701,7 +4701,6 @@ static BOOLEAN jjMEMORY(leftv res, leftv v)
   omUpdateInfo();
   switch(((int)(long)v->Data()))
   {
-  #ifdef HAVE_OMALLOC
   case 0:
     res->data=(char *)n_Init(om_Info.UsedBytes,coeffs_BIGINT);
     break;
@@ -4711,7 +4710,6 @@ static BOOLEAN jjMEMORY(leftv res, leftv v)
   case 2:
     res->data = (char *)n_Init(om_Info.MaxBytesSystem,coeffs_BIGINT);
     break;
-  #endif  
   default:
     omPrintStats(stdout);
     omPrintInfo(stdout);
