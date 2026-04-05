@@ -534,7 +534,7 @@ inline static int* initS_2_R (const int maxnr)
   return (int*)omAlloc0(maxnr*sizeof(int));
 }
 
-static inline void enlargeT (TSet &T, TObject** &R, unsigned long* &sevT,
+void enlargeT (TSet &T, TObject** &R, unsigned long* &sevT,
                              int &length, const int incr)
 {
   assume(T!=NULL);
@@ -8690,7 +8690,12 @@ void enterT(LObject &p, kStrategy strat, int atT)
     }
   }
 
-  if ((strat->tailBin != NULL) && (pNext(p.p) != NULL))
+  // Skip p_ShallowCopyDelete when tailBin == tailRing->PolyBin (always true
+  // with --disable-omalloc, since omGetStickyBinOfBin is the identity).
+  // This eliminates unnecessary malloc/memcpy/free of every monomial chain.
+  if ((strat->tailBin != NULL)
+      && (strat->tailRing == NULL || strat->tailBin != strat->tailRing->PolyBin)
+      && (pNext(p.p) != NULL))
   {
 #ifdef HAVE_SHIFTBBA
     // letterplace: if p.shift > 0 then pNext(p.p) is already in the tailBin
@@ -8712,11 +8717,17 @@ void enterT(LObject &p, kStrategy strat, int atT)
   else
     strat->T[atT].max_exp = NULL;
 
-  strat->tl++;
-  strat->R[strat->tl] = &(strat->T[atT]);
-  strat->T[atT].i_r = strat->tl;
+  // Write sevT, R, and i_r BEFORE incrementing tl, so concurrent
+  // readers (parallel bba workers) see fully initialized data when
+  // they observe the new tl value.  The compiler barrier prevents
+  // reordering of the tl++ past the data writes.
   assume((p.sev == 0) || (pGetShortExpVector(p.p) == p.sev));
   strat->sevT[atT] = (p.sev == 0 ? pGetShortExpVector(p.p) : p.sev);
+  strat->R[strat->tl + 1] = &(strat->T[atT]);
+  strat->T[atT].i_r = strat->tl + 1;
+
+  __asm__ __volatile__("" ::: "memory");  // compiler barrier (x86 has strong HW ordering)
+  strat->tl++;
   kTest_T(&(strat->T[atT]),strat);
 }
 

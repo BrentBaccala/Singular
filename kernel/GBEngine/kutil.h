@@ -813,6 +813,7 @@ void initSyzRules (kStrategy strat);
 void updateS(BOOLEAN toT,kStrategy strat);
 void enterSyz (LObject &p,kStrategy strat, int atT);
 void enterT (LObject &p,kStrategy strat, int atT = -1);
+void enlargeT (TSet &T, TObject** &R, unsigned long* &sevT, int &length, const int incr);
 void replaceInLAndSAndT(LObject &p, int tj, kStrategy strat);
 void enterT_strong (LObject &p,kStrategy strat, int atT = -1);
 void cancelunit (LObject* p,BOOLEAN inNF=FALSE);

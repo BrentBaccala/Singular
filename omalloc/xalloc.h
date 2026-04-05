@@ -8,8 +8,8 @@
 */
 /* debug routines of omalloc are not implemented, but as dummies provided: */
 #define OM_NDEBUG 1
-/* use of Bins: define for optimal performancei(6%), undef for valgrind */
-#define XALLOC_BIN 1
+/* use of Bins: define for optimal performance (6%), undef for valgrind/threads */
+/* #define XALLOC_BIN 1 -- disabled for thread safety in parallel bba */
 
 /* performancce of xalloc+XALLOC_BIN: +32.6 %, xalloc w/o XALLOC_BIN: +40.7 %
  * (omalloc=100 %) */

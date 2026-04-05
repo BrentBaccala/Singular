@@ -61,6 +61,7 @@ VAR long sba_interreduction_operations;
 ***********************************************/
 
 #include "kernel/GBEngine/kutil.h"
+#include "kernel/GBEngine/kthread.h"
 #if defined(__x86_64__) && defined(__GNUC__)
 #define HAVE_SIMD_SEV_SCAN 1
 #include <immintrin.h>
@@ -2840,6 +2841,19 @@ ideal bba (ideal F, ideal Q,intvec *w,bigintmat *hilb,kStrategy strat)
 #ifdef KDEBUG
   //kDebugPrint(strat);
 #endif
+
+  /* parallel bba: dispatch to parallel loop if SINGULAR_THREADS > 1 */
+  {
+    int singular_threads = get_singular_threads();
+    if (singular_threads > 1 && strat->red == redHoney)
+    {
+      SweepContext *pctx = sweep_context_init(strat, singular_threads);
+      bba_parallel_loop(pctx);
+      sweep_context_destroy(pctx);
+      goto bba_post_loop;
+    }
+  }
+
   /* compute------------------------------------------------------- */
   while (! strat->L.empty())
   {
@@ -3062,6 +3076,32 @@ ideal bba (ideal F, ideal Q,intvec *w,bigintmat *hilb,kStrategy strat)
     kTest_TS(strat);
 #endif /* KDEBUG */
   }
+
+bba_post_loop:
+  // After parallel bba, remove redundant S-elements whose leading
+  // monomials are divisible by another S-element. The batch model may
+  // produce such redundancies since multiple polynomials are reduced
+  // against the same T snapshot.
+  if (get_singular_threads() > 1)
+  {
+    if (!rField_is_Ring(currRing))
+    {
+      int k = 1;
+      int j;
+      while (k <= strat->sl)
+      {
+        j = 0;
+        loop
+        {
+          if (j >= k) break;
+          clearS(strat->S[j], strat->sevS[j], &k, &j, strat);
+          j++;
+        }
+        k++;
+      }
+    }
+  }
+
 #ifdef KDEBUG
   if (TEST_OPT_DEBUG) messageSets(strat);
 #endif /* KDEBUG */
