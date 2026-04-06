@@ -534,26 +534,7 @@ inline static int* initS_2_R (const int maxnr)
   return (int*)omAlloc0(maxnr*sizeof(int));
 }
 
-void enlargeT (TSet &T, TObject** &R, unsigned long* &sevT,
-                             int &length, const int incr)
-{
-  assume(T!=NULL);
-  assume(sevT!=NULL);
-  assume(R!=NULL);
-  assume((length+incr) > 0);
-
-  int i;
-  T = (TSet)omRealloc0Size(T, length*sizeof(TObject),
-                           (length+incr)*sizeof(TObject));
-
-  sevT = (unsigned long*) omReallocSize(sevT, length*sizeof(long*),
-                           (length+incr)*sizeof(long*));
-
-  R = (TObject**)omRealloc0Size(R,length*sizeof(TObject*),
-                                (length+incr)*sizeof(TObject*));
-  for (i=length-1;i>=0;i--) R[T[i].i_r] = &(T[i]);
-  length += incr;
-}
+// enlargeT removed — BlockArray grows automatically via ensure_capacity
 
 void cleanT (kStrategy strat)
 {
@@ -694,7 +675,7 @@ BOOLEAN isInPairsetL(LSet::iterator &it,poly p1,poly p2,kStrategy strat)
   return FALSE;
 }
 
-int kFindInT(poly p, TSet T, int tlength)
+int kFindInT(poly p, const BlockArray<TObject> &T, int tlength)
 {
   int i;
 
@@ -719,7 +700,7 @@ int kFindInT(poly p, kStrategy strat)
 }
 
 #ifdef HAVE_SHIFTBBA
-int kFindInTShift(poly p, TSet T, int tlength)
+int kFindInTShift(poly p, const BlockArray<TObject> &T, int tlength)
 {
   int i;
 
@@ -908,7 +889,7 @@ BOOLEAN kTest_T(TObject * T, kStrategy strat, int i, char TN)
 
 #ifdef KDEBUG
 BOOLEAN kTest_L(LObject *L, kStrategy strat,
-                BOOLEAN testp, int lpos, TSet T, int tlength)
+                BOOLEAN testp, int lpos, BlockArray<TObject> *T, int tlength)
 {
   ring strat_tailRing=strat->tailRing;
   if (L->p!=NULL)
@@ -972,21 +953,21 @@ BOOLEAN kTest_L(LObject *L, kStrategy strat,
     int i;
 #ifdef HAVE_SHIFTBBA
     if (rIsLPRing(currRing))
-      i = kFindInTShift(L->p1, T, tlength);
+      i = kFindInTShift(L->p1, *T, tlength);
     else
 #endif
-      i = kFindInT(L->p1, T, tlength);
+      i = kFindInT(L->p1, *T, tlength);
     if (i < 0)
       return dReportError("L[%d].p1 not in T",lpos);
 #ifdef HAVE_SHIFTBBA
     if (rIsLPRing(currRing))
     {
       if (rField_is_Ring(currRing)) return TRUE; // m*shift(q) is not in T
-      i = kFindInTShift(L->p2, T, tlength);
+      i = kFindInTShift(L->p2, *T, tlength);
     }
     else
 #endif
-      i = kFindInT(L->p2, T, tlength);
+      i = kFindInT(L->p2, *T, tlength);
     if (i < 0)
       return dReportError("L[%d].p2 not in T",lpos);
   }
@@ -1001,10 +982,10 @@ BOOLEAN kTest (kStrategy strat)
   // test P
   kFalseReturn(kTest_L(&(strat->P), strat,
                        (strat->P.p != NULL && pNext(strat->P.p)!=strat->tail),
-                       -1, strat->T, strat->tl));
+                       -1, &strat->T, strat->tl));
 
   // test T
-  if (strat->T != NULL)
+  if (strat->tl >= 0)
   {
     for (i=0; i<=strat->tl; i++)
     {
@@ -1019,7 +1000,7 @@ BOOLEAN kTest (kStrategy strat)
   for (auto& Lp: strat->L) {
     kFalseReturn(kTest_L(&Lp, strat,
                          Lp.Next() != strat->tail, i,
-                         strat->T, strat->tl));
+                         &strat->T, strat->tl));
     i++;
       // may be unused
       //if (strat->use_buckets && Lp.Next() != strat->tail &&
@@ -1068,7 +1049,7 @@ BOOLEAN kTest_TS(kStrategy strat)
     if (strat->T[i].i_r < 0 || strat->T[i].i_r > strat->tl)
       return dReportError("strat->T[%d].i_r == %d out of bounds", i,
                           strat->T[i].i_r);
-    if (strat->R[strat->T[i].i_r] != &(strat->T[i]))
+    if (strat->R[strat->T[i].i_r] != strat->T.addr(i))
       return dReportError("T[%d].i_r with R out of sync", i);
   }
   // test containment of S inT
@@ -4916,7 +4897,7 @@ int posInIdealMonFirst (const ideal F, const poly p,int start,int end)
 * looks up the position of p in set
 * the position is the last one
 */
-int posInT0 (const TSet,const int length,LObject &)
+int posInT0 (const BlockArray<TObject> &,const int length,LObject &)
 {
   return (length+1);
 }
@@ -4927,7 +4908,7 @@ int posInT0 (const TSet,const int length,LObject &)
 * set[0] is the smallest with respect to the ordering-procedure
 * pComp
 */
-int posInT1 (const TSet set,const int length,LObject &p)
+int posInT1 (const BlockArray<TObject> &set,const int length,LObject &p)
 {
   if (length==-1) return 0;
 
@@ -4956,7 +4937,7 @@ int posInT1 (const TSet set,const int length,LObject &p)
 * set[0] is the smallest with respect to the ordering-procedure
 * length
 */
-int posInT2 (const TSet set,const int length,LObject &p)
+int posInT2 (const BlockArray<TObject> &set,const int length,LObject &p)
 {
   if (length==-1) return 0;
   p.GetpLength();
@@ -4984,7 +4965,7 @@ int posInT2 (const TSet set,const int length,LObject &p)
 * set[0] is the smallest with respect to the ordering-procedure
 * totaldegree,pComp
 */
-int posInT11 (const TSet set,const int length,LObject &p)
+int posInT11 (const BlockArray<TObject> &set,const int length,LObject &p)
 {
   if (length==-1) return 0;
 
@@ -5020,7 +5001,7 @@ int posInT11 (const TSet set,const int length,LObject &p)
   }
 }
 
-int posInT11Ring (const TSet set,const int length,LObject &p)
+int posInT11Ring (const BlockArray<TObject> &set,const int length,LObject &p)
 {
   if (length==-1) return 0;
 
@@ -5060,7 +5041,7 @@ int posInT11Ring (const TSet set,const int length,LObject &p)
 * set[0] is the smallest with respect to the ordering-procedure
 * totaldegree,pComp
 */
-int posInT110 (const TSet set,const int length,LObject &p)
+int posInT110 (const BlockArray<TObject> &set,const int length,LObject &p)
 {
   if (length==-1) return 0;
   p.GetpLength();
@@ -5102,7 +5083,7 @@ int posInT110 (const TSet set,const int length,LObject &p)
   }
 }
 
-int posInT110Ring (const TSet set,const int length,LObject &p)
+int posInT110Ring (const BlockArray<TObject> &set,const int length,LObject &p)
 {
   if (length==-1) return 0;
   p.GetpLength();
@@ -5148,7 +5129,7 @@ int posInT110Ring (const TSet set,const int length,LObject &p)
 * set[0] is the smallest with respect to the ordering-procedure
 * pFDeg
 */
-int posInT13 (const TSet set,const int length,LObject &p)
+int posInT13 (const BlockArray<TObject> &set,const int length,LObject &p)
 {
   if (length==-1) return 0;
 
@@ -5177,7 +5158,7 @@ int posInT13 (const TSet set,const int length,LObject &p)
 }
 
 // determines the position based on: 1.) Ecart 2.) pLength
-int posInT_EcartpLength(const TSet set,const int length,LObject &p)
+int posInT_EcartpLength(const BlockArray<TObject> &set,const int length,LObject &p)
 {
   if (length==-1) return 0;
   int ol = p.GetpLength();
@@ -5215,7 +5196,7 @@ int posInT_EcartpLength(const TSet set,const int length,LObject &p)
 * set[0] is the smallest with respect to the ordering-procedure
 * maximaldegree, pComp
 */
-int posInT15 (const TSet set,const int length,LObject &p)
+int posInT15 (const BlockArray<TObject> &set,const int length,LObject &p)
 /*{
  *int j=0;
  * int o;
@@ -5269,7 +5250,7 @@ int posInT15 (const TSet set,const int length,LObject &p)
   }
 }
 
-int posInT15Ring (const TSet set,const int length,LObject &p)
+int posInT15Ring (const BlockArray<TObject> &set,const int length,LObject &p)
 {
   if (length==-1) return 0;
 
@@ -5309,7 +5290,7 @@ int posInT15Ring (const TSet set,const int length,LObject &p)
 * set[0] is the smallest with respect to the ordering-procedure
 * pFDeg+ecart, ecart, pComp
 */
-int posInT17 (const TSet set,const int length,LObject &p)
+int posInT17 (const BlockArray<TObject> &set,const int length,LObject &p)
 /*
 *{
 * int j=0;
@@ -5370,7 +5351,7 @@ int posInT17 (const TSet set,const int length,LObject &p)
   }
 }
 
-int posInT17Ring (const TSet set,const int length,LObject &p)
+int posInT17Ring (const BlockArray<TObject> &set,const int length,LObject &p)
 {
   if (length==-1) return 0;
 
@@ -5415,7 +5396,7 @@ int posInT17Ring (const TSet set,const int length,LObject &p)
 * set[0] is the smallest with respect to the ordering-procedure
 * pGetComp, pFDeg+ecart, ecart, pComp
 */
-int posInT17_c (const TSet set,const int length,LObject &p)
+int posInT17_c (const BlockArray<TObject> &set,const int length,LObject &p)
 {
   if (length==-1) return 0;
 
@@ -5476,7 +5457,7 @@ int posInT17_c (const TSet set,const int length,LObject &p)
   }
 }
 
-int posInT17_cRing (const TSet set,const int length,LObject &p)
+int posInT17_cRing (const BlockArray<TObject> &set,const int length,LObject &p)
 {
   if (length==-1) return 0;
 
@@ -5541,7 +5522,7 @@ int posInT17_cRing (const TSet set,const int length,LObject &p)
 * set[0] is the smallest with respect to
 * ecart, pFDeg, length
 */
-int posInT19 (const TSet set,const int length,LObject &p)
+int posInT19 (const BlockArray<TObject> &set,const int length,LObject &p)
 {
   p.GetpLength();
   if (length==-1) return 0;
@@ -8670,23 +8651,17 @@ void enterT(LObject &p, kStrategy strat, int atT)
   strat->newt = TRUE;
   if (atT < 0)
     atT = strat->posInT(strat->T, strat->tl, p);
-  if (strat->tl == strat->tmax-1)
-    enlargeT(strat->T,strat->R,strat->sevT,strat->tmax,strat->tmax);
+  // Ensure capacity for tl+2 elements (current tl+1, plus the new one)
+  strat->T.ensure_capacity(strat->tl + 2);
+  strat->sevT.ensure_capacity(strat->tl + 2);
+  strat->R.ensure_capacity(strat->tl + 2);
   if (atT <= strat->tl)
   {
-#ifdef ENTER_USE_MEMMOVE
-    memmove(&(strat->T[atT+1]), &(strat->T[atT]),
-            (strat->tl-atT+1)*sizeof(TObject));
-    memmove(&(strat->sevT[atT+1]), &(strat->sevT[atT]),
-            (strat->tl-atT+1)*sizeof(unsigned long));
-#endif
     for (i=strat->tl+1; i>=atT+1; i--)
     {
-#ifndef ENTER_USE_MEMMOVE
       strat->T[i] = strat->T[i-1];
       strat->sevT[i] = strat->sevT[i-1];
-#endif
-      strat->R[strat->T[i].i_r] = &(strat->T[i]);
+      strat->R[strat->T[i].i_r] = strat->T.addr(i);
     }
   }
 
@@ -8723,7 +8698,7 @@ void enterT(LObject &p, kStrategy strat, int atT)
   // reordering of the tl++ past the data writes.
   assume((p.sev == 0) || (pGetShortExpVector(p.p) == p.sev));
   strat->sevT[atT] = (p.sev == 0 ? pGetShortExpVector(p.p) : p.sev);
-  strat->R[strat->tl + 1] = &(strat->T[atT]);
+  strat->R[strat->tl + 1] = strat->T.addr(atT);
   strat->T[atT].i_r = strat->tl + 1;
 
   __asm__ __volatile__("" ::: "memory");  // compiler barrier (x86 has strong HW ordering)
@@ -8768,23 +8743,17 @@ void enterT_strong(LObject &p, kStrategy strat, int atT)
   strat->newt = TRUE;
   if (atT < 0)
     atT = strat->posInT(strat->T, strat->tl, p);
-  if (strat->tl == strat->tmax-1)
-    enlargeT(strat->T,strat->R,strat->sevT,strat->tmax,strat->tmax);
+  // Ensure capacity for tl+2 elements
+  strat->T.ensure_capacity(strat->tl + 2);
+  strat->sevT.ensure_capacity(strat->tl + 2);
+  strat->R.ensure_capacity(strat->tl + 2);
   if (atT <= strat->tl)
   {
-#ifdef ENTER_USE_MEMMOVE
-    memmove(&(strat->T[atT+1]), &(strat->T[atT]),
-            (strat->tl-atT+1)*sizeof(TObject));
-    memmove(&(strat->sevT[atT+1]), &(strat->sevT[atT]),
-            (strat->tl-atT+1)*sizeof(unsigned long));
-#endif
     for (i=strat->tl+1; i>=atT+1; i--)
     {
-#ifndef ENTER_USE_MEMMOVE
       strat->T[i] = strat->T[i-1];
       strat->sevT[i] = strat->sevT[i-1];
-#endif
-      strat->R[strat->T[i].i_r] = &(strat->T[i]);
+      strat->R[strat->T[i].i_r] = strat->T.addr(i);
     }
   }
 
@@ -8805,7 +8774,7 @@ void enterT_strong(LObject &p, kStrategy strat, int atT)
     strat->T[atT].max_exp = NULL;
 
   strat->tl++;
-  strat->R[strat->tl] = &(strat->T[atT]);
+  strat->R[strat->tl] = strat->T.addr(atT);
   strat->T[atT].i_r = strat->tl;
   assume(p.sev == 0 || pGetShortExpVector(p.p) == p.sev);
   strat->sevT[atT] = (p.sev == 0 ? pGetShortExpVector(p.p) : p.sev);
@@ -9257,10 +9226,9 @@ void initBuchMora (ideal F,ideal Q,kStrategy strat)
   strat->sl = -1;
   /*- set T -*/
   strat->tl = -1;
-  strat->tmax = setmaxT;
-  strat->T = initT();
-  strat->R = initR();
-  strat->sevT = initsevT();
+  initT(strat->T);
+  initR(strat->R);
+  initsevT(strat->sevT);
   /*- init local data struct.---------------------------------------- -*/
   //strat->P.ecart=0; // already by skStragy()
   //strat->P.length=0; // already by skStragy()
@@ -9327,9 +9295,9 @@ void exitBuchMora (kStrategy strat)
 {
   /*- release temp data -*/
   cleanT(strat);
-  omFreeSize(strat->T,(strat->tmax)*sizeof(TObject));
-  omFreeSize(strat->R,(strat->tmax)*sizeof(TObject*));
-  omFreeSize(strat->sevT, (strat->tmax)*sizeof(unsigned long));
+  strat->T.free_all();
+  strat->R.free_all();
+  strat->sevT.free_all();
   omFreeSize(strat->ecartS,IDELEMS(strat->Shdl)*sizeof(int));
   omFreeSize((ADDRESS)strat->sevS,IDELEMS(strat->Shdl)*sizeof(unsigned long));
   omFreeSize(strat->S_2_R,IDELEMS(strat->Shdl)*sizeof(int));
@@ -9427,10 +9395,9 @@ void initSbaBuchMora (ideal F,ideal Q,kStrategy strat)
   strat->syzl = -1;
   /*- set T -*/
   strat->tl = -1;
-  strat->tmax = setmaxT;
-  strat->T = initT();
-  strat->R = initR();
-  strat->sevT = initsevT();
+  initT(strat->T);
+  initR(strat->R);
+  initsevT(strat->sevT);
   /*- init local data struct.---------------------------------------- -*/
   //strat->P.ecart=0;  // done by skStrategy
   //strat->P.length=0;  // done by skStrategy
@@ -9487,9 +9454,9 @@ void exitSba (kStrategy strat)
     cleanTSbaRing(strat);
   else
     cleanT(strat);
-  omFreeSize(strat->T,(strat->tmax)*sizeof(TObject));
-  omFreeSize(strat->R,(strat->tmax)*sizeof(TObject*));
-  omFreeSize(strat->sevT, (strat->tmax)*sizeof(unsigned long));
+  strat->T.free_all();
+  strat->R.free_all();
+  strat->sevT.free_all();
   omFreeSize(strat->ecartS,IDELEMS(strat->Shdl)*sizeof(int));
   omFreeSize((ADDRESS)strat->sevS,IDELEMS(strat->Shdl)*sizeof(unsigned long));
   omFreeSize((ADDRESS)strat->sevSig,IDELEMS(strat->Shdl)*sizeof(unsigned long));
@@ -10823,7 +10790,7 @@ virasoro     3.39        3.50        3.35        3.47        3.70        7.66
 //#ifdef HAVE_MORE_POS_IN_T
 #if 1
 // determines the position based on: 1.) Ecart 2.) FDeg 3.) pLength
-int posInT_EcartFDegpLength(const TSet set,const int length,LObject &p)
+int posInT_EcartFDegpLength(const BlockArray<TObject> &set,const int length,LObject &p)
 {
 
   if (length==-1) return 0;
@@ -10877,7 +10844,7 @@ int posInT_EcartFDegpLength(const TSet set,const int length,LObject &p)
 }
 
 // determines the position based on: 1.) FDeg 2.) pLength
-int posInT_FDegpLength(const TSet set,const int length,LObject &p)
+int posInT_FDegpLength(const BlockArray<TObject> &set,const int length,LObject &p)
 {
 
   if (length==-1) return 0;
@@ -10914,7 +10881,7 @@ int posInT_FDegpLength(const TSet set,const int length,LObject &p)
 
 
 // determines the position based on: 1.) pLength
-int posInT_pLength(const TSet set,const int length,LObject &p)
+int posInT_pLength(const BlockArray<TObject> &set,const int length,LObject &p)
 {
   int ol = p.GetpLength();
   if (length==-1)

@@ -292,10 +292,9 @@ static ideal kInterRedCC(ideal F, ideal Q)
   strat->initEcart   = initEcartNormal;
   strat->sl   = -1;
   strat->tl          = -1;
-  strat->tmax        = setmaxT;
-  strat->T           = initT();
-  strat->R           = initR();
-  strat->sevT        = initsevT();
+  initT(strat->T);
+  initR(strat->R);
+  initsevT(strat->sevT);
   if(rHasLocalOrMixedOrdering(currRing))
   {
     strat->honey = TRUE;
@@ -320,13 +319,13 @@ static ideal kInterRedCC(ideal F, ideal Q)
     completeReduce(strat);
   }
   if(strat->kNoether!=NULL) pLmFree(&strat->kNoether);
-  omFreeSize((ADDRESS)strat->T,strat->tmax*sizeof(TObject));
+  strat->T.free_all();
   omFreeSize((ADDRESS)strat->ecartS,IDELEMS(strat->Shdl)*sizeof(int));
   omFreeSize((ADDRESS)strat->sevS,IDELEMS(strat->Shdl)*sizeof(unsigned long));
   omFreeSize((ADDRESS)strat->NotUsedAxis,(currRing->N+1)*sizeof(BOOLEAN));
-  omfree(strat->sevT);
+  strat->sevT.free_all();
   omfree(strat->S_2_R);
-  omfree(strat->R);
+  strat->R.free_all();
 
   if(strat->fromQ)
   {

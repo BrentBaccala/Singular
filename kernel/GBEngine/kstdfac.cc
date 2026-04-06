@@ -26,13 +26,15 @@ static void copyT (kStrategy o,kStrategy n)
 {
   int i,j;
   poly  p;
-  TSet t=(TSet)omAlloc0(o->tmax*sizeof(TObject));
-  TObject** r = (TObject**)omAlloc0(o->tmax*sizeof(TObject*));
+  int needed = o->tl + 1;
+  if (needed < setmaxT) needed = setmaxT;
+  n->T.ensure_capacity(needed);
+  n->R.ensure_capacity(needed);
 
   for (j=0; j<=o->tl; j++)
   {
-    t[j] = o->T[j];
-    r[t[j].i_r] = &t[j];
+    n->T[j] = o->T[j];
+    n->R[n->T[j].i_r] = n->T.addr(j);
     p = o->T[j].p;
     i = -1;
     loop
@@ -40,21 +42,19 @@ static void copyT (kStrategy o,kStrategy n)
       i++;
       if (i>o->sl)
       {
-        t[j].p=pCopy(p);
+        n->T[j].p=pCopy(p);
         break;
       }
       if (p == o->S[i])
       {
-        t[j].p=n->S[i];
+        n->T[j].p=n->S[i];
         break;
       }
     }
-    t[j].t_p = NULL; // ?? or t[j].p ??
-    t[j].max_exp = NULL; // ?? or p_GetMaxExpP(t[j].t_p,o->tailRing); ??
-    t[j].pLength =  pLength(p);
+    n->T[j].t_p = NULL; // ?? or n->T[j].p ??
+    n->T[j].max_exp = NULL; // ?? or p_GetMaxExpP(n->T[j].t_p,o->tailRing); ??
+    n->T[j].pLength =  pLength(p);
   }
-  n->T=t;
-  n->R=r;
 }
 
 /*3
@@ -157,8 +157,14 @@ kStrategy kStratCopy(kStrategy o)
   memcpy(s->sevS,o->sevS,IDELEMS(o->Shdl)*sizeof(unsigned long));
   s->S_2_R=(int*)omAlloc(IDELEMS(o->Shdl)*sizeof(int));
   memcpy(s->S_2_R,o->S_2_R,IDELEMS(o->Shdl)*sizeof(int));
-  s->sevT=(unsigned long *)omAlloc(o->tmax*sizeof(unsigned long));
-  memcpy(s->sevT,o->sevT,o->tmax*sizeof(unsigned long));
+  // Copy sevT block-by-block
+  {
+    int needed = o->tl + 1;
+    if (needed < setmaxT) needed = setmaxT;
+    s->sevT.ensure_capacity(needed);
+    for (int ii = 0; ii <= o->tl; ii++)
+      s->sevT[ii] = o->sevT[ii];
+  }
   if(o->fromQ!=NULL)
   {
     s->fromQ=(int *)omAlloc(IDELEMS(o->Shdl)*sizeof(int));
@@ -188,7 +194,6 @@ kStrategy kStratCopy(kStrategy o)
   s->sl=o->sl;
   s->mu=o->mu;
   s->tl=o->tl;
-  s->tmax=o->tmax;
   s->ak=o->ak;
   s->syzComp=o->syzComp;
   s->LazyPass=o->LazyPass;

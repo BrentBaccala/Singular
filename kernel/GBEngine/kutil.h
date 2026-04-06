@@ -9,6 +9,7 @@
 
 
 #include <string.h>
+#include <stdlib.h>
 
 #include "writable_set.h"
 #include <vector>
@@ -57,9 +58,71 @@ typedef int* intset;
 typedef int64  wlen_type;
 typedef wlen_type* wlen_set;
 
+// Block-allocated array: elements are stored in fixed-size blocks.
+// Existing blocks never move when new blocks are appended, so pointers
+// to elements (&arr[i]) remain stable across growth.
+template<typename Elem, int BLOCK_SHIFT = 10>
+class BlockArray {
+  static const int BLOCK_SIZE = 1 << BLOCK_SHIFT;
+  static const int BLOCK_MASK = BLOCK_SIZE - 1;
+  Elem **blocks;        // directory of block pointers
+  int num_blocks;       // current number of allocated blocks
+  int dir_capacity;     // allocated directory slots
+public:
+  BlockArray() : blocks(NULL), num_blocks(0), dir_capacity(0) {}
+
+  Elem& operator[](int i) {
+    return blocks[i >> BLOCK_SHIFT][i & BLOCK_MASK];
+  }
+  const Elem& operator[](int i) const {
+    return blocks[i >> BLOCK_SHIFT][i & BLOCK_MASK];
+  }
+
+  // Return pointer to element i (stable across growth)
+  Elem* addr(int i) {
+    return &blocks[i >> BLOCK_SHIFT][i & BLOCK_MASK];
+  }
+
+  // Ensure at least n elements are allocated (indices 0..n-1)
+  void ensure_capacity(int n) {
+    int needed_blocks = (n + BLOCK_SIZE - 1) >> BLOCK_SHIFT;
+    if (needed_blocks <= num_blocks) return;
+    // Grow directory if needed
+    if (needed_blocks > dir_capacity) {
+      int new_cap = dir_capacity == 0 ? 4 : dir_capacity;
+      while (new_cap < needed_blocks) new_cap *= 2;
+      Elem **new_dir = (Elem **)calloc(new_cap, sizeof(Elem *));
+      if (blocks != NULL) {
+        memcpy(new_dir, blocks, num_blocks * sizeof(Elem *));
+        free(blocks);
+      }
+      blocks = new_dir;
+      dir_capacity = new_cap;
+    }
+    // Allocate new blocks (zero-initialized)
+    for (int b = num_blocks; b < needed_blocks; b++) {
+      blocks[b] = (Elem *)calloc(BLOCK_SIZE, sizeof(Elem));
+    }
+    num_blocks = needed_blocks;
+  }
+
+  // Return current capacity (total elements allocated)
+  int capacity() const { return num_blocks * BLOCK_SIZE; }
+
+  // Free all blocks and the directory
+  void free_all() {
+    for (int b = 0; b < num_blocks; b++) {
+      free(blocks[b]);
+    }
+    if (blocks != NULL) free(blocks);
+    blocks = NULL;
+    num_blocks = 0;
+    dir_capacity = 0;
+  }
+};
+
 typedef class sTObject TObject;
 typedef class sLObject LObject;
-typedef TObject * TSet;
 
 typedef struct denominator_list_s denominator_list_s;
 typedef denominator_list_s *denominator_list;
@@ -561,7 +624,7 @@ public:
   int (*red)(LObject * L,kStrategy strat) = NULL;
   int (*red2)(LObject * L,kStrategy strat) = NULL;
   void (*initEcart)(TObject * L) = NULL;
-  int (*posInT)(const TSet T,const int tl,LObject &h) = NULL;
+  int (*posInT)(const BlockArray<TObject> &T,const int tl,LObject &h) = NULL;
   int (*compareL) (const LObject &lhs, const LObject &rhs, const kStrategy strat) = NULL;
   int (*compareLOld) (const LObject &lhs, const LObject &rhs, const kStrategy strat) = NULL;
   void (*enterS)(LObject &h, int pos,kStrategy strat, int atR/* =-1*/ ) = NULL;
@@ -601,8 +664,8 @@ public:
   unsigned long* sevS = NULL;
   unsigned long* sevSyz = NULL;
   unsigned long* sevSig = NULL;
-  unsigned long* sevT = NULL;
-  TSet T = NULL;
+  BlockArray<unsigned long> sevT;
+  BlockArray<TObject> T;
   LSet L;
   LSet    B;
   poly    kNoether = NULL;
@@ -616,7 +679,7 @@ public:
   // procedure for ShalloCopy from tailRing  to currRing
   pShallowCopyDeleteProc p_shallow_copy_delete = NULL;
   // pointers to Tobjects R[i] is ith Tobject which is generated
-  TObject**  R = NULL;
+  BlockArray<TObject*>  R;
   // S_2_R[i] yields Tobject which corresponds to S[i]
   int*      S_2_R = NULL;
   ring tailRing = NULL;
@@ -626,7 +689,7 @@ public:
   int cp = 0,c3 = 0;
   int sl = 0,mu = 0;
   int syzl = 0,syzmax = 0,syzidxmax = 0;
-  int tl = 0,tmax = 0;
+  int tl = 0;
   int ak = 0,LazyDegree = 0,LazyPass = 0;
   int syzComp = 0;
   int lastAxis = 0;
@@ -721,26 +784,26 @@ int posInS (const kStrategy strat, const int length, const poly p,
             const int ecart_p);
 int posInSMonFirst (const kStrategy strat, const int length, const poly p);
 int posInIdealMonFirst (const ideal F, const poly p,int start = 0,int end = -1);
-int posInT0 (const TSet set,const int length,LObject &p);
-int posInT1 (const TSet set,const int length,LObject &p);
-int posInT2 (const TSet set,const int length,LObject &p);
-int posInT11 (const TSet set,const int length,LObject &p);
-int posInTSig (const TSet set,const int length,LObject &p);
-int posInT110 (const TSet set,const int length,LObject &p);
-int posInT13 (const TSet set,const int length,LObject &p);
-int posInT15 (const TSet set,const int length,LObject &p);
-int posInT17 (const TSet set,const int length,LObject &p);
-int posInT17_c (const TSet set,const int length,LObject &p);
-int posInT19 (const TSet set,const int length,LObject &p);
-int posInT_EcartpLength(const TSet set,const int length,LObject &p);
-int posInT_EcartFDegpLength(const TSet set,const int length,LObject &p);
-int posInT_FDegpLength(const TSet set,const int length,LObject &p);
-int posInT_pLength(const TSet set,const int length,LObject &p);
+int posInT0 (const BlockArray<TObject> &set,const int length,LObject &p);
+int posInT1 (const BlockArray<TObject> &set,const int length,LObject &p);
+int posInT2 (const BlockArray<TObject> &set,const int length,LObject &p);
+int posInT11 (const BlockArray<TObject> &set,const int length,LObject &p);
+int posInTSig (const BlockArray<TObject> &set,const int length,LObject &p);
+int posInT110 (const BlockArray<TObject> &set,const int length,LObject &p);
+int posInT13 (const BlockArray<TObject> &set,const int length,LObject &p);
+int posInT15 (const BlockArray<TObject> &set,const int length,LObject &p);
+int posInT17 (const BlockArray<TObject> &set,const int length,LObject &p);
+int posInT17_c (const BlockArray<TObject> &set,const int length,LObject &p);
+int posInT19 (const BlockArray<TObject> &set,const int length,LObject &p);
+int posInT_EcartpLength(const BlockArray<TObject> &set,const int length,LObject &p);
+int posInT_EcartFDegpLength(const BlockArray<TObject> &set,const int length,LObject &p);
+int posInT_FDegpLength(const BlockArray<TObject> &set,const int length,LObject &p);
+int posInT_pLength(const BlockArray<TObject> &set,const int length,LObject &p);
 
 #ifdef HAVE_MORE_POS_IN_T
-int posInT_EcartFDegpLength(const TSet set,const int length,LObject &p);
-int posInT_FDegpLength(const TSet set,const int length,LObject &p);
-int posInT_pLength(const TSet set,const int length,LObject &p);
+int posInT_EcartFDegpLength(const BlockArray<TObject> &set,const int length,LObject &p);
+int posInT_FDegpLength(const BlockArray<TObject> &set,const int length,LObject &p);
+int posInT_pLength(const BlockArray<TObject> &set,const int length,LObject &p);
 #endif
 
 
@@ -813,7 +876,7 @@ void initSyzRules (kStrategy strat);
 void updateS(BOOLEAN toT,kStrategy strat);
 void enterSyz (LObject &p,kStrategy strat, int atT);
 void enterT (LObject &p,kStrategy strat, int atT = -1);
-void enlargeT (TSet &T, TObject** &R, unsigned long* &sevT, int &length, const int incr);
+// enlargeT removed — BlockArray grows automatically via ensure_capacity
 void replaceInLAndSAndT(LObject &p, int tj, kStrategy strat);
 void enterT_strong (LObject &p,kStrategy strat, int atT = -1);
 void cancelunit (LObject* p,BOOLEAN inNF=FALSE);
@@ -846,9 +909,9 @@ BOOLEAN faugereRewCriterion(poly sig, unsigned long not_sevSig, poly lm, kStrate
 BOOLEAN findMinLMPair(poly sig, unsigned long not_sevSig, kStrategy strat, int start);
 
 /// returns index of p in TSet, or -1 if not found
-int kFindInT(poly p, TSet T, int tlength);
+int kFindInT(poly p, const BlockArray<TObject> &T, int tlength);
 #ifdef HAVE_SHIFTBBA
-int kFindInTShift(poly p, TSet T, int tlength);
+int kFindInTShift(poly p, const BlockArray<TObject> &T, int tlength);
 #endif
 
 /// return -1 if no divisor is found
@@ -873,9 +936,9 @@ TObject* kFindDivisibleByInS_T(kStrategy strat, int end_pos, LObject* L, TObject
  *
  ***************************************************************/
 
-KINLINE TSet initT ();
-KINLINE TObject** initR();
-KINLINE unsigned long* initsevT();
+KINLINE void initT (BlockArray<TObject> &T);
+KINLINE void initR (BlockArray<TObject*> &R);
+KINLINE void initsevT (BlockArray<unsigned long> &sevT);
 KINLINE poly k_LmInit_currRing_2_tailRing(poly p, ring tailRing, omBin bin);
 KINLINE poly k_LmInit_tailRing_2_currRing(poly p, ring tailRing, omBin bin);
 KINLINE poly k_LmShallowCopyDelete_currRing_2_tailRing(poly p, ring tailRing, omBin bin);
@@ -902,7 +965,7 @@ BOOLEAN kTest_TS(kStrategy strat);
 // test LObject
 BOOLEAN kTest_L(LObject* L, kStrategy strat,
                  BOOLEAN testp = FALSE, int lpos = -1,
-                 TSet T = NULL, int tlength = -1);
+                 BlockArray<TObject> *T = NULL, int tlength = -1);
 // test TObject
 BOOLEAN kTest_T(TObject* T, kStrategy strat, int tpos = -1, char TN = '?');
 // test set strat->SevS
@@ -1048,7 +1111,7 @@ KINLINE int ksReducePolyTail(LObject* PR, TObject* PW, LObject* Red);
 // Assume:  Pair->p1 != NULL && Pair->p2
 void ksCreateSpoly(LObject* Pair, poly spNoether = NULL,
                    int use_buckets=0, ring tailRing=currRing,
-                   poly m1 = NULL, poly m2 = NULL, TObject** R = NULL);
+                   poly m1 = NULL, poly m2 = NULL, BlockArray<TObject*>* R = NULL);
 
 /*2
 * creates the leading term of the S-polynomial of p1 and p2

@@ -1429,7 +1429,7 @@ static void updateL(BOOLEAN searchPP, kStrategy strat)
       }
       /* create the real one */
       ksCreateSpoly(&(*it), strat->kNoetherTail(), FALSE,
-                    strat->tailRing, m1, m2, strat->R);
+                    strat->tailRing, m1, m2, &strat->R);
 
       it->SetLmCurrRing();
       if (!strat->honey)
@@ -1498,7 +1498,7 @@ static void updateLHC(kStrategy strat)
         }
         /* create the real one */
         ksCreateSpoly(&(*it), strat->kNoetherTail(), FALSE,
-                      strat->tailRing, m1, m2, strat->R);
+                      strat->tailRing, m1, m2, &strat->R);
         if (! it->IsNull())
         {
           it->SetLmCurrRing();
@@ -1515,7 +1515,7 @@ static void updateLHC(kStrategy strat)
     else
     {
 #ifdef KDEBUG
-      kTest_L(&(*it), strat, TRUE, i++, strat->T, strat->tl);
+      kTest_L(&(*it), strat, TRUE, i++, &strat->T, strat->tl);
 #endif
       it ++;
     }
@@ -1979,7 +1979,7 @@ ideal mora (ideal F, ideal Q,intvec *w,bigintmat *hilb,kStrategy strat)
       }
       /* create the real one */
       ksCreateSpoly(&(strat->P), strat->kNoetherTail(), strat->use_buckets,
-                    strat->tailRing, m1, m2, strat->R);
+                    strat->tailRing, m1, m2, &strat->R);
       if (!strat->use_buckets)
         strat->P.SetLength(strat->length_pLength);
       strat->P.PrepareRed(strat->use_buckets);
@@ -2156,10 +2156,9 @@ poly kNF1 (ideal F,ideal Q,poly q, kStrategy strat, int lazyReduce)
   strat->enterS = enterSMoraNF;
   /*- set T -*/
   strat->tl = -1;
-  strat->tmax = setmaxT;
-  strat->T = initT();
-  strat->R = initR();
-  strat->sevT = initsevT();
+  initT(strat->T);
+  initR(strat->R);
+  initsevT(strat->sevT);
   /*- set S -*/
   strat->sl = -1;
   /*- init local data struct.-------------------------- -*/
@@ -2221,13 +2220,13 @@ poly kNF1 (ideal F,ideal Q,poly q, kStrategy strat, int lazyReduce)
   }
   /*- release temp data------------------------------- -*/
   cleanT(strat);
-  omFreeSize((ADDRESS)strat->T,strat->tmax*sizeof(TObject));
+  strat->T.free_all();
   omFreeSize((ADDRESS)strat->ecartS,IDELEMS(strat->Shdl)*sizeof(int));
   omFreeSize((ADDRESS)strat->sevS,IDELEMS(strat->Shdl)*sizeof(unsigned long));
   omFreeSize((ADDRESS)strat->NotUsedAxis,((currRing->N)+1)*sizeof(BOOLEAN));
-  omFree(strat->sevT);
+  strat->sevT.free_all();
   omFree(strat->S_2_R);
-  omFree(strat->R);
+  strat->R.free_all();
 
   omfree((ADDRESS)strat->fromQ);
   strat->fromQ=NULL;
@@ -2294,10 +2293,9 @@ ideal kNF1 (ideal F,ideal Q,ideal q, kStrategy strat, int lazyReduce)
   strat->enterS = enterSMoraNF;
   /*- set T -*/
   strat->tl = -1;
-  strat->tmax = setmaxT;
-  strat->T = initT();
-  strat->R = initR();
-  strat->sevT = initsevT();
+  initT(strat->T);
+  initR(strat->R);
+  initsevT(strat->sevT);
   /*- set S -*/
   strat->sl = -1;
   /*- init local data struct.-------------------------- -*/
@@ -2368,13 +2366,13 @@ ideal kNF1 (ideal F,ideal Q,ideal q, kStrategy strat, int lazyReduce)
     //  res->m[i]=NULL;
   }
   /*- release temp data------------------------------- -*/
-  omFreeSize((ADDRESS)strat->T,strat->tmax*sizeof(TObject));
+  strat->T.free_all();
   omFreeSize((ADDRESS)strat->ecartS,IDELEMS(strat->Shdl)*sizeof(int));
   omFreeSize((ADDRESS)strat->sevS,IDELEMS(strat->Shdl)*sizeof(unsigned long));
   omFreeSize((ADDRESS)strat->NotUsedAxis,((currRing->N)+1)*sizeof(BOOLEAN));
-  omFree(strat->sevT);
+  strat->sevT.free_all();
   omFree(strat->S_2_R);
-  omFree(strat->R);
+  strat->R.free_all();
   omfree((ADDRESS)strat->fromQ);
   strat->fromQ=NULL;
   if (strat->kNoether!=NULL) pLmFree(&strat->kNoether);
@@ -3483,10 +3481,9 @@ ideal kInterRedOld (ideal F,const ideal Q)
   strat->initEcart   = initEcartNormal;
   strat->sl   = -1;
   strat->tl          = -1;
-  strat->tmax        = setmaxT;
-  strat->T           = initT();
-  strat->R           = initR();
-  strat->sevT        = initsevT();
+  initT(strat->T);
+  initR(strat->R);
+  initsevT(strat->sevT);
   if (rHasLocalOrMixedOrdering(currRing))   strat->honey = TRUE;
   initS(tempF, tempQ, strat);
   if (TEST_OPT_REDSB)
@@ -3497,13 +3494,13 @@ ideal kInterRedOld (ideal F,const ideal Q)
   //else if (TEST_OPT_PROT) PrintLn();
   cleanT(strat);
   if (strat->kNoether!=NULL) pLmFree(&strat->kNoether);
-  omFreeSize((ADDRESS)strat->T,strat->tmax*sizeof(TObject));
+  strat->T.free_all();
   omFreeSize((ADDRESS)strat->ecartS,IDELEMS(strat->Shdl)*sizeof(int));
   omFreeSize((ADDRESS)strat->sevS,IDELEMS(strat->Shdl)*sizeof(unsigned long));
   omFreeSize((ADDRESS)strat->NotUsedAxis,((currRing->N)+1)*sizeof(BOOLEAN));
-  omfree(strat->sevT);
+  strat->sevT.free_all();
   omfree(strat->S_2_R);
-  omfree(strat->R);
+  strat->R.free_all();
 
   if (strat->fromQ)
   {
@@ -3691,10 +3688,11 @@ ideal kInterRedBba (ideal F, ideal Q, int &need_retry)
                 strat->T[jj].p=NULL;
                 if (jj<strat->tl)
                 {
-                  memmove(&(strat->T[jj]),&(strat->T[jj+1]),
-                          (strat->tl-jj)*sizeof(strat->T[jj]));
-                  memmove(&(strat->sevT[jj]),&(strat->sevT[jj+1]),
-                          (strat->tl-jj)*sizeof(strat->sevT[jj]));
+                  for (int kk=jj; kk<strat->tl; kk++)
+                  {
+                    strat->T[kk] = strat->T[kk+1];
+                    strat->sevT[kk] = strat->sevT[kk+1];
+                  }
                 }
                 strat->tl--;
                 break;

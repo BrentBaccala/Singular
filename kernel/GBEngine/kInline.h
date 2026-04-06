@@ -81,25 +81,24 @@ KINLINE poly skStrategy::kNoetherTail()
  *
  ***************************************************************/
 
-KINLINE TSet initT ()
+KINLINE void initT (BlockArray<TObject> &T)
 {
-  TSet T = (TSet)omAlloc0(setmaxT*sizeof(TObject));
+  T.ensure_capacity(setmaxT);
   for (int i=setmaxT-1; i>=0; i--)
   {
     T[i].tailRing = currRing;
     T[i].i_r = -1;
   }
-  return T;
 }
 
-KINLINE TObject** initR()
+KINLINE void initR (BlockArray<TObject*> &R)
 {
-  return (TObject**) omAlloc0(setmaxT*sizeof(TObject*));
+  R.ensure_capacity(setmaxT);
 }
 
-KINLINE unsigned long* initsevT()
+KINLINE void initsevT (BlockArray<unsigned long> &sevT)
 {
-  return (unsigned long*) omAlloc0(setmaxT*sizeof(unsigned long));
+  sevT.ensure_capacity(setmaxT);
 }
 
 // initialization

@@ -62,7 +62,9 @@ VAR long sba_interreduction_operations;
 
 #include "kernel/GBEngine/kutil.h"
 #include "kernel/GBEngine/kthread.h"
-#if defined(__x86_64__) && defined(__GNUC__)
+// SIMD sev scan disabled: BlockArray elements are not contiguous across blocks.
+// Re-enable when SIMD scan is adapted for block-allocated arrays.
+#if 0 && defined(__x86_64__) && defined(__GNUC__)
 #define HAVE_SIMD_SEV_SCAN 1
 #include <immintrin.h>
 
@@ -197,8 +199,8 @@ int kFindSameLMInT_Z(const kStrategy strat, const LObject* L, const int start)
   int j = start;
   int o = -1;
 
-  const TSet T=strat->T;
-  const unsigned long* sevT=strat->sevT;
+  const BlockArray<TObject>& T=strat->T;
+  const BlockArray<unsigned long>& sevT=strat->sevT;
   number gcd, ogcd;
   if (L->p!=NULL)
   {
@@ -323,8 +325,8 @@ int kFindDivisibleByInT_Z(const kStrategy strat, const LObject* L, const int sta
   int j = start;
   int o = -1;
 
-  const TSet T=strat->T;
-  const unsigned long* sevT=strat->sevT;
+  const BlockArray<TObject>& T=strat->T;
+  const BlockArray<unsigned long>& sevT=strat->sevT;
   number rest, orest, mult;
   if (L->p!=NULL)
   {
@@ -430,8 +432,8 @@ int kFindDivisibleByInT(const kStrategy strat, const LObject* L, const int start
   unsigned long not_sev = ~L->sev;
   int j = start;
 
-  const TSet T=strat->T;
-  const unsigned long* sevT=strat->sevT;
+  const BlockArray<TObject>& T=strat->T;
+  const BlockArray<unsigned long>& sevT=strat->sevT;
   const ring r=currRing;
   const BOOLEAN is_Ring=rField_is_Ring(r);
   if (L->p!=NULL)
@@ -2917,7 +2919,7 @@ ideal bba (ideal F, ideal Q,intvec *w,bigintmat *hilb,kStrategy strat)
       }
       // create the real one
       ksCreateSpoly(&(strat->P), NULL, strat->use_buckets,
-                    strat->tailRing, m1, m2, strat->R);
+                    strat->tailRing, m1, m2, &strat->R);
     }
     else if (strat->P.p1 == NULL)
     {
@@ -3475,7 +3477,7 @@ ideal sba (ideal F0, ideal Q,intvec *w,bigintmat *hilb,kStrategy strat)
         }
         // create the real one
         ksCreateSpoly(&(strat->P), NULL, strat->use_buckets,
-            strat->tailRing, m1, m2, strat->R);
+            strat->tailRing, m1, m2, &strat->R);
 
       }
       else if (strat->P.p1 == NULL)
@@ -4223,9 +4225,9 @@ poly kNF2 (ideal F,ideal Q,poly q,kStrategy strat, int lazyReduce)
   /*- release temp data------------------------------- -*/
   omFree(strat->sevS);
   omFree(strat->ecartS);
-  assume(strat->T==NULL);//omfree(strat->T);
-  assume(strat->sevT==NULL);//omfree(strat->sevT);
-  assume(strat->R==NULL);//omfree(strat->R);
+  // T already freed (BlockArray)
+  // sevT already freed (BlockArray)
+  // R already freed (BlockArray)
   omfree(strat->S_2_R);
   omfree(strat->fromQ);
   strat->fromQ=NULL;
@@ -4296,9 +4298,9 @@ poly kNF2Bound (ideal F,ideal Q,poly q,int bound,kStrategy strat, int lazyReduce
   /*- release temp data------------------------------- -*/
   omFree(strat->sevS);
   omFree(strat->ecartS);
-  assume(strat->T==NULL);//omfree(strat->T);
-  assume(strat->sevT==NULL);//omfree(strat->sevT);
-  assume(strat->R==NULL);//omfree(strat->R);
+  // T already freed (BlockArray)
+  // sevT already freed (BlockArray)
+  // R already freed (BlockArray)
   omfree(strat->S_2_R);
   omfree(strat->fromQ);
   strat->fromQ=NULL;
@@ -4380,9 +4382,9 @@ ideal kNF2 (ideal F,ideal Q,ideal q,kStrategy strat, int lazyReduce)
   /*- release temp data------------------------------- -*/
   omFree(strat->sevS);
   omFree(strat->ecartS);
-  assume(strat->T==NULL);//omfree(strat->T);
-  assume(strat->sevT==NULL);//omfree(strat->sevT);
-  assume(strat->R==NULL);//omfree(strat->R);
+  // T already freed (BlockArray)
+  // sevT already freed (BlockArray)
+  // R already freed (BlockArray)
   omfree(strat->S_2_R);
   omfree(strat->fromQ);
   strat->fromQ=NULL;
@@ -4459,9 +4461,9 @@ ideal kNF2Bound (ideal F,ideal Q,ideal q,int bound,kStrategy strat, int lazyRedu
   /*- release temp data------------------------------- -*/
   omFree(strat->sevS);
   omFree(strat->ecartS);
-  assume(strat->T==NULL);//omfree(strat->T);
-  assume(strat->sevT==NULL);//omfree(strat->sevT);
-  assume(strat->R==NULL);//omfree(strat->R);
+  // T already freed (BlockArray)
+  // sevT already freed (BlockArray)
+  // R already freed (BlockArray)
   omfree(strat->S_2_R);
   omfree(strat->fromQ);
   strat->fromQ=NULL;
@@ -4584,7 +4586,7 @@ void f5c (kStrategy strat, int& olddeg, int& minimcnt, int& hilbeledeg,
       }
       // create the real one
       ksCreateSpoly(&(strat->P), NULL, strat->use_buckets,
-          strat->tailRing, m1, m2, strat->R);
+          strat->tailRing, m1, m2, &strat->R);
     }
     else if (strat->P.p1 == NULL)
     {
@@ -4892,7 +4894,7 @@ ideal bbaShift(ideal F, ideal Q,intvec *w,bigintmat *hilb,kStrategy strat)
       }
       // create the real one
       ksCreateSpoly(&(strat->P), NULL, strat->use_buckets,
-                    strat->tailRing, m1, m2, strat->R);
+                    strat->tailRing, m1, m2, &strat->R);
     }
     else if (strat->P.p1 == NULL)
     {
