@@ -71,6 +71,9 @@ struct SweepContext
   // Barrier for phase synchronization
   pthread_barrier_t barrier;
 
+  // Startup barrier: ensures all workers are running before main loop
+  pthread_barrier_t startup_barrier;
+
   // Thread handles and IDs
   pthread_t *threads;
   int *thread_ids;          // thread_id for each worker

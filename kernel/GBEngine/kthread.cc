@@ -108,6 +108,7 @@ SweepContext *sweep_context_init(kStrategy strat, int nthreads)
   int barrier_count = ctx->num_workers + 1;
   if (barrier_count < 1) barrier_count = 1;
   pthread_barrier_init(&ctx->barrier, NULL, barrier_count);
+  pthread_barrier_init(&ctx->startup_barrier, NULL, barrier_count);
 
   int alloc_n = ctx->num_workers > 0 ? ctx->num_workers : 1;
   ctx->threads = (pthread_t *)calloc(alloc_n, sizeof(pthread_t));
@@ -127,6 +128,7 @@ void sweep_context_destroy(SweepContext *ctx)
 {
   if (ctx == NULL) return;
   pthread_barrier_destroy(&ctx->barrier);
+  pthread_barrier_destroy(&ctx->startup_barrier);
   pthread_mutex_destroy(&ctx->L_lock);
   free(ctx->active);
   free(ctx->sweep_results);
@@ -364,22 +366,22 @@ static void process_survivor(SweepContext *ctx, ActivePoly *ap)
 
 static void batch_reduce(SweepContext *ctx, int thread_id)
 {
-  // Only thread 0 (main) does work for now.
-  // Workers participate in barrier protocol only.
-  if (thread_id != 0) return;
-
-  ActivePoly *ap = &ctx->active[0];
+  ActivePoly *ap = &ctx->active[thread_id];
 
   while (true)
   {
-    // Grab a polynomial from L
+    // Grab a polynomial from L (under lock)
+    pthread_mutex_lock(&ctx->L_lock);
     BOOLEAN got = pop_and_prepare(ctx, ap);
+    pthread_mutex_unlock(&ctx->L_lock);
+
     if (!got) break;
 
     // Reduce it fully
     reduce_fully(ctx, ap);
     ctx->stat_rounds.fetch_add(1, std::memory_order_relaxed);
 
+    // If survivor, stop — can't overwrite our slot
     if (ap->is_survivor) break;
   }
 }
@@ -398,9 +400,10 @@ static std::atomic<bool> g_done(false);
 
 /**
  * Worker thread. Each batch:
- *   1. batch_reduce: grab polys from L, reduce them
- *   2. B1: barrier (all done reducing)
- *   3. B2: barrier (main processed survivors, ready for next batch)
+ *   1. B0: barrier (wait for main to signal start of batch)
+ *   2. batch_reduce: grab polys from L, reduce them
+ *   3. B1: barrier (all done reducing, main processes survivors)
+ * Workers check g_done after B0 and exit if true.
  */
 static void *worker_thread(void *arg)
 {
@@ -413,15 +416,19 @@ static void *worker_thread(void *arg)
   si_opt_1 = ctx->saved_si_opt_1;
   si_opt_2 = ctx->saved_si_opt_2;
 
+  // Wait for all threads to be created and main to be ready
+  pthread_barrier_wait(&ctx->startup_barrier);
+
   while (true)
   {
+    // Wait for main to signal start of batch (or done)
+    pthread_barrier_wait(&ctx->barrier);  // B0: start of batch
+    if (g_done.load(std::memory_order_acquire)) break;
+
     batch_reduce(ctx, thread_id);
     pthread_barrier_wait(&ctx->barrier);  // B1: all done reducing
 
     // Main processes survivors between B1 and B2
-    pthread_barrier_wait(&ctx->barrier);  // B2: ready for next batch
-
-    if (g_done.load(std::memory_order_acquire)) break;
   }
 
   return NULL;
@@ -464,21 +471,50 @@ void bba_parallel_loop(SweepContext *ctx)
     pthread_create(&ctx->threads[t], NULL, worker_thread, wa);
   }
 
+  // Pre-compute pLength for all T entries to avoid lazy init during parallel phase
+  // (must be done BEFORE startup barrier so workers don't race ahead)
+  for (int j = 0; j <= strat->tl; j++)
+  {
+    if (strat->T[j].pLength <= 0)
+      strat->T[j].pLength = pLength(strat->T[j].p ? strat->T[j].p : strat->T[j].t_p);
+  }
+
+  // Wait for all workers to start before entering main loop
+  if (ctx->num_workers > 0)
+    pthread_barrier_wait(&ctx->startup_barrier);
+
   // Main loop: batch reduce + process survivors
+  //
+  // Barrier protocol (3-phase per batch):
+  //   B0: main signals start of batch (workers waiting here)
+  //   batch_reduce: all threads reduce in parallel
+  //   B1: all done reducing
+  //   main processes survivors (workers idle)
+  //   back to B0 for next batch
+  //
+  // Workers: B0 -> batch_reduce -> B1 -> (loop back to B0)
+  // Main:    B0 -> batch_reduce -> B1 -> process_survivors -> (loop)
+  //
   while (!strat->L.empty())
   {
     if (siCntrlc)
     {
       while (!strat->L.empty()) strat->L.pop_and_erase();
       strat->noClearS = TRUE;
-      // Signal done and hit barriers so workers can exit
-      g_done.store(true, std::memory_order_release);
-      pthread_barrier_wait(&ctx->barrier);  // B1
-      pthread_barrier_wait(&ctx->barrier);  // B2
-      break;
+      // Workers are waiting at B0; signal done and release them
+      if (ctx->num_workers > 0)
+      {
+        g_done.store(true, std::memory_order_release);
+        pthread_barrier_wait(&ctx->barrier);  // B0: workers check g_done and exit
+      }
+      goto parallel_cleanup;
     }
 
-    // Reduce: main thread participates
+    // B0: signal start of batch (workers are waiting here)
+    if (ctx->num_workers > 0)
+      pthread_barrier_wait(&ctx->barrier);  // B0
+
+    // Reduce: all threads participate in parallel
     batch_reduce(ctx, 0);
     pthread_barrier_wait(&ctx->barrier);  // B1: all done reducing
 
@@ -493,34 +529,32 @@ void bba_parallel_loop(SweepContext *ctx)
       }
     }
 
-    // Check if done
-    if (strat->L.empty())
+    // Re-compute pLength for any new T entries added by process_survivor
+    if (had_survivor)
     {
-      g_done.store(true, std::memory_order_release);
-      pthread_barrier_wait(&ctx->barrier);  // B2
-      break;
+      for (int j = 0; j <= strat->tl; j++)
+      {
+        if (strat->T[j].pLength <= 0)
+          strat->T[j].pLength = pLength(strat->T[j].p ? strat->T[j].p : strat->T[j].t_p);
+      }
     }
 
     if (strat->overflow || errorreported)
     {
-      g_done.store(true, std::memory_order_release);
-      pthread_barrier_wait(&ctx->barrier);  // B2
+      // Drain L so workers find nothing in next batch
+      while (!strat->L.empty()) strat->L.pop_and_erase();
       break;
     }
-
-    pthread_barrier_wait(&ctx->barrier);  // B2: ready for next batch
   }
 
-  // If we exited the loop without signaling done, do it now.
-  // Must hit both B1 and B2 to match worker protocol.
-  if (!g_done.load(std::memory_order_acquire))
+  // Signal workers to exit: hit B0 with g_done=true so they break
+  if (ctx->num_workers > 0)
   {
     g_done.store(true, std::memory_order_release);
-    batch_reduce(ctx, 0);  // no-op (L empty)
-    pthread_barrier_wait(&ctx->barrier);  // B1
-    pthread_barrier_wait(&ctx->barrier);  // B2 — workers check g_done after B2
+    pthread_barrier_wait(&ctx->barrier);  // B0: workers check g_done and exit
   }
 
+parallel_cleanup:
   for (int t = 0; t < ctx->num_workers; t++)
     pthread_join(ctx->threads[t], NULL);
 
