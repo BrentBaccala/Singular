@@ -1,27 +1,32 @@
 /**
  * @file kthread.cc
- * @brief Parallel Groebner basis reduction — poly-per-thread design.
+ * @brief Parallel Groebner basis reduction — cooperative T-sweep design.
  *
- * Each thread independently reduces a different polynomial from L,
- * sharing T[] and sevT[] as read-only. When a polynomial survives
- * (no divisor found), it enters a survivor queue processed by the
- * main thread (enterT/enterpairs/enterS). When a polynomial reduces
- * to zero, the thread immediately grabs the next polynomial from L.
+ * All threads cooperatively sweep T[0..tl] for ALL active polynomials.
+ * Each T entry is loaded into cache once and checked against N active
+ * polynomials, instead of N threads each loading every T entry.
  *
- * Synchronization:
- *   - L pops are under L_lock (cheap, since L.pop() is O(1))
- *   - Survivor processing is serialized on main thread
- *   - T/sevT/S are read-only during parallel reduction; modified
- *     only during survivor processing (serialized)
- *   - Barrier between batch reduce and batch survivor processing
+ * Round structure:
+ *   Fill:   Main thread fills active slots from L
+ *   B0:     Barrier — start sweep
+ *   Sweep:  All threads grab T indices via atomic sweep_cursor,
+ *           check each T[j] against ALL active slots
+ *   B1:     Barrier — sweep done
+ *   Merge:  Main merges per-thread SweepResults into per-slot best
+ *   Reduce: Main applies ksReducePoly for each slot with a reducer
+ *   Update: Zero → mark empty; no reducer → survivor; still reducing → loop
+ *   Process survivors, refill, next round
  *
  * Thread safety relies on:
  *   - posInT0 (append at end, no memmove)
- *   - sevT/R/T written BEFORE tl++ (compiler barrier in enterT)
+ *   - T is read-only during sweep+reduce; modified only during
+ *     process_survivor (after all slots are done)
  *   - --disable-omalloc build (thread-safe malloc/free)
  *   - currRing and si_opt_1/si_opt_2 are __thread
  *   - OPT_REDTHROUGH forced (no lazy pushback to L from reduction)
  *   - tailRing pre-expanded before parallel phase
+ *   - Per-thread SweepResults: no contention during sweep
+ *   - ksCreateSpoly race fix (task 267) preserved
  */
 
 #include "kernel/GBEngine/kthread.h"
@@ -231,8 +236,8 @@ static BOOLEAN pop_and_prepare(SweepContext *ctx, ActivePoly *ap)
 }
 
 /* ------------------------------------------------------------------ */
-/*  Find best reducer for a polynomial by scanning T (sequential).     */
-/*  This is equivalent to kFindDivisibleByInT_ecart.                   */
+/*  Find best reducer for a single polynomial by scanning T (sequential). */
+/*  Used for subsequent reduction rounds to avoid barrier overhead.     */
 /* ------------------------------------------------------------------ */
 
 static int find_reducer(SweepContext *ctx, ActivePoly *ap)
@@ -243,8 +248,8 @@ static int find_reducer(SweepContext *ctx, ActivePoly *ap)
   poly p_lm = ap->P.p;
   int p_ecart = ap->P.ecart;
 
-  int best_reducer = -1;    // any divisor
-  int best_good = -1;       // good ecart, shortest pLength
+  int best_reducer = -1;
+  int best_good = -1;
   int best_pLength = 0;
 
   for (int j = 0; j <= tl; j++)
@@ -260,15 +265,13 @@ static int find_reducer(SweepContext *ctx, ActivePoly *ap)
     if (ecart_j <= p_ecart)
     {
       int pLen = strat->T[j].pLength;
-      if (pLen <= 0)
-        pLen = 3;  // avoid thread-unsafe T[j].GetpLength()
-
+      if (pLen <= 0) pLen = 3;
       if (best_good < 0 || pLen < best_pLength)
       {
         best_good = j;
         best_pLength = pLen;
       }
-      if (best_pLength <= 2) break;  // can't do better
+      if (best_pLength <= 2) break;
     }
   }
 
@@ -276,12 +279,11 @@ static int find_reducer(SweepContext *ctx, ActivePoly *ap)
 }
 
 /* ------------------------------------------------------------------ */
-/*  Reduce one polynomial fully (like redHoney). Returns:              */
-/*    0 = reduced to zero                                              */
-/*    1 = survived (no reducer found)                                  */
+/*  Reduce one slot fully using sequential find_reducer.               */
+/*  Returns: 0 = reduced to zero, 1 = survivor                        */
 /* ------------------------------------------------------------------ */
 
-static int reduce_fully(SweepContext *ctx, ActivePoly *ap)
+static int reduce_slot_fully(SweepContext *ctx, ActivePoly *ap)
 {
   kStrategy strat = ctx->strat;
 
@@ -291,7 +293,6 @@ static int reduce_fully(SweepContext *ctx, ActivePoly *ap)
 
     if (best < 0)
     {
-      // No reducer found — survivor
       ap->is_survivor = true;
       return 1;
     }
@@ -312,7 +313,6 @@ static int reduce_fully(SweepContext *ctx, ActivePoly *ap)
       return 0;
     }
 
-    // IDLIFT check (redHoney lines 2384-2402)
     if (UNLIKELY(TEST_OPT_IDLIFT))
     {
       poly hp = ap->P.p ? ap->P.p : ap->P.t_p;
@@ -326,7 +326,6 @@ static int reduce_fully(SweepContext *ctx, ActivePoly *ap)
     }
     else if (UNLIKELY((strat->syzComp > 0) && (!TEST_OPT_REDTAIL_SYZ)))
     {
-      // syzComp check (redHoney lines 2403-2420)
       poly hp = ap->P.p ? ap->P.p : ap->P.t_p;
       if (hp && p_GetComp(hp, currRing) > strat->syzComp)
       {
@@ -335,7 +334,6 @@ static int reduce_fully(SweepContext *ctx, ActivePoly *ap)
       }
     }
 
-    // Update ecart (redHoney lines 2421-2436)
     ap->P.SetShortExpVector();
     int h_d = ap->P.SetpFDeg();
     if (ei <= ap->P.ecart)
@@ -345,7 +343,6 @@ static int reduce_fully(SweepContext *ctx, ActivePoly *ap)
     ap->pass++;
     ap->d = h_d + ap->P.ecart;
 
-    // Overflow check (redHoney lines 2467-2480)
     if (UNLIKELY(ap->d > ap->reddeg))
     {
       if (UNLIKELY(ap->d >= (long)strat->tailRing->bitmask))
@@ -354,23 +351,259 @@ static int reduce_fully(SweepContext *ctx, ActivePoly *ap)
         {
           strat->overflow = TRUE;
           ap->P.GetP();
-          // Push back to L for the main thread to handle
-          pthread_mutex_lock(&ctx->L_lock);
-          strat->L.push(ap->P);
-          pthread_mutex_unlock(&ctx->L_lock);
           ap->P.Clear();
           ap->occupied = false;
-          return 0;  // treat as consumed (main will see overflow flag)
+          return 0;
         }
       }
       ap->reddeg = ap->d;
     }
 
-    // Update for next reducer search
     ap->P.SetLmCurrRing();
     ap->P.SetShortExpVector();
     ap->not_sev = ~ap->P.sev;
   }
+}
+
+/* ------------------------------------------------------------------ */
+/*  Sweep phase: all threads cooperatively scan T for active polys.    */
+/*  Each thread grabs T indices via atomic cursor and checks each T[j] */
+/*  against ALL active slots, recording per-thread best reducers.      */
+/* ------------------------------------------------------------------ */
+
+static void sweep_phase(SweepContext *ctx, int thread_id)
+{
+  kStrategy strat = ctx->strat;
+  int tl = strat->tl;
+  int max_active = ctx->max_active;
+
+  while (true)
+  {
+    int j = ctx->sweep_cursor.fetch_add(1, std::memory_order_relaxed);
+    if (j > tl) break;
+
+    unsigned long sev_j = strat->sevT[j];
+
+    for (int s = 0; s < max_active; s++)
+    {
+      if (!ctx->active[s].occupied) continue;
+      if (sev_j & ctx->active[s].not_sev) continue;
+      if (!p_LmDivisibleBy(strat->T[j].p, ctx->active[s].P.p, currRing))
+        continue;
+
+      // Found a divisor for slot s
+      SweepResult &sr = sweep_result(ctx, thread_id, s);
+      if (sr.best_reducer < 0)
+        sr.best_reducer = j;
+
+      int ecart_j = strat->T[j].ecart;
+      if (ecart_j <= ctx->active[s].P.ecart)
+      {
+        int pLen = strat->T[j].pLength;
+        if (pLen <= 0) pLen = 3;
+        if (sr.best_good < 0 || pLen < sr.best_pLength)
+        {
+          sr.best_good = j;
+          sr.best_pLength = pLen;
+        }
+      }
+    }
+  }
+}
+
+/* ------------------------------------------------------------------ */
+/*  Merge per-thread sweep results into per-slot best reducer.         */
+/*  Called by main thread after sweep barrier.                          */
+/* ------------------------------------------------------------------ */
+
+static void merge_sweep_results(SweepContext *ctx)
+{
+  int total_threads = ctx->num_workers + 1;
+
+  for (int s = 0; s < ctx->max_active; s++)
+  {
+    if (!ctx->active[s].occupied) continue;
+
+    int best_reducer = -1, best_good = -1, best_pLength = 0;
+
+    for (int t = 0; t < total_threads; t++)
+    {
+      SweepResult &sr = sweep_result(ctx, t, s);
+      if (sr.best_reducer >= 0 && best_reducer < 0)
+        best_reducer = sr.best_reducer;
+      if (sr.best_good >= 0)
+      {
+        if (best_good < 0 || sr.best_pLength < best_pLength)
+        {
+          best_good = sr.best_good;
+          best_pLength = sr.best_pLength;
+        }
+      }
+    }
+
+    ctx->active[s].best_reducer = best_reducer;
+    ctx->active[s].best_good = best_good;
+    ctx->active[s].best_pLength = best_pLength;
+  }
+}
+
+/* ------------------------------------------------------------------ */
+/*  Reset sweep results for all threads and all slots.                 */
+/* ------------------------------------------------------------------ */
+
+static void reset_sweep_results(SweepContext *ctx)
+{
+  int total_threads = ctx->num_workers + 1;
+  int total = total_threads * ctx->max_active;
+  for (int i = 0; i < total; i++)
+  {
+    ctx->sweep_results[i].best_reducer = -1;
+    ctx->sweep_results[i].best_good = -1;
+    ctx->sweep_results[i].best_pLength = 0;
+  }
+}
+
+/* ------------------------------------------------------------------ */
+/*  Reduce one slot: apply the sweep result, then reduce fully.        */
+/*  Called by worker threads in parallel (one slot per thread).         */
+/* ------------------------------------------------------------------ */
+
+static void reduce_slot_from_sweep(SweepContext *ctx, int slot)
+{
+  kStrategy strat = ctx->strat;
+  ActivePoly *ap = &ctx->active[slot];
+
+  int best = (ap->best_good >= 0) ? ap->best_good : ap->best_reducer;
+
+  if (best < 0)
+  {
+    // No reducer found by cooperative sweep — survivor
+    ap->is_survivor = true;
+    return;
+  }
+
+  // Apply first reduction from cooperative sweep result
+  int ei = strat->T[best].ecart;
+
+  ksReducePoly(&ap->P, strat->T.addr(best),
+               strat->kNoetherTail(), NULL, NULL, strat);
+
+  ctx->stat_reductions.fetch_add(1, std::memory_order_relaxed);
+
+  if (ap->P.IsNull())
+  {
+    kDeleteLcm(&ap->P);
+    ap->P.Clear();
+    ap->occupied = false;
+    ctx->stat_zeros.fetch_add(1, std::memory_order_relaxed);
+    return;
+  }
+
+  // IDLIFT check
+  if (UNLIKELY(TEST_OPT_IDLIFT))
+  {
+    poly hp = ap->P.p ? ap->P.p : ap->P.t_p;
+    if (hp && p_GetComp(hp, currRing) > strat->syzComp)
+    {
+      ap->P.Delete();
+      ap->occupied = false;
+      ctx->stat_zeros.fetch_add(1, std::memory_order_relaxed);
+      return;
+    }
+  }
+  else if (UNLIKELY((strat->syzComp > 0) && (!TEST_OPT_REDTAIL_SYZ)))
+  {
+    poly hp = ap->P.p ? ap->P.p : ap->P.t_p;
+    if (hp && p_GetComp(hp, currRing) > strat->syzComp)
+    {
+      ap->is_survivor = true;
+      return;
+    }
+  }
+
+  // Update ecart after first reduction
+  ap->P.SetShortExpVector();
+  int h_d = ap->P.SetpFDeg();
+  if (ei <= ap->P.ecart)
+    ap->P.ecart = ap->d - h_d;
+  else
+    ap->P.ecart = ap->d - h_d + ei - ap->P.ecart;
+  ap->pass++;
+  ap->d = h_d + ap->P.ecart;
+
+  if (UNLIKELY(ap->d > ap->reddeg))
+  {
+    if (UNLIKELY(ap->d >= (long)strat->tailRing->bitmask))
+    {
+      if (ap->P.pTotalDeg() + ap->P.ecart >= (long)strat->tailRing->bitmask)
+      {
+        strat->overflow = TRUE;
+        ap->P.GetP();
+        ap->P.Clear();
+        ap->occupied = false;
+        return;
+      }
+    }
+    ap->reddeg = ap->d;
+  }
+
+  ap->P.SetLmCurrRing();
+  ap->P.SetShortExpVector();
+  ap->not_sev = ~ap->P.sev;
+
+  // Continue reducing this slot fully using sequential find_reducer
+  reduce_slot_fully(ctx, ap);
+}
+
+/* ------------------------------------------------------------------ */
+/*  Parallel reduce phase: threads grab slots via atomic counter.      */
+/* ------------------------------------------------------------------ */
+
+static void reduce_phase_parallel(SweepContext *ctx)
+{
+  while (true)
+  {
+    int s = ctx->slot_counter.fetch_add(1, std::memory_order_relaxed);
+    if (s >= ctx->max_active) break;
+
+    ActivePoly *ap = &ctx->active[s];
+    if (!ap->occupied) continue;
+    if (ap->is_survivor) continue;
+
+    reduce_slot_from_sweep(ctx, s);
+  }
+}
+
+/* ------------------------------------------------------------------ */
+/*  Fill empty active slots from L. Returns number of occupied slots.  */
+/* ------------------------------------------------------------------ */
+
+static int fill_active_slots(SweepContext *ctx)
+{
+  int occupied = 0;
+
+  for (int s = 0; s < ctx->max_active; s++)
+  {
+    if (ctx->active[s].occupied)
+    {
+      if (!ctx->active[s].is_survivor)
+        occupied++;
+      continue;
+    }
+
+    // Try to fill this empty slot from L
+    pthread_mutex_lock(&ctx->L_lock);
+    BOOLEAN got = pop_and_prepare(ctx, &ctx->active[s]);
+    pthread_mutex_unlock(&ctx->L_lock);
+
+    if (got)
+    {
+      occupied++;
+      ctx->stat_rounds.fetch_add(1, std::memory_order_relaxed);
+    }
+  }
+
+  return occupied;
 }
 
 /* ------------------------------------------------------------------ */
@@ -436,31 +669,7 @@ static void process_survivor(SweepContext *ctx, ActivePoly *ap)
   ap->is_survivor = false;
 }
 
-/* ------------------------------------------------------------------ */
-/*  Batch reduce function: each thread grabs and reduces polys from L  */
-/* ------------------------------------------------------------------ */
-
-static void batch_reduce(SweepContext *ctx, int thread_id)
-{
-  ActivePoly *ap = &ctx->active[thread_id];
-
-  while (true)
-  {
-    // Grab a polynomial from L (under lock)
-    pthread_mutex_lock(&ctx->L_lock);
-    BOOLEAN got = pop_and_prepare(ctx, ap);
-    pthread_mutex_unlock(&ctx->L_lock);
-
-    if (!got) break;
-
-    // Reduce it fully
-    reduce_fully(ctx, ap);
-    ctx->stat_rounds.fetch_add(1, std::memory_order_relaxed);
-
-    // If survivor, stop — can't overwrite our slot
-    if (ap->is_survivor) break;
-  }
-}
+/* (batch_reduce removed — replaced by cooperative sweep_phase) */
 
 /* ------------------------------------------------------------------ */
 /*  Worker thread function                                             */
@@ -475,13 +684,20 @@ struct WorkerArg
 /**
  * Worker thread. Each batch:
  *   1. B0: barrier_B0 (wait for main to signal start of batch)
- *   2. batch_reduce: grab polys from L, reduce them
- *   3. B1: barrier_B1 (all done reducing, main processes survivors)
+ *   2. sweep_phase: cooperatively scan T for all active polynomials
+ *   3. B1: barrier_B1 (sweep done, main merges results)
+ *   4. reduce_phase_parallel: grab slots and reduce them fully
+ *   5. B0 (next): barrier — reduction done, main processes survivors
  * Workers check ctx->done after B0 and exit if true.
  *
- * B0 and B1 use SEPARATE barrier objects to prevent reuse races
- * where a fast thread re-entering barrier_wait could be miscounted
- * as part of the previous synchronization cycle.
+ * The 3-barrier protocol per batch:
+ *   B0: start sweep
+ *   B1: sweep done (main merges, then all threads reduce)
+ *   next B0: reduction done (main processes survivors)
+ *
+ * Since B0 is reused for both "start sweep" and "reduction done",
+ * the cycle is: B0 → sweep → B1 → reduce → B0 → sweep → ...
+ * Workers see ctx->done after B0 to know when to exit.
  */
 static void *worker_thread(void *arg)
 {
@@ -503,7 +719,16 @@ static void *worker_thread(void *arg)
     pthread_barrier_wait(&ctx->barrier_B0);
     if (ctx->done.load(std::memory_order_acquire)) break;
 
-    batch_reduce(ctx, thread_id);
+    // Phase 1: cooperative sweep
+    sweep_phase(ctx, thread_id);
+    pthread_barrier_wait(&ctx->barrier_B1);
+
+    // Phase 2: parallel reduction (main merges first, then signals)
+    // Workers wait at B0 for main to finish merge, then reduce
+    pthread_barrier_wait(&ctx->barrier_B0);
+    if (ctx->done.load(std::memory_order_acquire)) break;
+
+    reduce_phase_parallel(ctx);
     pthread_barrier_wait(&ctx->barrier_B1);
 
     // Main processes survivors between B1 and next B0
@@ -561,40 +786,106 @@ void bba_parallel_loop(SweepContext *ctx)
   if (ctx->num_workers > 0)
     pthread_barrier_wait(&ctx->startup_barrier);
 
-  // Main loop: batch reduce + process survivors
+  // Main loop: cooperative sweep rounds
   //
-  // Barrier protocol (3-phase per batch):
-  //   B0: main signals start of batch (workers waiting here)
-  //   batch_reduce: all threads reduce in parallel
-  //   B1: all done reducing
-  //   main processes survivors (workers idle)
-  //   back to B0 for next batch
+  // Each round:
+  //   Fill:    main fills empty active slots from L
+  //   B0:      barrier — start sweep
+  //   Sweep:   all threads cooperatively scan T (atomic cursor)
+  //   B1:      barrier — sweep done
+  //   Merge:   main merges per-thread SweepResults
+  //   Reduce:  main applies ksReducePoly for slots with reducers
+  //   Process: survivors → enterT/enterpairs/enterS (serialized)
+  //   Loop if any slots still need reduction
   //
-  // Workers: B0 -> batch_reduce -> B1 -> (loop back to B0)
-  // Main:    B0 -> batch_reduce -> B1 -> process_survivors -> (loop)
-  //
-  while (!strat->L.empty())
+  while (true)
   {
     if (siCntrlc)
     {
       while (!strat->L.empty()) strat->L.pop_and_erase();
       strat->noClearS = TRUE;
-      // Workers are waiting at B0; signal done and release them
       if (ctx->num_workers > 0)
       {
+        // Workers are waiting at B0; signal done and release them
         ctx->done.store(true, std::memory_order_release);
         pthread_barrier_wait(&ctx->barrier_B0);
       }
       goto parallel_cleanup;
     }
 
-    // B0: signal start of batch (workers are waiting here)
+    // Fill phase: fill empty active slots from L
+    int occupied = fill_active_slots(ctx);
+
+    // If no occupied slots (all done or L empty), check for remaining work
+    if (occupied == 0)
+    {
+      // Process any remaining survivors
+      bool had_survivor = false;
+      for (int i = 0; i < ctx->max_active; i++)
+      {
+        if (ctx->active[i].occupied && ctx->active[i].is_survivor)
+        {
+          process_survivor(ctx, &ctx->active[i]);
+          had_survivor = true;
+        }
+      }
+
+      if (had_survivor)
+      {
+        // Re-compute pLength for new T entries
+        for (int j = 0; j <= strat->tl; j++)
+        {
+          if (strat->T[j].pLength <= 0)
+            strat->T[j].pLength = pLength(strat->T[j].p ? strat->T[j].p : strat->T[j].t_p);
+        }
+        // Try again — process_survivor may have added to L via enterpairs
+        continue;
+      }
+
+      // Nothing left to do
+      if (strat->L.empty())
+        break;
+      // L has new entries from enterpairs, loop back to fill
+      continue;
+    }
+
+    // Prepare for sweep round
+    reset_sweep_results(ctx);
+    ctx->sweep_cursor.store(0, std::memory_order_relaxed);
+
+    // B0: signal start of sweep (workers are waiting here)
     if (ctx->num_workers > 0)
       pthread_barrier_wait(&ctx->barrier_B0);
 
-    // Reduce: all threads participate in parallel
-    batch_reduce(ctx, 0);
+    // Phase 1: cooperative sweep — all threads scan T for active polys
+    sweep_phase(ctx, 0);
+
+    // B1: sweep done
     pthread_barrier_wait(&ctx->barrier_B1);
+
+    // Merge per-thread sweep results into per-slot best reducer
+    merge_sweep_results(ctx);
+
+    // Prepare slot counter for parallel reduction
+    ctx->slot_counter.store(0, std::memory_order_relaxed);
+
+    // B0: signal start of reduction phase (workers waiting)
+    if (ctx->num_workers > 0)
+      pthread_barrier_wait(&ctx->barrier_B0);
+
+    // Phase 2: parallel reduction — each thread grabs slots and reduces
+    reduce_phase_parallel(ctx);
+
+    // B1: reduction done
+    pthread_barrier_wait(&ctx->barrier_B1);
+
+    if (strat->overflow || errorreported)
+    {
+      while (!strat->L.empty()) strat->L.pop_and_erase();
+      for (int i = 0; i < ctx->max_active; i++)
+        ctx->active[i].occupied = false;
+      break;
+    }
 
     // Process all survivors (main thread only, serialized)
     bool had_survivor = false;
@@ -617,12 +908,8 @@ void bba_parallel_loop(SweepContext *ctx)
       }
     }
 
-    if (strat->overflow || errorreported)
-    {
-      // Drain L so workers find nothing in next batch
-      while (!strat->L.empty()) strat->L.pop_and_erase();
-      break;
-    }
+    // All slots are now done (zero or survivor or empty).
+    // Loop back to refill from L and do the next cooperative sweep.
   }
 
   // Signal workers to exit: hit B0 with ctx->done=true so they break
