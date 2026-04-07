@@ -107,7 +107,8 @@ SweepContext *sweep_context_init(kStrategy strat, int nthreads)
 
   int barrier_count = ctx->num_workers + 1;
   if (barrier_count < 1) barrier_count = 1;
-  pthread_barrier_init(&ctx->barrier, NULL, barrier_count);
+  pthread_barrier_init(&ctx->barrier_B0, NULL, barrier_count);
+  pthread_barrier_init(&ctx->barrier_B1, NULL, barrier_count);
   pthread_barrier_init(&ctx->startup_barrier, NULL, barrier_count);
 
   int alloc_n = ctx->num_workers > 0 ? ctx->num_workers : 1;
@@ -116,6 +117,7 @@ SweepContext *sweep_context_init(kStrategy strat, int nthreads)
 
   pthread_mutex_init(&ctx->L_lock, NULL);
 
+  ctx->done.store(false, std::memory_order_relaxed);
   ctx->stat_reductions.store(0, std::memory_order_relaxed);
   ctx->stat_zeros.store(0, std::memory_order_relaxed);
   ctx->stat_survivors.store(0, std::memory_order_relaxed);
@@ -127,7 +129,8 @@ SweepContext *sweep_context_init(kStrategy strat, int nthreads)
 void sweep_context_destroy(SweepContext *ctx)
 {
   if (ctx == NULL) return;
-  pthread_barrier_destroy(&ctx->barrier);
+  pthread_barrier_destroy(&ctx->barrier_B0);
+  pthread_barrier_destroy(&ctx->barrier_B1);
   pthread_barrier_destroy(&ctx->startup_barrier);
   pthread_mutex_destroy(&ctx->L_lock);
   free(ctx->active);
@@ -168,8 +171,37 @@ static BOOLEAN pop_and_prepare(SweepContext *ctx, ActivePoly *ap)
         assume(m1 == NULL && m2 == NULL);
         break;
       }
-      ksCreateSpoly(&(ap->P), NULL, strat->use_buckets,
-                    strat->tailRing, m1, m2, &strat->R);
+      // Thread safety: ksCreateSpoly temporarily modifies Pair->p1/p2
+      // via p_SetCompP when their components differ (module computations).
+      // Since p1/p2 point to shared T entry polynomials that other threads
+      // may be reading concurrently in ksReducePoly/pp_Mult_mm, we must
+      // make deep copies so that p_SetCompP modifies copies, not shared data.
+      bool need_copy = (currRing->pCompIndex >= 0) &&
+          (ap->P.p1 != NULL) && (ap->P.p2 != NULL) &&
+          (__p_GetComp(ap->P.p1, currRing) != __p_GetComp(ap->P.p2, currRing));
+
+      if (need_copy)
+      {
+        poly orig_p1 = ap->P.p1;
+        poly orig_p2 = ap->P.p2;
+        ap->P.p1 = pCopy(orig_p1);
+        ap->P.p2 = pCopy(orig_p2);
+
+        ksCreateSpoly(&(ap->P), NULL, strat->use_buckets,
+                      strat->tailRing, m1, m2, &strat->R);
+
+        // Free the copies (ksCreateSpoly doesn't consume p1/p2, and the
+        // spoly data is all freshly allocated from pp_Mult_mm etc.)
+        pDelete(&ap->P.p1);
+        pDelete(&ap->P.p2);
+        ap->P.p1 = orig_p1;
+        ap->P.p2 = orig_p2;
+      }
+      else
+      {
+        ksCreateSpoly(&(ap->P), NULL, strat->use_buckets,
+                      strat->tailRing, m1, m2, &strat->R);
+      }
     }
     else if (ap->P.p1 == NULL)
     {
@@ -280,6 +312,29 @@ static int reduce_fully(SweepContext *ctx, ActivePoly *ap)
       return 0;
     }
 
+    // IDLIFT check (redHoney lines 2384-2402)
+    if (UNLIKELY(TEST_OPT_IDLIFT))
+    {
+      poly hp = ap->P.p ? ap->P.p : ap->P.t_p;
+      if (hp && p_GetComp(hp, currRing) > strat->syzComp)
+      {
+        ap->P.Delete();
+        ap->occupied = false;
+        ctx->stat_zeros.fetch_add(1, std::memory_order_relaxed);
+        return 0;
+      }
+    }
+    else if (UNLIKELY((strat->syzComp > 0) && (!TEST_OPT_REDTAIL_SYZ)))
+    {
+      // syzComp check (redHoney lines 2403-2420)
+      poly hp = ap->P.p ? ap->P.p : ap->P.t_p;
+      if (hp && p_GetComp(hp, currRing) > strat->syzComp)
+      {
+        ap->is_survivor = true;
+        return 1;
+      }
+    }
+
     // Update ecart (redHoney lines 2421-2436)
     ap->P.SetShortExpVector();
     int h_d = ap->P.SetpFDeg();
@@ -289,6 +344,27 @@ static int reduce_fully(SweepContext *ctx, ActivePoly *ap)
       ap->P.ecart = ap->d - h_d + ei - ap->P.ecart;
     ap->pass++;
     ap->d = h_d + ap->P.ecart;
+
+    // Overflow check (redHoney lines 2467-2480)
+    if (UNLIKELY(ap->d > ap->reddeg))
+    {
+      if (UNLIKELY(ap->d >= (long)strat->tailRing->bitmask))
+      {
+        if (ap->P.pTotalDeg() + ap->P.ecart >= (long)strat->tailRing->bitmask)
+        {
+          strat->overflow = TRUE;
+          ap->P.GetP();
+          // Push back to L for the main thread to handle
+          pthread_mutex_lock(&ctx->L_lock);
+          strat->L.push(ap->P);
+          pthread_mutex_unlock(&ctx->L_lock);
+          ap->P.Clear();
+          ap->occupied = false;
+          return 0;  // treat as consumed (main will see overflow flag)
+        }
+      }
+      ap->reddeg = ap->d;
+    }
 
     // Update for next reducer search
     ap->P.SetLmCurrRing();
@@ -396,14 +472,16 @@ struct WorkerArg
   int thread_id;
 };
 
-static std::atomic<bool> g_done(false);
-
 /**
  * Worker thread. Each batch:
- *   1. B0: barrier (wait for main to signal start of batch)
+ *   1. B0: barrier_B0 (wait for main to signal start of batch)
  *   2. batch_reduce: grab polys from L, reduce them
- *   3. B1: barrier (all done reducing, main processes survivors)
- * Workers check g_done after B0 and exit if true.
+ *   3. B1: barrier_B1 (all done reducing, main processes survivors)
+ * Workers check ctx->done after B0 and exit if true.
+ *
+ * B0 and B1 use SEPARATE barrier objects to prevent reuse races
+ * where a fast thread re-entering barrier_wait could be miscounted
+ * as part of the previous synchronization cycle.
  */
 static void *worker_thread(void *arg)
 {
@@ -422,13 +500,13 @@ static void *worker_thread(void *arg)
   while (true)
   {
     // Wait for main to signal start of batch (or done)
-    pthread_barrier_wait(&ctx->barrier);  // B0: start of batch
-    if (g_done.load(std::memory_order_acquire)) break;
+    pthread_barrier_wait(&ctx->barrier_B0);
+    if (ctx->done.load(std::memory_order_acquire)) break;
 
     batch_reduce(ctx, thread_id);
-    pthread_barrier_wait(&ctx->barrier);  // B1: all done reducing
+    pthread_barrier_wait(&ctx->barrier_B1);
 
-    // Main processes survivors between B1 and B2
+    // Main processes survivors between B1 and next B0
   }
 
   return NULL;
@@ -460,7 +538,7 @@ void bba_parallel_loop(SweepContext *ctx)
   ctx->saved_si_opt_1 = si_opt_1;
   ctx->saved_si_opt_2 = si_opt_2 & ~Sy_bit(OPT_PROT);
 
-  g_done.store(false, std::memory_order_release);
+  ctx->done.store(false, std::memory_order_release);
 
   for (int t = 0; t < ctx->num_workers; t++)
   {
@@ -504,19 +582,19 @@ void bba_parallel_loop(SweepContext *ctx)
       // Workers are waiting at B0; signal done and release them
       if (ctx->num_workers > 0)
       {
-        g_done.store(true, std::memory_order_release);
-        pthread_barrier_wait(&ctx->barrier);  // B0: workers check g_done and exit
+        ctx->done.store(true, std::memory_order_release);
+        pthread_barrier_wait(&ctx->barrier_B0);
       }
       goto parallel_cleanup;
     }
 
     // B0: signal start of batch (workers are waiting here)
     if (ctx->num_workers > 0)
-      pthread_barrier_wait(&ctx->barrier);  // B0
+      pthread_barrier_wait(&ctx->barrier_B0);
 
     // Reduce: all threads participate in parallel
     batch_reduce(ctx, 0);
-    pthread_barrier_wait(&ctx->barrier);  // B1: all done reducing
+    pthread_barrier_wait(&ctx->barrier_B1);
 
     // Process all survivors (main thread only, serialized)
     bool had_survivor = false;
@@ -547,11 +625,11 @@ void bba_parallel_loop(SweepContext *ctx)
     }
   }
 
-  // Signal workers to exit: hit B0 with g_done=true so they break
+  // Signal workers to exit: hit B0 with ctx->done=true so they break
   if (ctx->num_workers > 0)
   {
-    g_done.store(true, std::memory_order_release);
-    pthread_barrier_wait(&ctx->barrier);  // B0: workers check g_done and exit
+    ctx->done.store(true, std::memory_order_release);
+    pthread_barrier_wait(&ctx->barrier_B0);
   }
 
 parallel_cleanup:

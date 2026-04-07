@@ -68,8 +68,9 @@ struct SweepContext
   // Shared atomic slot counter for Phase 1 and Phase 3
   std::atomic<int> slot_counter;
 
-  // Barrier for phase synchronization
-  pthread_barrier_t barrier;
+  // Barriers for phase synchronization (separate to prevent reuse races)
+  pthread_barrier_t barrier_B0;   // start of batch
+  pthread_barrier_t barrier_B1;   // end of batch (all done reducing)
 
   // Startup barrier: ensures all workers are running before main loop
   pthread_barrier_t startup_barrier;
@@ -80,6 +81,9 @@ struct SweepContext
 
   // Mutex for L access (multiple threads pop from L)
   pthread_mutex_t L_lock;
+
+  // Shutdown flag (per-context, not global static)
+  std::atomic<bool> done;
 
   // Saved state for restoration after parallel phase
   int (*saved_posInT)(const BlockArray<TObject> &T, const int tl, LObject &h);
