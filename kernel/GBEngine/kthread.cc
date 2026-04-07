@@ -241,6 +241,8 @@ static BOOLEAN pop_and_prepare(SweepContext *ctx, ActivePoly *ap)
 /*  against ALL active slots, recording per-thread best reducers.      */
 /* ------------------------------------------------------------------ */
 
+static const int SWEEP_CHUNK = 64;
+
 static void sweep_phase(SweepContext *ctx, int thread_id)
 {
   kStrategy strat = ctx->strat;
@@ -249,33 +251,38 @@ static void sweep_phase(SweepContext *ctx, int thread_id)
 
   while (true)
   {
-    int j = ctx->sweep_cursor.fetch_add(1, std::memory_order_relaxed);
-    if (j > tl) break;
+    int start = ctx->sweep_cursor.fetch_add(SWEEP_CHUNK, std::memory_order_relaxed);
+    if (start > tl) break;
+    int end = start + SWEEP_CHUNK;
+    if (end > tl + 1) end = tl + 1;
 
-    unsigned long sev_j = strat->sevT[j];
-
-    for (int s = 0; s < max_active; s++)
+    for (int j = start; j < end; j++)
     {
-      if (!ctx->active[s].occupied) continue;
-      if (ctx->active[s].is_survivor) continue;
-      if (sev_j & ctx->active[s].not_sev) continue;
-      if (!p_LmDivisibleBy(strat->T[j].p, ctx->active[s].P.p, currRing))
-        continue;
+      unsigned long sev_j = strat->sevT[j];
 
-      // Found a divisor for slot s
-      SweepResult &sr = sweep_result(ctx, thread_id, s);
-      if (sr.best_reducer < 0)
-        sr.best_reducer = j;
-
-      int ecart_j = strat->T[j].ecart;
-      if (ecart_j <= ctx->active[s].P.ecart)
+      for (int s = 0; s < max_active; s++)
       {
-        int pLen = strat->T[j].pLength;
-        if (pLen <= 0) pLen = 3;
-        if (sr.best_good < 0 || pLen < sr.best_pLength)
+        if (!ctx->active[s].occupied) continue;
+        if (ctx->active[s].is_survivor) continue;
+        if (sev_j & ctx->active[s].not_sev) continue;
+        if (!p_LmDivisibleBy(strat->T[j].p, ctx->active[s].P.p, currRing))
+          continue;
+
+        // Found a divisor for slot s
+        SweepResult &sr = sweep_result(ctx, thread_id, s);
+        if (sr.best_reducer < 0)
+          sr.best_reducer = j;
+
+        int ecart_j = strat->T[j].ecart;
+        if (ecart_j <= ctx->active[s].P.ecart)
         {
-          sr.best_good = j;
-          sr.best_pLength = pLen;
+          int pLen = strat->T[j].pLength;
+          if (pLen <= 0) pLen = 3;
+          if (sr.best_good < 0 || pLen < sr.best_pLength)
+          {
+            sr.best_good = j;
+            sr.best_pLength = pLen;
+          }
         }
       }
     }
