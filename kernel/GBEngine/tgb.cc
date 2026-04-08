@@ -4730,7 +4730,7 @@ static void multi_reduction (red_object * los, int &losl, slimgb_alg * c)
   poly *delay = (poly *) omAlloc (losl * sizeof (poly));
   int delay_s = 0;
   //initialize;
-  assume (c->(!strat->S.empty()));
+  assume (!c->strat->S.empty());
   assume (losl > 0);
   int i;
   wlen_type max_initial_quality = 0;

@@ -1011,7 +1011,7 @@ BOOLEAN kTest (kStrategy strat)
   }
 
   // test S
-  if (strat->S != NULL)
+  if (!strat->S.empty())
     kFalseReturn(kTest_S(strat));
 
   return TRUE;
@@ -1053,7 +1053,7 @@ BOOLEAN kTest_TS(kStrategy strat)
       return dReportError("T[%d].i_r with R out of sync", i);
   }
   // test containment of S inT
-  if ((strat->S != NULL)&&((!strat->T.empty())))
+  if ((!strat->S.empty())&&((!strat->T.empty())))
   {
     for (i=0; i < strat->S.size(); i++)
     {
@@ -9304,6 +9304,10 @@ void exitSba (kStrategy strat)
 * in every case (also for ideals:)
 * deletes divisible vectors/polynomials
 */
+// Note: r == strat->Shdl.  With SElement, r->m[l] and strat->S[l].p are
+// separate copies of the same poly pointer.  Any pDelete or replacement
+// of r->m[l] must be mirrored to strat->S[l].p, otherwise S holds a
+// dangling pointer to freed memory.
 void updateResult(ideal r,ideal Q, kStrategy strat)
 {
   int l;
@@ -9314,6 +9318,8 @@ void updateResult(ideal r,ideal Q, kStrategy strat)
       if ((r->m[l]!=NULL) && (pGetComp(r->m[l])==0))
       {
         pDelete(&r->m[l]); // and set it to NULL
+        if (l < strat->S.size()) strat->S[l].p = r->m[l];
+        if (l < strat->S.size()) strat->S[l].p = r->m[l];
       }
     }
     int q;
@@ -9336,11 +9342,13 @@ void updateResult(ideal r,ideal Q, kStrategy strat)
               {
                 p=r->m[l];
                 r->m[l]=kNF(Q,NULL,p);
+                if (l < strat->S.size()) strat->S[l].p = r->m[l];
                 pDelete(&p);
               }
               else
               {
                 pDelete(&r->m[l]); // and set it to NULL
+                if (l < strat->S.size()) strat->S[l].p = r->m[l];
               }
               break;
             }
@@ -9368,11 +9376,13 @@ void updateResult(ideal r,ideal Q, kStrategy strat)
                 {
                   p=r->m[l];
                   r->m[l]=kNF(Q,NULL,p);
+                  if (l < strat->S.size()) strat->S[l].p = r->m[l];
                   pDelete(&p);
                 }
                 else
                 {
                   pDelete(&r->m[l]); // and set it to NULL
+                  if (l < strat->S.size()) strat->S[l].p = r->m[l];
                 }
                 break;
               }
@@ -9401,12 +9411,14 @@ void updateResult(ideal r,ideal Q, kStrategy strat)
               {
                 p=r->m[l];
                 r->m[l]=kNF(Q,NULL,p);
+                if (l < strat->S.size()) strat->S[l].p = r->m[l];
                 pDelete(&p);
                 reduction_found=TRUE;
               }
               else
               {
                 pDelete(&r->m[l]); // and set it to NULL
+                if (l < strat->S.size()) strat->S[l].p = r->m[l];
               }
               break;
             }
@@ -9431,12 +9443,14 @@ void updateResult(ideal r,ideal Q, kStrategy strat)
                 {
                   p=r->m[l];
                   r->m[l]=kNF(Q,NULL,p);
+                  if (l < strat->S.size()) strat->S[l].p = r->m[l];
                   pDelete(&p);
                   reduction_found=TRUE;
                 }
                 else
                 {
                   pDelete(&r->m[l]); // and set it to NULL
+                  if (l < strat->S.size()) strat->S[l].p = r->m[l];
                 }
                 break;
               }
