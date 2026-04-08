@@ -45,9 +45,9 @@ static void copyT (kStrategy o,kStrategy n)
         n->T[j].p=pCopy(p);
         break;
       }
-      if (p == o->S[i])
+      if (p == o->S[i].p)
       {
-        n->T[j].p=n->S[i];
+        n->T[j].p=n->S[i].p;
         break;
       }
     }
@@ -146,17 +146,27 @@ kStrategy kStratCopy(kStrategy o)
   s->compareLOld=o->compareLOld;
   s->enterOnePair=o->enterOnePair;
   s->chainCrit=o->chainCrit;
+  s->sl=o->sl;
   s->Shdl=idCopy(o->Shdl);
-  s->S=s->Shdl->m;
+  s->S.ensure_capacity(IDELEMS(s->Shdl));
+  for (int ii=0; ii<=s->sl; ii++)
+    s->S[ii].p = s->Shdl->m[ii];
   s->tailRing = o->tailRing;
   if (o->D!=NULL) s->D=idCopy(o->D);
   else            s->D=NULL;
-  s->ecartS=(int *)omAlloc(IDELEMS(o->Shdl)*sizeof(int));
-  memcpy(s->ecartS,o->ecartS,IDELEMS(o->Shdl)*sizeof(int));
-  s->sevS=(unsigned long *)omAlloc(IDELEMS(o->Shdl)*sizeof(unsigned long));
-  memcpy(s->sevS,o->sevS,IDELEMS(o->Shdl)*sizeof(unsigned long));
-  s->S_2_R=(int*)omAlloc(IDELEMS(o->Shdl)*sizeof(int));
-  memcpy(s->S_2_R,o->S_2_R,IDELEMS(o->Shdl)*sizeof(int));
+  // Copy S metadata (ecart, sev, s_2_r, fromQ) from o->S to s->S
+  for (int ii=0; ii<=o->sl; ii++)
+  {
+    s->S[ii].ecart = o->S[ii].ecart;
+    s->S[ii].sev = o->S[ii].sev;
+    s->S[ii].s_2_r = o->S[ii].s_2_r;
+    s->S[ii].length = o->S[ii].length;
+    s->S[ii].wlength = o->S[ii].wlength;
+    s->S[ii].fromQ = o->S[ii].fromQ;
+  }
+  s->hasFromQ = o->hasFromQ;
+  s->use_lenS = o->use_lenS;
+  s->use_lenSw = o->use_lenSw;
   // Copy sevT block-by-block
   {
     int needed = o->tl + 1;
@@ -165,13 +175,6 @@ kStrategy kStratCopy(kStrategy o)
     for (int ii = 0; ii <= o->tl; ii++)
       s->sevT[ii] = o->sevT[ii];
   }
-  if(o->fromQ!=NULL)
-  {
-    s->fromQ=(int *)omAlloc(IDELEMS(o->Shdl)*sizeof(int));
-    memcpy(s->fromQ,o->fromQ,IDELEMS(o->Shdl)*sizeof(int));
-  }
-  else
-    s->fromQ=NULL;
   copyT(o,s);//s->T=...
   s->tail = pInit();
   copyL(o,s);//s->L=...
@@ -269,10 +272,12 @@ static void completeReduceFac (kStrategy strat, ideal_list FL)
   }
   for (si=strat->sl; si>0; si--)
   {
-    strat->S[si] = redtailBba(strat->S[si],si-1,strat);
+    strat->S[si].p = redtailBba(strat->S[si].p,si-1,strat);
+    strat->Shdl->m[si] = strat->S[si].p;
     if (TEST_OPT_INTSTRATEGY)
     {
-      strat->S[si]=p_Cleardenom(strat->S[si], currRing);
+      strat->S[si].p=p_Cleardenom(strat->S[si].p, currRing);
+      strat->Shdl->m[si] = strat->S[si].p;
     }
     if (TEST_OPT_PROT)
     {
@@ -289,7 +294,7 @@ static void completeReduceFac (kStrategy strat, ideal_list FL)
     ideal fac;
     ideal fac_copy;
 
-    if (!k_factorize(strat->S[si],fac,fac_copy))
+    if (!k_factorize(strat->S[si].p,fac,fac_copy))
     {
       idDelete(&fac);
       idDelete(&fac_copy);
@@ -388,9 +393,9 @@ static void completeReduceFac (kStrategy strat, ideal_list FL)
                 int i=n->sl;
                 while (i>=0)
                 {
-                  if (n->S[i]==n->T[n->tl].p)
+                  if (n->S[i].p==n->T[n->tl].p)
                   {
-                    n->T[n->tl].p=NULL; n->S[i]=NULL;
+                    n->T[n->tl].p=NULL; n->S[i].p=NULL;
                     break;
                   }
                   i--;
@@ -399,6 +404,7 @@ static void completeReduceFac (kStrategy strat, ideal_list FL)
                 n->tl--;
               }
               memset(n->Shdl->m,0,IDELEMS(n->Shdl)*sizeof(poly));
+              for (int ii=0; ii<=n->sl; ii++) n->S[ii].p = NULL;
               n->sl=-1;
               if (strat==n) si=-1;
               break;
@@ -416,7 +422,7 @@ static void completeReduceFac (kStrategy strat, ideal_list FL)
         ideal_list Lj=FL;
         while (Lj!=NULL)
         {
-          if ((n->sl>=0)&&(n->S[0]!=NULL))
+          if ((n->sl>=0)&&(n->S[0].p!=NULL))
           {
             ideal r=kNF(n->Shdl,NULL,Lj->d,0,KSTD_NF_LAZY | KSTD_NF_NONORM);
             if (idIs0(r))
@@ -432,9 +438,9 @@ static void completeReduceFac (kStrategy strat, ideal_list FL)
                 int i=n->sl;
                 while (i>=0)
                 {
-                  if (n->S[i]==n->T[n->tl].p)
+                  if (n->S[i].p==n->T[n->tl].p)
                   {
-                    n->T[n->tl].p=NULL; n->S[i]=NULL;
+                    n->T[n->tl].p=NULL; n->S[i].p=NULL;
                     break;
                   }
                   i--;
@@ -443,6 +449,7 @@ static void completeReduceFac (kStrategy strat, ideal_list FL)
                 n->tl--;
               }
               memset(n->Shdl->m,0,IDELEMS(n->Shdl)*sizeof(poly));
+              for (int ii=0; ii<=n->sl; ii++) n->S[ii].p = NULL;
               n->sl=-1;
               if (strat==n) si=-1;
               idDelete(&r);
@@ -677,9 +684,9 @@ ideal bbafac (ideal /*F*/, ideal Q,intvec* /*w*/,kStrategy strat, ideal_list FL)
                   int i=n->sl;
                   while (i>=0)
                   {
-                    if (n->S[i]==n->T[n->tl].p)
+                    if (n->S[i].p==n->T[n->tl].p)
                     {
-                      n->T[n->tl].p=NULL; n->S[i]=NULL;
+                      n->T[n->tl].p=NULL; n->S[i].p=NULL;
                       break;
                     }
                     i--;
@@ -688,6 +695,7 @@ ideal bbafac (ideal /*F*/, ideal Q,intvec* /*w*/,kStrategy strat, ideal_list FL)
                   n->tl--;
                 }
                 memset(n->Shdl->m,0,IDELEMS(n->Shdl)*sizeof(poly));
+              for (int ii=0; ii<=n->sl; ii++) n->S[ii].p = NULL;
                 n->sl=-1;
                 break;
               }
@@ -705,7 +713,7 @@ ideal bbafac (ideal /*F*/, ideal Q,intvec* /*w*/,kStrategy strat, ideal_list FL)
           ideal_list Lj=FL;
           while (Lj!=NULL)
           {
-            if ((n->sl>=0)&&(n->S[0]!=NULL))
+            if ((n->sl>=0)&&(n->S[0].p!=NULL))
             {
               ideal r=kNF(n->Shdl,NULL,Lj->d,0,
 	        KSTD_NF_LAZY | KSTD_NF_NONORM | KSTD_NF_NOLF);
@@ -726,9 +734,9 @@ ideal bbafac (ideal /*F*/, ideal Q,intvec* /*w*/,kStrategy strat, ideal_list FL)
                   int i=n->sl;
                   while (i>=0)
                   {
-                    if (n->S[i]==n->T[n->tl].p)
+                    if (n->S[i].p==n->T[n->tl].p)
                     {
-                      n->T[n->tl].p=NULL; n->S[i]=NULL;
+                      n->T[n->tl].p=NULL; n->S[i].p=NULL;
                       break;
                     }
                     i--;
@@ -737,6 +745,7 @@ ideal bbafac (ideal /*F*/, ideal Q,intvec* /*w*/,kStrategy strat, ideal_list FL)
                   n->tl--;
                 }
                 memset(n->Shdl->m,0,IDELEMS(n->Shdl)*sizeof(poly));
+              for (int ii=0; ii<=n->sl; ii++) n->S[ii].p = NULL;
                 n->sl=-1;
                 idDelete(&r);
                 break;

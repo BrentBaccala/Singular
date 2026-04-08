@@ -759,20 +759,20 @@ template<class number_type> MonRedResNP<number_type> noro_red_mon_to_non_poly(po
     number coef_bak=p_GetCoeff(t,c->r);
 
     p_SetCoeff(t,npInit(1,c->r->cf),c->r);
-    assume(npIsOne(p_GetCoeff(c->strat->S[i],c->r),c->r->cf));
-    number coefstrat=p_GetCoeff(c->strat->S[i],c->r);
+    assume(npIsOne(p_GetCoeff(c->strat->S[i].p,c->r),c->r->cf));
+    number coefstrat=p_GetCoeff(c->strat->S[i].p,c->r);
 
 
     poly exp_diff=cache->temp_term;
-    p_ExpVectorDiff(exp_diff,t,c->strat->S[i],c->r);
+    p_ExpVectorDiff(exp_diff,t,c->strat->S[i].p,c->r);
     p_SetCoeff(exp_diff,npNegM(npInversM(coefstrat,c->r->cf),c->r->cf),c->r);
     p_Setm(exp_diff,c->r);
-    assume(c->strat->S[i]!=NULL);
+    assume(c->strat->S[i].p!=NULL);
 
     poly res;
-    res=pp_Mult_mm(pNext(c->strat->S[i]),exp_diff,c->r);
+    res=pp_Mult_mm(pNext(c->strat->S[i].p),exp_diff,c->r);
 
-    int len=c->strat->lenS[i]-1;
+    int len=c->strat->S[i].length-1;
     SparseRow<number_type>* srow;
     srow=noro_red_to_non_poly_t<number_type>(res,len,cache,c);
     ref=cache->insert(t,srow);

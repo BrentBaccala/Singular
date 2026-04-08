@@ -30,7 +30,7 @@ void addLObject(LObject& h, kStrategy& strat)
   // add h into S and L
   int pos=posInS(strat, strat->sl, h.p, h.ecart);
 
-  if ( (pos <= strat->sl) && (p_ComparePolys(h.p, strat->S[pos], currRing)) )
+  if ( (pos <= strat->sl) && (p_ComparePolys(h.p, strat->S[pos].p, currRing)) )
   {
     if (TEST_OPT_PROT)
       PrintS("d\n");

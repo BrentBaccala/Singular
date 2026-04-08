@@ -68,7 +68,7 @@ int redGrFirst (LObject* h,kStrategy strat)
 #ifdef KDEBUG
     if (TEST_OPT_DEBUG) Print("%d",j);
 #endif
-    if (pDivisibleBy(strat->S[j],(*h).p))
+    if (pDivisibleBy(strat->S[j].p,(*h).p))
     {
 #ifdef KDEBUG
       if (TEST_OPT_DEBUG) PrintS("+\n");
@@ -78,16 +78,16 @@ int redGrFirst (LObject* h,kStrategy strat)
       * T[j].p
       */
       if (!TEST_OPT_INTSTRATEGY)
-        pNorm(strat->S[j]);
+        pNorm(strat->S[j].p);
 #ifdef KDEBUG
       if (TEST_OPT_DEBUG)
       {
         wrp(h->p);
         PrintS(" with ");
-        wrp(strat->S[j]);
+        wrp(strat->S[j].p);
       }
 #endif
-      (*h).p = nc_ReduceSpoly(strat->S[j],(*h).p, currRing);
+      (*h).p = nc_ReduceSpoly(strat->S[j].p,(*h).p, currRing);
       //spSpolyRed(strat->T[j].p,(*h).p,strat->kNoether);
 
 #ifdef KDEBUG
@@ -138,7 +138,7 @@ int redGrFirst (LObject* h,kStrategy strat)
           {
             i--;
             if (i<0) return 0;
-          } while (!pDivisibleBy(strat->S[i],(*h).p));
+          } while (!pDivisibleBy(strat->S[i].p,(*h).p));
           strat->L.push(*h);
 #ifdef KDEBUG
           if (TEST_OPT_DEBUG) Print(" degree jumped; ->L\n");
@@ -246,26 +246,26 @@ int redGrRatGB (LObject* h,kStrategy strat)
         * S[c_j]
         */
         if (!TEST_OPT_INTSTRATEGY)
-          pNorm(strat->S[c_j]);
+          pNorm(strat->S[c_j].p);
 #ifdef KDEBUG
     if (TEST_OPT_DEBUG)
         if (TEST_OPT_DEBUG)
         {
           wrp(h->p);
           Print(" with S[%d]= ",c_j);
-          wrp(strat->S[c_j]);
+          wrp(strat->S[c_j].p);
         }
 #endif
-    //poly hh = nc_CreateSpoly(strat->S[c_j],(*h).p, currRing);
+    //poly hh = nc_CreateSpoly(strat->S[c_j].p,(*h).p, currRing);
     //        Print("vor nc_rat_ReduceSpolyNew (ce:%d) ",c_e);wrp(h->p);PrintLn();
     //if(c_e==-1)
-    //  c_p = nc_CreateSpoly(pCopy(strat->S[c_j]),pCopy((*h).p), currRing);
+    //  c_p = nc_CreateSpoly(pCopy(strat->S[c_j].p),pCopy((*h).p), currRing);
     //else
-    //          c_p=nc_rat_ReduceSpolyNew(strat->S[c_j],pCopy((*h).p), currRing->real_var_start-1,currRing);
+    //          c_p=nc_rat_ReduceSpolyNew(strat->S[c_j].p,pCopy((*h).p), currRing->real_var_start-1,currRing);
     //        Print("nach nc_rat_ReduceSpolyNew ");wrp(c_p);PrintLn();
     //        pDelete(&((*h).p));
 
-        c_p=nc_rat_ReduceSpolyNew(strat->S[c_j],(*h).p, currRing->real_var_start-1,currRing);
+        c_p=nc_rat_ReduceSpolyNew(strat->S[c_j].p,(*h).p, currRing->real_var_start-1,currRing);
         (*h).p=c_p;
         if (!TEST_OPT_INTSTRATEGY)
         {
@@ -300,13 +300,13 @@ int redGrRatGB (LObject* h,kStrategy strat)
       }
     }
     // first try usual division
-    if (p_LmDivisibleBy(strat->S[j],(*h).p,currRing))
+    if (p_LmDivisibleBy(strat->S[j].p,(*h).p,currRing))
     {
 #ifdef KDEBUG
       if(TEST_OPT_DEBUG)
       {
         p_wrp(h->p,currRing); Print(" divisible by S[%d]=",j);
-        p_wrp(strat->S[j],currRing); PrintS(" e=-1\n");
+        p_wrp(strat->S[j].p,currRing); PrintS(" e=-1\n");
       }
 #endif
       if ((c_j<0)||(c_e>=0))
@@ -315,21 +315,21 @@ int redGrRatGB (LObject* h,kStrategy strat)
       }
     }
     else
-    if (p_LmDivisibleByPart(strat->S[j],(*h).p,currRing,
+    if (p_LmDivisibleByPart(strat->S[j].p,(*h).p,currRing,
         currRing->real_var_start,currRing->real_var_end))
     {
-      int a_e=(p_Totaldegree(strat->S[j],currRing)-currRing->pFDeg(strat->S[j],currRing));
+      int a_e=(p_Totaldegree(strat->S[j].p,currRing)-currRing->pFDeg(strat->S[j].p,currRing));
 #ifdef KDEBUG
       if(TEST_OPT_DEBUG)
       {
         p_wrp(h->p,currRing); Print(" divisibly by S[%d]=",j);
-        p_wrp(strat->S[j],currRing); Print(" e=%d\n",a_e);
+        p_wrp(strat->S[j].p,currRing); Print(" e=%d\n",a_e);
       }
 #endif
       if ((c_j<0)||(c_e>a_e))
       {
         c_e=a_e; c_j=j;
-        //c_p = nc_CreateSpoly(pCopy(strat->S[c_j]),pCopy((*h).p), currRing);
+        //c_p = nc_CreateSpoly(pCopy(strat->S[c_j].p),pCopy((*h).p), currRing);
       }
       /*computes the ecart*/
       if ((strat->syzComp!=0) && !strat->honey)
@@ -349,7 +349,7 @@ int redGrRatGB (LObject* h,kStrategy strat)
       if(TEST_OPT_DEBUG)
       {
         p_wrp(h->p,currRing); Print(" not divisibly by S[%d]=",j);
-        p_wrp(strat->S[j],currRing); PrintLn();
+        p_wrp(strat->S[j].p,currRing); PrintLn();
       }
 #endif
     }
@@ -383,15 +383,15 @@ static int nc_redHomog (LObject* h,kStrategy strat)
   loop
   {
     if (TEST_OPT_DEBUG) Print("%d",j);
-    if (pDivisibleBy(strat->S[j],(*h).p))
+    if (pDivisibleBy(strat->S[j].p,(*h).p))
     {
       if (TEST_OPT_DEBUG)
       {
         PrintS("+\nwith ");
-        wrp(strat->S[j]);
+        wrp(strat->S[j].p);
       }
       /*- compute the s-polynomial -*/
-      (*h).p = nc_ReduceSpoly(strat->S[j],(*h).p,currRing);
+      (*h).p = nc_ReduceSpoly(strat->S[j].p,(*h).p,currRing);
       if ((*h).p == NULL)
       {
         if (TEST_OPT_DEBUG) PrintS(" to 0\n");
@@ -454,7 +454,7 @@ static int nc_redHomog0 (LObject* h,kStrategy strat)
       if (TEST_OPT_DEBUG)
       {
         PrintS("+\nwith ");
-        wrp(strat->S[j]);
+        wrp(strat->S[j].p);
       }
       /*- compute the s-polynomial -*/
       (*h).p = nc_ReduceSpoly(strat->T[j].p,(*h).p,strat->kNoether,currRing);
@@ -530,15 +530,15 @@ static int nc_redLazy (LObject* h,kStrategy strat)
   loop
   {
     if (TEST_OPT_DEBUG) Print("%d",j);
-    if (pDivisibleBy(strat->S[j],(*h).p))
+    if (pDivisibleBy(strat->S[j].p,(*h).p))
     {
       if (TEST_OPT_DEBUG)
       {
         PrintS("+\nwith ");
-        wrp(strat->S[j]);
+        wrp(strat->S[j].p);
       }
       /*- compute the s-polynomial -*/
-      (*h).p = nc_ReduceSpoly(strat->S[j],(*h).p,strat->kNoether,currRing);
+      (*h).p = nc_ReduceSpoly(strat->S[j].p,(*h).p,strat->kNoether,currRing);
       if ((*h).p == NULL)
       {
         if (TEST_OPT_DEBUG) PrintS(" to 0\n");
@@ -586,7 +586,7 @@ static int nc_redLazy (LObject* h,kStrategy strat)
               return 0;
             }
           }
-          while (!pDivisibleBy(strat->S[i],(*h).p));
+          while (!pDivisibleBy(strat->S[i].p,(*h).p));
           if (TEST_OPT_DEBUG) Print(" ->L[%d]\n",at);
           strat->L.push(*h);
           (*h).p = NULL;
@@ -763,7 +763,7 @@ static int nc_redHoney (LObject*  h,kStrategy strat)
               enterT((*h),strat);
               return 0;
             }
-          } while (!pDivisibleBy(strat->S[i],(*h).p));
+          } while (!pDivisibleBy(strat->S[i].p,(*h).p));
           strat->L.push(*h);
           if (TEST_OPT_DEBUG)
             Print(" degree jumped: -> L\n");
@@ -1243,7 +1243,7 @@ ideal k_gnc_gr_bba(const ideal F, const ideal Q, const intvec *, const bigintmat
       loop
       {
         if (j>=k) break;
-        clearS(strat->S[j],strat->sevS[j],&k,&j,strat);
+        clearS(strat->S[j].p,strat->S[j].sev,&k,&j,strat);
         j++;
       }
       k++;

@@ -58,7 +58,7 @@ void khCheck( ideal Q, intvec *w, bigintmat *hilb, int &eledeg, int &count,
       int i;
       for(i=strat->sl;i>0;i--)
       {
-        used_comp[pGetComp(strat->S[i])]='\1';
+        used_comp[pGetComp(strat->S[i].p)]='\1';
       }
       for(i=strat->ak;i>0;i--)
       {
@@ -172,7 +172,7 @@ void khCheck( ideal Q, intvec *w, poly hilb, const ring Qt, int &eledeg, int &co
       int i;
       for(i=strat->sl;i>0;i--)
       {
-        used_comp[pGetComp(strat->S[i])]='\1';
+        used_comp[pGetComp(strat->S[i].p)]='\1';
       }
       for(i=strat->ak;i>0;i--)
       {

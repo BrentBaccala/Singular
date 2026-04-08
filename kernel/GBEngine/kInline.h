@@ -38,9 +38,9 @@
 KINLINE TObject* skStrategy::S_2_T(int i)
 {
   assume(i>= 0 && i<=sl);
-  assume(S_2_R[i] >= 0 && S_2_R[i] <= tl);
-  TObject* TT = R[S_2_R[i]];
-  assume(TT != NULL && TT->p == S[i]);
+  assume(S[i].s_2_r >= 0 && S[i].s_2_r <= tl);
+  TObject* TT = R[S[i].s_2_r];
+  assume(TT != NULL && TT->p == S[i].p);
   return TT;
 }
 
@@ -48,15 +48,15 @@ KINLINE TObject* skStrategy::s_2_t(int i)
 {
   if (i >= 0 && i <= sl)
   {
-    int sri= S_2_R[i];
+    int sri= S[i].s_2_r;
     if ((sri >= 0) && (sri <= tl))
     {
       TObject* t = R[sri];
-      if ((t != NULL) && (t->p == S[i]))
+      if ((t != NULL) && (t->p == S[i].p))
         return t;
     }
     // last but not least, try kFindInT
-    sri = kFindInT(S[i], T, tl);
+    sri = kFindInT(S[i].p, T, tl);
     if (sri >= 0)
       return &(T[sri]);
   }
@@ -1338,14 +1338,14 @@ KINLINE void clearS (poly p, unsigned long p_sev, int* at, int* k,
   if (strat->noClearS) return;
   if(rField_is_Ring(currRing))
   {
-    if (!pLmShortDivisibleBy(p,p_sev, strat->S[*at], ~ strat->sevS[*at]))
+    if (!pLmShortDivisibleBy(p,p_sev, strat->S[*at].p, ~ strat->S[*at].sev))
       return;
-    if(!n_DivBy(pGetCoeff(strat->S[*at]), pGetCoeff(p), currRing->cf))
+    if(!n_DivBy(pGetCoeff(strat->S[*at].p), pGetCoeff(p), currRing->cf))
       return;
   }
   else
   {
-    if (!pLmShortDivisibleBy(p,p_sev, strat->S[*at], ~ strat->sevS[*at])) return;
+    if (!pLmShortDivisibleBy(p,p_sev, strat->S[*at].p, ~ strat->S[*at].sev)) return;
   }
   deleteInS((*at),strat);
   (*at)--;

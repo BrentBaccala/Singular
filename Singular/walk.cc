@@ -320,25 +320,12 @@ static ideal kInterRedCC(ideal F, ideal Q)
   }
   if(strat->kNoether!=NULL) pLmFree(&strat->kNoether);
   strat->T.free_all();
-  omFreeSize((ADDRESS)strat->ecartS,IDELEMS(strat->Shdl)*sizeof(int));
-  omFreeSize((ADDRESS)strat->sevS,IDELEMS(strat->Shdl)*sizeof(unsigned long));
+  strat->S.free_all();
   omFreeSize((ADDRESS)strat->NotUsedAxis,(currRing->N+1)*sizeof(BOOLEAN));
   strat->sevT.free_all();
-  omfree(strat->S_2_R);
   strat->R.free_all();
 
-  if(strat->fromQ)
-  {
-    for(j=0; j<IDELEMS(strat->Shdl); j++)
-    {
-      if(strat->fromQ[j])
-      {
-        pDelete(&strat->Shdl->m[j]);
-      }
-    }
-    omFreeSize((ADDRESS)strat->fromQ,IDELEMS(strat->Shdl)*sizeof(int));
-    strat->fromQ = NULL;
-  }
+  strat->hasFromQ = FALSE;
 /*
   if (TEST_OPT_PROT)
   {

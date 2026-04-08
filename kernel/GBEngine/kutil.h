@@ -109,6 +109,22 @@ public:
   // Return current capacity (total elements allocated)
   int capacity() const { return num_blocks * BLOCK_SIZE; }
 
+  // Insert val at position pos, shifting elements pos..count-1 up by one.
+  // Caller must ensure capacity is sufficient (call ensure_capacity first).
+  // count is the current number of valid elements.
+  void insert(int pos, const Elem& val, int count) {
+    for (int i = count; i > pos; i--)
+      (*this)[i] = (*this)[i-1];
+    (*this)[pos] = val;
+  }
+
+  // Erase element at position pos, shifting elements pos+1..count-1 down by one.
+  // count is the current number of valid elements (before erase).
+  void erase(int pos, int count) {
+    for (int i = pos; i < count - 1; i++)
+      (*this)[i] = (*this)[i+1];
+  }
+
   // Free all blocks and the directory
   void free_all() {
     for (int b = 0; b < num_blocks; b++) {
@@ -614,6 +630,20 @@ public:
   unordered_iterator erase(unordered_iterator it);
 };
 
+// SElement: one element of the S set (standard basis).
+// Replaces the 7 parallel arrays S[], ecartS[], sevS[], S_2_R[], lenS[], lenSw[], fromQ[].
+struct SElement {
+  poly p;              // the polynomial
+  int ecart;           // ecart
+  unsigned long sev;   // short exponent vector
+  int s_2_r;           // index into R array
+  int length;          // number of terms (replaces lenS)
+  wlen_type wlength;   // weighted length (replaces lenSw)
+  int fromQ;           // from quotient ideal
+
+  SElement() : p(NULL), ecart(0), sev(0), s_2_r(0), length(0), wlength(0), fromQ(0) {}
+};
+
 class skStrategy
 #ifdef HAVE_OMALLOC
                  : public omallocClass
@@ -645,10 +675,9 @@ public:
   ideal Shdl = NULL;
   ideal D = NULL; /*V(S) is in D(D)*/
   ideal M = NULL; /*set of minimal generators*/
-  polyset S = NULL;
+  BlockArray<SElement> S;
   polyset syz = NULL;
   polyset sig = NULL;
-  intset ecartS = NULL;
   intset fromS = NULL; // from which S[i] S[j] comes from
                        // this is important for signature-based
                        // algorithms
@@ -658,10 +687,6 @@ public:
   unsigned sbaOrder = 0;
   int currIdx = 0;
   int max_lower_index = 0;
-  intset lenS = NULL;
-  wlen_set lenSw = NULL; /* for tgb.ccc */
-  intset fromQ = NULL;
-  unsigned long* sevS = NULL;
   unsigned long* sevSyz = NULL;
   unsigned long* sevSig = NULL;
   BlockArray<unsigned long> sevT;
@@ -680,8 +705,6 @@ public:
   pShallowCopyDeleteProc p_shallow_copy_delete = NULL;
   // pointers to Tobjects R[i] is ith Tobject which is generated
   BlockArray<TObject*>  R;
-  // S_2_R[i] yields Tobject which corresponds to S[i]
-  int*      S_2_R = NULL;
   ring tailRing = NULL;
   omBin lmBin = NULL;
   omBin tailBin = NULL;
@@ -739,6 +762,11 @@ public:
   char    noClearS = FALSE;
   char    completeReduce_retry = FALSE;
   char    overflow = FALSE;
+  // Flags indicating whether optional S-set fields are in use.
+  // With SElement, the fields always exist but may not be meaningful.
+  /*BOOLEAN*/ char use_lenS = FALSE;   // replaces lenS != NULL check
+  /*BOOLEAN*/ char use_lenSw = FALSE;  // replaces lenSw != NULL check
+  /*BOOLEAN*/ char hasFromQ = FALSE;   // replaces fromQ != NULL check
 
   skStrategy();
   ~skStrategy();
@@ -771,6 +799,7 @@ int compareL17_c (const LObject &lhs, const LObject &rhs, const kStrategy strat)
 int compareL17_cRing (const LObject &lhs, const LObject &rhs, const kStrategy strat);
 int compareLSpecial (const LObject &lhs, const LObject &rhs, const kStrategy strat);
 
+void syncShdl (kStrategy strat);
 void deleteHC(poly *p, int *e, int *l, kStrategy strat);
 void deleteHC(LObject* L, kStrategy strat, BOOLEAN fromNext = FALSE);
 void deleteInS (int i,kStrategy strat);

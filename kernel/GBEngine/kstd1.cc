@@ -2105,7 +2105,7 @@ ideal mora (ideal F, ideal Q,intvec *w,bigintmat *hilb,kStrategy strat)
   if (Q!=NULL) updateResult(strat->Shdl,Q,strat);
   SI_RESTORE_OPT1(save1);
   idTest(strat->Shdl);
-  return (strat->Shdl);
+  syncShdl(strat); return (strat->Shdl);
 }
 
 poly kNF1 (ideal F,ideal Q,poly q, kStrategy strat, int lazyReduce)
@@ -2182,17 +2182,17 @@ poly kNF1 (ideal F,ideal Q,poly q, kStrategy strat, int lazyReduce)
   && (!rField_is_Ring(currRing)))
   {
     for (i=strat->sl; i>=0; i--)
-      pNorm(strat->S[i]);
+      pNorm(strat->S[i].p);
   }
   /*- puts the elements of S also to T -*/
   for (i=0; i<=strat->sl; i++)
   {
-    h.p = strat->S[i];
-    h.ecart = strat->ecartS[i];
-    if (strat->sevS[i] == 0) strat->sevS[i] = pGetShortExpVector(h.p);
-    else assume(strat->sevS[i] == pGetShortExpVector(h.p));
+    h.p = strat->S[i].p;
+    h.ecart = strat->S[i].ecart;
+    if (strat->S[i].sev == 0) strat->S[i].sev = pGetShortExpVector(h.p);
+    else assume(strat->S[i].sev == pGetShortExpVector(h.p));
     h.length = pLength(h.p);
-    h.sev = strat->sevS[i];
+    h.sev = strat->S[i].sev;
     h.SetpFDeg();
     enterT(h,strat);
   }
@@ -2221,15 +2221,12 @@ poly kNF1 (ideal F,ideal Q,poly q, kStrategy strat, int lazyReduce)
   /*- release temp data------------------------------- -*/
   cleanT(strat);
   strat->T.free_all();
-  omFreeSize((ADDRESS)strat->ecartS,IDELEMS(strat->Shdl)*sizeof(int));
-  omFreeSize((ADDRESS)strat->sevS,IDELEMS(strat->Shdl)*sizeof(unsigned long));
+  strat->S.free_all();
   omFreeSize((ADDRESS)strat->NotUsedAxis,((currRing->N)+1)*sizeof(BOOLEAN));
   strat->sevT.free_all();
-  omFree(strat->S_2_R);
   strat->R.free_all();
 
-  omfree((ADDRESS)strat->fromQ);
-  strat->fromQ=NULL;
+  strat->hasFromQ=FALSE;
   if (strat->kNoether!=NULL) pLmFree(&strat->kNoether);
 //  if ((TEST_OPT_WEIGHTM)&&(F!=NULL))
 //  {
@@ -2319,7 +2316,7 @@ ideal kNF1 (ideal F,ideal Q,ideal q, kStrategy strat, int lazyReduce)
   && (!rField_is_Ring(currRing)))
   {
     for (i=strat->sl; i>=0; i--)
-      pNorm(strat->S[i]);
+      pNorm(strat->S[i].p);
   }
   /*- compute------------------------------------------- -*/
   res=idInit(IDELEMS(q),strat->ak);
@@ -2334,12 +2331,12 @@ ideal kNF1 (ideal F,ideal Q,ideal q, kStrategy strat, int lazyReduce)
         /*- puts the elements of S also to T -*/
         for (j=0; j<=strat->sl; j++)
         {
-          h.p = strat->S[j];
-          h.ecart = strat->ecartS[j];
+          h.p = strat->S[j].p;
+          h.ecart = strat->S[j].ecart;
           h.pLength = h.length = pLength(h.p);
-          if (strat->sevS[j] == 0) strat->sevS[j] = pGetShortExpVector(h.p);
-          else assume(strat->sevS[j] == pGetShortExpVector(h.p));
-          h.sev = strat->sevS[j];
+          if (strat->S[j].sev == 0) strat->S[j].sev = pGetShortExpVector(h.p);
+          else assume(strat->S[j].sev == pGetShortExpVector(h.p));
+          h.sev = strat->S[j].sev;
           h.SetpFDeg();
           if(rField_is_Ring(currRing) && rHasLocalOrMixedOrdering(currRing))
             enterT_strong(h,strat);
@@ -2367,14 +2364,11 @@ ideal kNF1 (ideal F,ideal Q,ideal q, kStrategy strat, int lazyReduce)
   }
   /*- release temp data------------------------------- -*/
   strat->T.free_all();
-  omFreeSize((ADDRESS)strat->ecartS,IDELEMS(strat->Shdl)*sizeof(int));
-  omFreeSize((ADDRESS)strat->sevS,IDELEMS(strat->Shdl)*sizeof(unsigned long));
+  strat->S.free_all();
   omFreeSize((ADDRESS)strat->NotUsedAxis,((currRing->N)+1)*sizeof(BOOLEAN));
   strat->sevT.free_all();
-  omFree(strat->S_2_R);
   strat->R.free_all();
-  omfree((ADDRESS)strat->fromQ);
-  strat->fromQ=NULL;
+  strat->hasFromQ=FALSE;
   if (strat->kNoether!=NULL) pLmFree(&strat->kNoether);
 //  if ((TEST_OPT_WEIGHTM)&&(F!=NULL))
 //  {
@@ -3495,22 +3489,24 @@ ideal kInterRedOld (ideal F,const ideal Q)
   cleanT(strat);
   if (strat->kNoether!=NULL) pLmFree(&strat->kNoether);
   strat->T.free_all();
-  omFreeSize((ADDRESS)strat->ecartS,IDELEMS(strat->Shdl)*sizeof(int));
-  omFreeSize((ADDRESS)strat->sevS,IDELEMS(strat->Shdl)*sizeof(unsigned long));
   omFreeSize((ADDRESS)strat->NotUsedAxis,((currRing->N)+1)*sizeof(BOOLEAN));
   strat->sevT.free_all();
-  omfree(strat->S_2_R);
   strat->R.free_all();
 
-  if (strat->fromQ)
+  if (strat->hasFromQ)
   {
     for (j=IDELEMS(strat->Shdl)-1;j>=0;j--)
     {
-      if(strat->fromQ[j]) pDelete(&strat->Shdl->m[j]);
+      if(strat->S[j].fromQ) pDelete(&strat->S[j].p);
     }
-    omFree((ADDRESS)strat->fromQ);
-    strat->fromQ=NULL;
+    strat->hasFromQ=FALSE;
   }
+  // Copy S polys back to Shdl before freeing S
+  for (int ii=0; ii<=strat->sl; ii++)
+    strat->Shdl->m[ii] = strat->S[ii].p;
+  for (int ii=strat->sl+1; ii<IDELEMS(strat->Shdl); ii++)
+    strat->Shdl->m[ii] = NULL;
+  strat->S.free_all();
 //  if (TEST_OPT_PROT)
 //  {
 //    writeTime("end Interred:");
@@ -3518,10 +3514,8 @@ ideal kInterRedOld (ideal F,const ideal Q)
 //  }
   ideal shdl=strat->Shdl;
   idSkipZeroes(shdl);
-  if (strat->fromQ)
+  if (strat->hasFromQ)
   {
-    omfree(strat->fromQ);
-    strat->fromQ=NULL;
     ideal res=kInterRed(shdl,NULL);
     idDelete(&shdl);
     shdl=res;
@@ -3677,9 +3671,9 @@ ideal kInterRedBba (ideal F, ideal Q, int &need_retry)
             LObject h;
             h.Clear();
             h.tailRing=strat->tailRing;
-            h.p=strat->S[ii]; strat->S[ii]=NULL;
+            h.p=strat->S[ii].p; strat->S[ii].p=NULL;
             strat->initEcart(&h);
-            h.sev=strat->sevS[ii];
+            h.sev=strat->S[ii].sev;
             int jj=strat->tl;
             while (jj>=0)
             {
@@ -3709,9 +3703,9 @@ ideal kInterRedBba (ideal F, ideal Q, int &need_retry)
             }
             #endif
           }
-          if (strat->fromQ!=NULL)
+          if (strat->hasFromQ)
           {
-            for(ii=pos+1;ii<=strat->sl;ii++) strat->fromQ[ii]=0;
+            for(ii=pos+1;ii<=strat->sl;ii++) strat->S[ii].fromQ=0;
           }
           strat->sl=pos;
         }
@@ -3756,7 +3750,7 @@ ideal kInterRedBba (ideal F, ideal Q, int &need_retry)
           strat->completeReduce_retry=FALSE;
           cleanT(strat);strat->tailRing=currRing;
           int i;
-          for(i=strat->sl;i>=0;i--) strat->S_2_R[i]=-1;
+          for(i=strat->sl;i>=0;i--) strat->S[i].s_2_r=-1;
           completeReduce(strat);
         }
         if (strat->completeReduce_retry)
