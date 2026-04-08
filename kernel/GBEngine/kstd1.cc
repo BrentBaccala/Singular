@@ -3775,6 +3775,7 @@ ideal kInterRedBba (ideal F, ideal Q, int &need_retry)
 //  }
   //if (TEST_OPT_PROT) messageStat(0/*hilbcount*/,strat);
   if (Q!=NULL) updateResult(strat->Shdl,Q,strat);
+  syncShdl(strat);
   ideal res=strat->Shdl;
   strat->Shdl=NULL;
   delete strat;
