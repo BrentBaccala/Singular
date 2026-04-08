@@ -3161,20 +3161,15 @@ bba_post_loop:
         if(!nGreaterZero(pGetCoeff(strat->S[i].p)))
         {
           strat->S[i].p = pNeg(strat->S[i].p);
-          strat->Shdl->m[i] = strat->S[i].p;
         }
       }
       finalReduceByMon(strat);
-      // finalReduceByMon modifies S[i].p in place and may NULL entries.
-      // Sync Shdl to match, then check leading coefficients.
-      for(int i = 0;i < strat->S.size();i++)
-        strat->Shdl->m[i] = strat->S[i].p;
+      // finalReduceByMon may NULL entries (poly reduced to zero); skip those
       for(int i = 0;i < strat->S.size();i++)
       {
         if(strat->S[i].p != NULL && !nGreaterZero(pGetCoeff(strat->S[i].p)))
         {
           strat->S[i].p = pNeg(strat->S[i].p);
-          strat->Shdl->m[i] = strat->S[i].p;
         }
       }
     }
@@ -3198,16 +3193,14 @@ bba_post_loop:
     { fprintf(stderr, "bba BEFORE updateResult: S[%d].p=%p NULL coef! Q=%p\n", _ii, (void*)strat->S[_ii].p, (void*)Q); abort(); }
 #endif
   /* postprocessing for GB over Q-rings ------------------*/
-  if ((Q!=NULL)&&(!errorreported)) updateResult(strat->Shdl,Q,strat);
+  if ((Q!=NULL)&&(!errorreported)) updateResult(Q,strat);
 #ifdef KDEBUG
   for(int _ii=0; _ii < strat->S.size(); _ii++)
     if (strat->S[_ii].p != NULL && strat->S[_ii].p->coef == NULL)
     { fprintf(stderr, "bba AFTER updateResult: S[%d].p=%p NULL coef! Q=%p\n", _ii, (void*)strat->S[_ii].p, (void*)Q); abort(); }
 #endif
 
-  idTest(strat->Shdl);
-
-  syncShdl(strat); return (strat->Shdl);
+  return strat->getShdl();
 }
 
 ideal sba (ideal F0, ideal Q,intvec *w,bigintmat *hilb,kStrategy strat)
@@ -3361,8 +3354,7 @@ ideal sba (ideal F0, ideal Q,intvec *w,bigintmat *hilb,kStrategy strat)
   initHilbCrit(F,Q,&hilb,strat);
   initSba(F,strat);
   /*set enterS, spSpolyShort, reduce, red, initEcart, initEcartPair*/
-  /*Shdl=*/initSbaBuchMora(F, Q,strat);
-  idTest(strat->Shdl);
+  initSbaBuchMora(F, Q,strat);
   if (strat->minim>0) strat->M=idInit(IDELEMS(F),F->rank);
   srmax = strat->S.size()-1;
   reduc = olddeg = 0;
@@ -3761,7 +3753,7 @@ ideal sba (ideal F0, ideal Q,intvec *w,bigintmat *hilb,kStrategy strat)
         BOOLEAN overwrite = FALSE;
         for (int tk=0; tk<strat->S.size(); tk++)
         {
-          if (pGetComp(strat->sig[tk]) == pGetComp(strat->P.sig))
+          if (pGetComp(strat->S[tk].sig) == pGetComp(strat->P.sig))
           {
             //printf("TK %d / %d\n",tk,strat->S.size()-1);
             overwrite = FALSE;
@@ -3806,7 +3798,7 @@ ideal sba (ideal F0, ideal Q,intvec *w,bigintmat *hilb,kStrategy strat)
             // module monomial strat->P.sig gives the leading monomial of
             // the corresponding principal syzygy
             // => we do not need to compute the "real" syzygy completely
-            poly help = p_Copy(strat->sig[ps],currRing);
+            poly help = p_Copy(strat->S[ps].sig,currRing);
             p_ExpVectorAdd (help,strat->P.p,currRing);
             Q.sig = p_Add_q(Q.sig,help,currRing);
             //printf("%d. SYZ  ",i+1);
@@ -3836,7 +3828,7 @@ ideal sba (ideal F0, ideal Q,intvec *w,bigintmat *hilb,kStrategy strat)
           {
             Q.sig = p_Copy(strat->P.sig,currRing);
             p_ExpVectorAdd(Q.sig,strat->S[i].p,currRing);
-            poly help = p_Copy(strat->sig[i],currRing);
+            poly help = p_Copy(strat->S[i].sig,currRing);
             p_ExpVectorAdd(help,strat->P.p,currRing);
             Q.sig = p_Add_q(Q.sig,help,currRing);
             //pWrite(Q.sig);
@@ -3854,7 +3846,7 @@ ideal sba (ideal F0, ideal Q,intvec *w,bigintmat *hilb,kStrategy strat)
             pos = -1;
             for (int j=0; j<strat->S.size()-1; ++j)
             {
-              if (__p_GetComp(strat->sig[j],currRing) == i)
+              if (__p_GetComp(strat->S[j].sig,currRing) == i)
               {
                 pos = j;
                 break;
@@ -3893,7 +3885,7 @@ ideal sba (ideal F0, ideal Q,intvec *w,bigintmat *hilb,kStrategy strat)
     printf("---------------------------\n");
     Print(" %d. ELEMENT ADDED TO GCURR:\n",strat->S.size());
     PrintS("LEAD POLY:  "); pWrite(pHead(strat->S[strat->S.size()-1].p));
-    PrintS("SIGNATURE:  "); pWrite(strat->sig[strat->S.size()-1]);
+    PrintS("SIGNATURE:  "); pWrite(strat->S[strat->S.size()-1].sig);
 #endif
       /*
       if (newrules)
@@ -4038,9 +4030,9 @@ ideal sba (ideal F0, ideal Q,intvec *w,bigintmat *hilb,kStrategy strat)
 //    }
 //  }
   if (TEST_OPT_PROT) messageStatSBA(hilbcount,strat);
-  if (Q!=NULL) updateResult(strat->Shdl,Q,strat);
+  if (Q!=NULL) updateResult(Q,strat);
 #if SBA_PRINT_SIZE_G
-  size_g_non_red  = IDELEMS(strat->Shdl);
+  size_g_non_red  = strat->S.size();
 #endif
   if(!rField_is_Ring(currRing))
       exitSba(strat);
@@ -4065,7 +4057,7 @@ ideal sba (ideal F0, ideal Q,intvec *w,bigintmat *hilb,kStrategy strat)
     {
       //printf("\nAdded k = %i\n",k);
       strat->enterS(*it, strat->S.size(), strat, strat->T.size()-1);
-      //printf("\nThis elements was added from L on pos %i\n",strat->S.size()-1);pWrite(strat->S[strat->S.size()-1].p);pWrite(strat->sig[strat->S.size()-1]);
+      //printf("\nThis elements was added from L on pos %i\n",strat->S.size()-1);pWrite(strat->S[strat->S.size()-1].p);pWrite(strat->S[strat->S.size()-1].sig);
     }
   }
   // Find the "sigdrop element" and put the same signature as the previous one - do we really need this?? - now i put it on the 0 position - no more comparing needed
@@ -4074,9 +4066,9 @@ ideal sba (ideal F0, ideal Q,intvec *w,bigintmat *hilb,kStrategy strat)
   {
     for(k=strat->S.size()-1;k>=0;k--)
     {
-      printf("\nsig[%i] = ",i);pWrite(strat->sig[k]);
-      if(strat->sig[k] == NULL)
-        strat->sig[k] = pCopy(strat->sig[k-1]);
+      printf("\nsig[%i] = ",i);pWrite(strat->S[k].sig);
+      if(strat->S[k].sig == NULL)
+        strat->S[k].sig = pCopy(strat->S[k-1].sig);
     }
   }
   #endif
@@ -4088,7 +4080,17 @@ ideal sba (ideal F0, ideal Q,intvec *w,bigintmat *hilb,kStrategy strat)
   {
     rChangeCurrRing (currRingOld);
     F0          = idrMoveR (F1, sRing, currRing);
-    strat->Shdl = idrMoveR_NoSort (strat->Shdl, sRing, currRing);
+    {
+      ideal tmpShdl = strat->getShdl();
+      tmpShdl = idrMoveR_NoSort (tmpShdl, sRing, currRing);
+      // Update S from the moved ideal
+      strat->S.setsize(IDELEMS(tmpShdl));
+      strat->S.ensure_capacity(IDELEMS(tmpShdl));
+      for (int ii = 0; ii < IDELEMS(tmpShdl); ii++)
+        strat->S[ii].p = tmpShdl->m[ii];
+      strat->Srank = tmpShdl->rank;
+      for (int ii = 0; ii < IDELEMS(tmpShdl); ii++) tmpShdl->m[ii] = NULL; id_Delete(&tmpShdl, currRing);
+    }
     rChangeCurrRing (sRing);
     if(rField_is_Ring(currRing))
       exitSba(strat);
@@ -4097,20 +4099,29 @@ ideal sba (ideal F0, ideal Q,intvec *w,bigintmat *hilb,kStrategy strat)
       strat->tailRing = currRing;
     rDelete (sRing);
   }
-  if(rField_is_Ring(currRing) && !strat->sigdrop)
-    id_DelDiv(strat->Shdl, currRing);
-  if(!rField_is_Ring(currRing))
-    id_DelDiv(strat->Shdl, currRing);
-  idSkipZeroes(strat->Shdl);
-  idTest(strat->Shdl);
+  {
+    ideal tmpShdl = strat->getShdl();
+    if(rField_is_Ring(currRing) && !strat->sigdrop)
+      id_DelDiv(tmpShdl, currRing);
+    if(!rField_is_Ring(currRing))
+      id_DelDiv(tmpShdl, currRing);
+    idSkipZeroes(tmpShdl);
+    // Update S from the cleaned ideal
+    strat->S.setsize(IDELEMS(tmpShdl));
+    for (int ii = 0; ii < IDELEMS(tmpShdl); ii++)
+      strat->S[ii].p = tmpShdl->m[ii];
+    strat->Srank = tmpShdl->rank;
+    for (int ii = 0; ii < IDELEMS(tmpShdl); ii++) tmpShdl->m[ii] = NULL;
+    id_Delete(&tmpShdl, currRing);
+  }
 
 #if SBA_PRINT_SIZE_G
-  size_g   = IDELEMS(strat->Shdl);
+  size_g   = strat->S.size();
 #endif
 #ifdef DEBUGF5
-  printf("SIZE OF SHDL: %d\n",IDELEMS(strat->Shdl));
+  printf("SIZE OF SHDL: %d\n",strat->S.size());
   int oo = 0;
-  while (oo<IDELEMS(strat->Shdl))
+  while (oo<strat->S.size())
   {
     printf(" %d.   ",oo+1);
     pWrite(pHead(strat->S[oo].p));
@@ -4162,7 +4173,7 @@ ideal sba (ideal F0, ideal Q,intvec *w,bigintmat *hilb,kStrategy strat)
   printf("PRODUCT CRITERIA:           %ld\n",product_criterion);
   product_criterion = 0;
 #endif
-  syncShdl(strat); return (strat->Shdl);
+  return strat->getShdl();
 }
 
 poly kNF2 (ideal F,ideal Q,poly q,kStrategy strat, int lazyReduce)
@@ -4207,7 +4218,7 @@ poly kNF2 (ideal F,ideal Q,poly q,kStrategy strat, int lazyReduce)
   /*- set S -*/
   strat->S.setsize(0);
   /*- init local data struct.---------------------------------------- -*/
-  /*Shdl=*/initS(F,Q,strat);
+  initS(F,Q,strat);
   /*- compute------------------------------------------------------- -*/
   //if ((TEST_OPT_INTSTRATEGY)&&(lazyReduce==0))
   //{
@@ -4239,7 +4250,6 @@ poly kNF2 (ideal F,ideal Q,poly q,kStrategy strat, int lazyReduce)
   /*- release temp data------------------------------- -*/
   strat->S.free_all();
   strat->hasFromQ=FALSE;
-  idDelete(&strat->Shdl);
   SI_RESTORE_OPT1(save1);
   if (TEST_OPT_PROT && ((lazyReduce &KSTD_NF_NOLF)==0)) PrintLn();
   return p;
@@ -4273,7 +4283,7 @@ poly kNF2Bound (ideal F,ideal Q,poly q,int bound,kStrategy strat, int lazyReduce
   /*- set S -*/
   strat->S.setsize(0);
   /*- init local data struct.---------------------------------------- -*/
-  /*Shdl=*/initS(F,Q,strat);
+  initS(F,Q,strat);
   /*- compute------------------------------------------------------- -*/
   //if ((TEST_OPT_INTSTRATEGY)&&(lazyReduce==0))
   //{
@@ -4306,7 +4316,6 @@ poly kNF2Bound (ideal F,ideal Q,poly q,int bound,kStrategy strat, int lazyReduce
   /*- release temp data------------------------------- -*/
   strat->S.free_all();
   strat->hasFromQ=FALSE;
-  idDelete(&strat->Shdl);
   SI_RESTORE_OPT1(save1);
   if (TEST_OPT_PROT) PrintLn();
   return p;
@@ -4353,7 +4362,7 @@ ideal kNF2 (ideal F,ideal Q,ideal q,kStrategy strat, int lazyReduce)
   strat->use_buckets = (!TEST_OPT_NOT_BUCKETS) && (!rIsPluralRing(currRing));
 #endif
   /*- init local data struct.---------------------------------------- -*/
-  /*Shdl=*/initS(F,Q,strat);
+  initS(F,Q,strat);
   /*- compute------------------------------------------------------- -*/
   res=idInit(IDELEMS(q),si_max(q->rank,F->rank));
   for (i=IDELEMS(q)-1; i>=0; i--)
@@ -4384,7 +4393,6 @@ ideal kNF2 (ideal F,ideal Q,ideal q,kStrategy strat, int lazyReduce)
   /*- release temp data------------------------------- -*/
   strat->S.free_all();
   strat->hasFromQ=FALSE;
-  idDelete(&strat->Shdl);
   SI_RESTORE_OPT1(save1);
   if (TEST_OPT_PROT) PrintLn();
   return res;
@@ -4422,7 +4430,7 @@ ideal kNF2Bound (ideal F,ideal Q,ideal q,int bound,kStrategy strat, int lazyRedu
   strat->use_buckets = (!TEST_OPT_NOT_BUCKETS) && (!rIsPluralRing(currRing));
 #endif
   /*- init local data struct.---------------------------------------- -*/
-  /*Shdl=*/initS(F,Q,strat);
+  initS(F,Q,strat);
   /*- compute------------------------------------------------------- -*/
   res=idInit(IDELEMS(q),si_max(q->rank,F->rank));
   for (i=IDELEMS(q)-1; i>=0; i--)
@@ -4457,7 +4465,6 @@ ideal kNF2Bound (ideal F,ideal Q,ideal q,int bound,kStrategy strat, int lazyRedu
   /*- release temp data------------------------------- -*/
   strat->S.free_all();
   strat->hasFromQ=FALSE;
-  idDelete(&strat->Shdl);
   SI_RESTORE_OPT1(save1);
   if (TEST_OPT_PROT) PrintLn();
   return res;
@@ -4688,7 +4695,7 @@ void f5c (kStrategy strat, int& olddeg, int& minimcnt, int& hilbeledeg,
 #ifdef DEBUGF5
         PrintS("ELEMENT ADDED TO GCURR DURING INTERRED: ");
         pWrite(pHead(strat->S[strat->S.size()-1].p));
-        pWrite(strat->sig[strat->S.size()-1]);
+        pWrite(strat->S[strat->S.size()-1].sig);
 #endif
         if (hilb!=NULL) khCheck(Q,w,hilb,hilbeledeg,hilbcount,strat);
       }
@@ -4719,8 +4726,8 @@ void f5c (kStrategy strat, int& olddeg, int& minimcnt, int& hilbeledeg,
     strat->T[cc].sig        = pOne();
     p_SetComp(strat->T[cc].sig,cc+1,currRing);
     strat->T[cc].sevSig     = pGetShortExpVector(strat->T[cc].sig);
-    strat->sig[cc]          = strat->T[cc].sig;
-    strat->sevSig[cc]       = strat->T[cc].sevSig;
+    strat->S[cc].sig          = strat->T[cc].sig;
+    strat->S[cc].sevSig       = strat->T[cc].sevSig;
     strat->T[cc].is_sigsafe = TRUE;
     cc++;
   }
@@ -4734,9 +4741,8 @@ void f5c (kStrategy strat, int& olddeg, int& minimcnt, int& hilbeledeg,
     p_SetComp(Lp.sig,cc+1,currRing);
     cc++;
   }
-  for (cc=strat->S.size(); cc<IDELEMS(strat->Shdl); ++cc)
+  for (cc=strat->S.size(); cc<strat->S.size(); ++cc)
     strat->S[cc].p  = NULL;
-    strat->Shdl->m[cc] = strat->S[cc].p;
   #if 0
   printf("\nAfter f5c sorting\n");
   for(int i=0;i < strat->S.size();i++)
@@ -4750,7 +4756,7 @@ void f5c (kStrategy strat, int& olddeg, int& minimcnt, int& hilbeledeg,
   while (cc<strat->T.size())
   {
     pWrite(pHead(strat->S[cc].p));
-    pWrite(strat->sig[cc]);
+    pWrite(strat->S[cc].sig);
     printf("- - - - - -\n");
     cc++;
   }
@@ -4801,7 +4807,7 @@ ideal bbaShift(ideal F, ideal Q,intvec *w,bigintmat *hilb,kStrategy strat)
   initHilbCrit(F,Q,&hilb,strat);
   initBba(strat);
   /*set enterS, spSpolyShort, reduce, red, initEcart, initEcartPair*/
-  /*Shdl=*/initBuchMora(F, Q,strat);
+  initBuchMora(F, Q,strat);
   if (strat->minim>0) strat->M=idInit(IDELEMS(F),F->rank);
   reduc = olddeg = 0;
 
@@ -5107,20 +5113,15 @@ ideal bbaShift(ideal F, ideal Q,intvec *w,bigintmat *hilb,kStrategy strat)
         if(!nGreaterZero(pGetCoeff(strat->S[i].p)))
         {
           strat->S[i].p = pNeg(strat->S[i].p);
-          strat->Shdl->m[i] = strat->S[i].p;
         }
       }
       finalReduceByMon(strat);
-      // finalReduceByMon modifies S[i].p in place and may NULL entries.
-      // Sync Shdl to match, then check leading coefficients.
-      for(int i = 0;i < strat->S.size();i++)
-        strat->Shdl->m[i] = strat->S[i].p;
+      // finalReduceByMon may NULL entries (poly reduced to zero); skip those
       for(int i = 0;i < strat->S.size();i++)
       {
         if(strat->S[i].p != NULL && !nGreaterZero(pGetCoeff(strat->S[i].p)))
         {
           strat->S[i].p = pNeg(strat->S[i].p);
-          strat->Shdl->m[i] = strat->S[i].p;
         }
       }
     }
@@ -5144,16 +5145,14 @@ ideal bbaShift(ideal F, ideal Q,intvec *w,bigintmat *hilb,kStrategy strat)
     { fprintf(stderr, "bba BEFORE updateResult: S[%d].p=%p NULL coef! Q=%p\n", _ii, (void*)strat->S[_ii].p, (void*)Q); abort(); }
 #endif
   /* postprocessing for GB over Q-rings ------------------*/
-  if ((Q!=NULL)&&(!errorreported)) updateResult(strat->Shdl,Q,strat);
+  if ((Q!=NULL)&&(!errorreported)) updateResult(Q,strat);
 #ifdef KDEBUG
   for(int _ii=0; _ii < strat->S.size(); _ii++)
     if (strat->S[_ii].p != NULL && strat->S[_ii].p->coef == NULL)
     { fprintf(stderr, "bba AFTER updateResult: S[%d].p=%p NULL coef! Q=%p\n", _ii, (void*)strat->S[_ii].p, (void*)Q); abort(); }
 #endif
 
-  idTest(strat->Shdl);
-
-  syncShdl(strat); return (strat->Shdl);
+  return strat->getShdl();
 }
 #endif
 

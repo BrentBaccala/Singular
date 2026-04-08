@@ -328,18 +328,18 @@ ideal k_sca_gr_bba(const ideal F, const ideal Q, const intvec *, const bigintmat
 
   if (TEST_OPT_PROT) messageStat(hilbcount,strat);
 
-  if (tempQ!=NULL) updateResult(strat->Shdl,tempQ,strat);
+  if (tempQ!=NULL) updateResult(tempQ,strat);
 
   id_Delete(&tempF, currRing);
 
 
   // complete reduction of the standard basis---------
   if (TEST_OPT_REDSB){
-    ideal I = strat->Shdl;
+    ideal I = strat->getShdl();
     ideal erg = kInterRedOld(I,tempQ);
     assume(I!=erg);
     id_Delete(&I, currRing);
-    strat->Shdl = erg;
+    strat->Srank = erg->rank;
     // id_Delete freed the old polys; update S to match new Shdl
     int newsize = IDELEMS(erg);
     while (newsize > 0 && erg->m[newsize-1] == NULL) newsize--;
@@ -356,7 +356,7 @@ ideal k_sca_gr_bba(const ideal F, const ideal Q, const intvec *, const bigintmat
 
   if( currRing != save )     rChangeCurrRing(save);
 
-  syncShdl(strat); return (strat->Shdl);
+  return strat->getShdl();
 }
 
 
@@ -806,17 +806,17 @@ ideal k_sca_bba (const ideal F, const ideal Q, const intvec */*w*/, const bigint
 
 
 
-  if (tempQ!=NULL) updateResult(strat->Shdl,tempQ,strat);
+  if (tempQ!=NULL) updateResult(tempQ,strat);
 
 
   if (TEST_OPT_REDSB) // ???
   {
     // must be at the very end (after exitBuchMora) as it changes the S set!!!
-    ideal I = strat->Shdl;
+    ideal I = strat->getShdl();
     ideal erg = kInterRedOld(I,tempQ);
     assume(I!=erg);
     id_Delete(&I, currRing);
-    strat->Shdl = erg;
+    strat->Srank = erg->rank;
     // id_Delete freed the old Shdl polys that S[i].p still references.
     // Update S to match the new Shdl, and adjust S.size since erg may
     // have a different number of entries.
@@ -834,7 +834,7 @@ ideal k_sca_bba (const ideal F, const ideal Q, const intvec */*w*/, const bigint
 
   if( currRing != save )     rChangeCurrRing(save);
 
-  syncShdl(strat); return (strat->Shdl);
+  return strat->getShdl();
 }
 
 // //////////////////////////////////////////////////////////////////////////////
@@ -1156,13 +1156,12 @@ ideal k_sca_mora(const ideal F, const ideal Q, const intvec */*w*/, const bigint
 //       ecartWeights=NULL;
 //     }
 //  }
-  if (tempQ!=NULL) updateResult(strat->Shdl,tempQ,strat);
-  idTest(strat->Shdl);
+  if (tempQ!=NULL) updateResult(tempQ,strat);
 
   id_Delete( &tempF, currRing);
 
   if( currRing != save )     rChangeCurrRing(save);
 
-  syncShdl(strat); return (strat->Shdl);
+  return strat->getShdl();
 }
 

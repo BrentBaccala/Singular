@@ -326,6 +326,7 @@ static ideal kInterRedCC(ideal F, ideal Q)
   strat->R.free_all();
 
   strat->hasFromQ = FALSE;
+  // walk.cc: get result ideal from strat
 /*
   if (TEST_OPT_PROT)
   {
@@ -333,7 +334,7 @@ static ideal kInterRedCC(ideal F, ideal Q)
     mflush();
   }
 */
-  ideal shdl=strat->Shdl;
+  ideal shdl=strat->getShdl();
   idSkipZeroes(shdl);
   delete(strat);
 

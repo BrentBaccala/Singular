@@ -1265,7 +1265,7 @@ ideal k_gnc_gr_bba(const ideal F, const ideal Q, const intvec *, const bigintmat
 //    }
 //  }
   if (TEST_OPT_PROT) messageStat(hilbcount,strat);
-  if (Q!=NULL) updateResult(strat->Shdl,Q,strat);
+  if (Q!=NULL) updateResult(Q,strat);
 
 
 #if MYTEST
@@ -1274,7 +1274,7 @@ ideal k_gnc_gr_bba(const ideal F, const ideal Q, const intvec *, const bigintmat
 
   if( currRing != save )     rChangeCurrRing(save);
 
-  syncShdl(strat); return (strat->Shdl);
+  return strat->getShdl();
 }
 
 ideal k_gnc_gr_mora(const ideal F, const ideal Q, const intvec *, const bigintmat *, kStrategy strat, const ring _currRing)

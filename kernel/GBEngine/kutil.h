@@ -648,7 +648,6 @@ public:
 };
 
 // SElement: one element of the S set (standard basis).
-// Replaces the 7 parallel arrays S[], ecartS[], sevS[], S_2_R[], lenS[], lenSw[], fromQ[].
 struct SElement {
   poly p;              // the polynomial
   int ecart;           // ecart
@@ -657,8 +656,11 @@ struct SElement {
   int length;          // number of terms (replaces lenS)
   wlen_type wlength;   // weighted length (replaces lenSw)
   int fromQ;           // from quotient ideal
+  poly sig;            // signature (sba only)
+  unsigned long sevSig;// short exponent vector of signature (sba only)
 
-  SElement() : p(NULL), ecart(0), sev(0), s_2_r(0), length(0), wlength(0), fromQ(0) {}
+  SElement() : p(NULL), ecart(0), sev(0), s_2_r(0), length(0), wlength(0),
+               fromQ(0), sig(NULL), sevSig(0) {}
 };
 
 class skStrategy
@@ -689,15 +691,11 @@ public:
   s_poly_proc_t s_poly = NULL;
 
   LObject P;
-  ideal Shdl = NULL;
   ideal D = NULL; /*V(S) is in D(D)*/
   ideal M = NULL; /*set of minimal generators*/
   BlockArray<SElement> S;
+  int Srank = 1;       // rank for getShdl() result ideal
   polyset syz = NULL;
-  polyset sig = NULL;
-  intset fromS = NULL; // from which S[i] S[j] comes from
-                       // this is important for signature-based
-                       // algorithms
   intset syzIdx = NULL;// index in the syz array at which the first
                        // syzygy of component i comes up
                        // important for signature-based algorithms
@@ -705,7 +703,12 @@ public:
   int currIdx = 0;
   int max_lower_index = 0;
   unsigned long* sevSyz = NULL;
-  unsigned long* sevSig = NULL;
+
+  // Build an ideal from S on demand. The caller owns the returned ideal.
+  // The ideal's m[] entries share poly pointers with S[i].p — they are
+  // NOT copies. The caller must not free them while S is still alive,
+  // or must take ownership (set S[i].p = NULL afterward).
+  ideal getShdl();
   BlockArray<unsigned long> sevT;
   BlockArray<TObject> T;
   LSet L;
@@ -815,7 +818,6 @@ int compareL17_c (const LObject &lhs, const LObject &rhs, const kStrategy strat)
 int compareL17_cRing (const LObject &lhs, const LObject &rhs, const kStrategy strat);
 int compareLSpecial (const LObject &lhs, const LObject &rhs, const kStrategy strat);
 
-void syncShdl (kStrategy strat);
 void deleteHC(poly *p, int *e, int *l, kStrategy strat);
 void deleteHC(LObject* L, kStrategy strat, BOOLEAN fromNext = FALSE);
 void deleteInS (int i,kStrategy strat);
@@ -936,7 +938,7 @@ void initBuchMora (ideal F, ideal Q,kStrategy strat);
 void initSbaBuchMora (ideal F, ideal Q,kStrategy strat);
 void exitBuchMora (kStrategy strat);
 void exitSba (kStrategy strat);
-void updateResult(ideal r,ideal Q,kStrategy strat);
+void updateResult(ideal Q,kStrategy strat);
 void completeReduce (kStrategy strat, BOOLEAN withT=FALSE);
 void kFreeStrat(kStrategy strat);
 void enterOnePairNormal (int i,poly p,int ecart, int isFromQ,kStrategy strat, int atR);

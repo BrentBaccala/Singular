@@ -3356,7 +3356,7 @@ slimgb_alg::slimgb_alg (ideal I, int syz_comp, BOOLEAN F4, int deg_pos)
   // i=((i+IDELEMS(c->S)+15)/16)*16;
   strat->S.ensure_capacity(i);
   strat->hasFromQ = FALSE;
-  strat->Shdl = idInit (1, 1);
+  strat->Srank = 1;
   strat->use_lenS = TRUE;
   if((isDifficultField) || (eliminationProblem))
     strat->use_lenSw = TRUE;
@@ -3365,7 +3365,7 @@ slimgb_alg::slimgb_alg (ideal I, int syz_comp, BOOLEAN F4, int deg_pos)
   assume (n > 0);
   add_to_basis_ideal_quotient (I->m[0], this, NULL);
 
-  assume (strat->S.size()-1 == IDELEMS (strat->Shdl) - 1);
+  assume (strat->S.size() > 0);
   if(!(F4_mode))
   {
     poly *array_arg = I->m;
@@ -3551,7 +3551,7 @@ slimgb_alg::~slimgb_alg ()
       // the same pointer.  pDelete NULLs S[i].p, but Shdl->m[i] still
       // holds the (now-freed) address.  NULL it so id_Delete(&Shdl)
       // below won't double-free the polynomial.
-      c->strat->Shdl->m[i] = NULL;
+      c->strat->S[i].p = NULL;
     }
   }
 //   for(i=0;i<c->n;i++)
@@ -3602,16 +3602,16 @@ slimgb_alg::~slimgb_alg ()
   IDELEMS (I) = c->n;
   idSkipZeroes (I);
   // The result ideal I (= c->S) shares poly pointers with strat->S[i].p
-  // and strat->Shdl->m[i].  NULL both so that S.free_all() and
+  // and strat->S[i].p.  NULL both so that S.free_all() and
   // id_Delete(&Shdl) below don't destroy the polynomials that the
   // caller still needs via I.
   for(i = 0; i <= c->strat->S.size()-1; i++)
   {
     c->strat->S[i].p = NULL;
-    c->strat->Shdl->m[i] = NULL;
+    c->strat->S[i].p = NULL;
   }
   c->strat->S.free_all();
-  id_Delete (&c->strat->Shdl, c->r);
+  // Shdl removed; S.free_all() handles cleanup
   pDelete (&c->tmp_lm);
   omUnGetSpecBin (&lm_bin);
   delete c->strat;

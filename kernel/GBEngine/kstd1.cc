@@ -1899,7 +1899,7 @@ ideal mora (ideal F, ideal Q,intvec *w,bigintmat *hilb,kStrategy strat)
     initBuchMoraPosRing(strat);
   else
     initBuchMoraPos(strat);
-  /*Shdl=*/initBuchMora(F,Q,strat);
+  initBuchMora(F,Q,strat);
   if (TEST_OPT_FASTHC) missingAxis(&strat->lastAxis,strat);
   /*updateS in initBuchMora has Hecketest
   * and could have put strat->kHEdgdeFound FALSE*/
@@ -2060,7 +2060,7 @@ ideal mora (ideal F, ideal Q,intvec *w,bigintmat *hilb,kStrategy strat)
     if (strat->kAllAxis)
     {
       if ((TEST_OPT_FINDET)
-      || ((TEST_OPT_MULTBOUND) && (scMult0Int(strat->Shdl,NULL) < Kstd1_mu)))
+      || ((TEST_OPT_MULTBOUND) && (scMult0Int(strat->getShdl(),NULL) < Kstd1_mu)))
       {
         // obachman: is this still used ???
         /*
@@ -2102,10 +2102,9 @@ ideal mora (ideal F, ideal Q,intvec *w,bigintmat *hilb,kStrategy strat)
 //  }
   if(nCoeff_is_Z(currRing->cf))
     finalReduceByMon(strat);
-  if (Q!=NULL) updateResult(strat->Shdl,Q,strat);
+  if (Q!=NULL) updateResult(Q,strat);
   SI_RESTORE_OPT1(save1);
-  idTest(strat->Shdl);
-  syncShdl(strat); return (strat->Shdl);
+  return strat->getShdl();
 }
 
 poly kNF1 (ideal F,ideal Q,poly q, kStrategy strat, int lazyReduce)
@@ -2162,7 +2161,7 @@ poly kNF1 (ideal F,ideal Q,poly q, kStrategy strat, int lazyReduce)
   /*- set S -*/
   strat->S.setsize(0);
   /*- init local data struct.-------------------------- -*/
-  /*Shdl=*/initS(F,Q,strat);
+  initS(F,Q,strat);
   if ((strat->ak!=0)
   && (strat->kAllAxis)) /*never true for ring-cf*/
   {
@@ -2237,7 +2236,6 @@ poly kNF1 (ideal F,ideal Q,poly q, kStrategy strat, int lazyReduce)
 //      ecartWeights=NULL;
 //    }
 //  }
-  idDelete(&strat->Shdl);
   SI_RESTORE_OPT1(save1);
   if (TEST_OPT_PROT) PrintLn();
   return p;
@@ -2296,7 +2294,7 @@ ideal kNF1 (ideal F,ideal Q,ideal q, kStrategy strat, int lazyReduce)
   /*- set S -*/
   strat->S.setsize(0);
   /*- init local data struct.-------------------------- -*/
-  /*Shdl=*/initS(F,Q,strat);
+  initS(F,Q,strat);
   if ((strat->ak!=0)
   && (strat->kNoether!=NULL))
   {
@@ -2380,7 +2378,6 @@ ideal kNF1 (ideal F,ideal Q,ideal q, kStrategy strat, int lazyReduce)
 //      ecartWeights=NULL;
 //    }
 //  }
-  idDelete(&strat->Shdl);
   SI_RESTORE_OPT1(save1);
   if (TEST_OPT_PROT) PrintLn();
   return res;
@@ -3495,24 +3492,19 @@ ideal kInterRedOld (ideal F,const ideal Q)
 
   if (strat->hasFromQ)
   {
-    for (j=IDELEMS(strat->Shdl)-1;j>=0;j--)
+    for (j=strat->S.size()-1;j>=0;j--)
     {
       if(strat->S[j].fromQ) pDelete(&strat->S[j].p);
     }
     strat->hasFromQ=FALSE;
   }
-  // Copy S polys back to Shdl before freeing S
-  for (int ii=0; ii < strat->S.size(); ii++)
-    strat->Shdl->m[ii] = strat->S[ii].p;
-  for (int ii=strat->S.size(); ii<IDELEMS(strat->Shdl); ii++)
-    strat->Shdl->m[ii] = NULL;
-  strat->S.free_all();
+
 //  if (TEST_OPT_PROT)
 //  {
 //    writeTime("end Interred:");
 //    mflush();
 //  }
-  ideal shdl=strat->Shdl;
+  ideal shdl=strat->getShdl();
   idSkipZeroes(shdl);
   if (strat->hasFromQ)
   {
@@ -3576,7 +3568,7 @@ ideal kInterRedBba (ideal F, ideal Q, int &need_retry)
   /*set enterS, spSpolyShort, reduce, red, initEcart, initEcartPair*/
   strat->compareL=compareL0; /* ord according pComp */
 
-  /*Shdl=*/initBuchMora(F, Q, strat);
+  initBuchMora(F, Q, strat);
   reduc = olddeg = 0;
 
 #ifndef NO_BUCKETS
@@ -3774,11 +3766,9 @@ ideal kInterRedBba (ideal F, ideal Q, int &need_retry)
 //    }
 //  }
   //if (TEST_OPT_PROT) messageStat(0/*hilbcount*/,strat);
-  if (Q!=NULL) updateResult(strat->Shdl,Q,strat);
-  syncShdl(strat);
-  ideal res=strat->Shdl;
-  strat->Shdl=NULL;
-  delete strat;
+  if (Q!=NULL) updateResult(Q,strat);
+  ideal res=strat->getShdl();
+    delete strat;
   return res;
 }
 ideal kInterRed (ideal F,const ideal Q)

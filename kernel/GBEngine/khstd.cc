@@ -27,7 +27,7 @@
 */
 void khCheck( ideal Q, intvec *w, bigintmat *hilb, int &eledeg, int &count,
               kStrategy strat)
-  /* ideal S=strat->Shdl, poly p=strat->P.p */
+  /* ideal S=strat->getShdl(), poly p=strat->P.p */
 /*
 * compute the number eledeg of elements with a degree >= deg(p) going into kStd,
 * p is already in S and for all further q going into S yields deg(q) >= deg(p),
@@ -77,7 +77,7 @@ void khCheck( ideal Q, intvec *w, bigintmat *hilb, int &eledeg, int &count,
     // degp = pWDegree;
     l = hilb->cols();
     mw = n_Int(BIMATELEM(*hilb,1,l),coeffs_BIGINT);
-    newhilb =hFirstSeries0b(strat->Shdl,Q,strat->kHomW,w,currRing,coeffs_BIGINT);
+    newhilb =hFirstSeries0b(strat->getShdl(),Q,strat->kHomW,w,currRing,coeffs_BIGINT);
     ln = newhilb->cols();
     deg = degp(strat->P.p,currRing);
     loop // compare the series in degree deg, try to increase deg -----------
@@ -140,7 +140,7 @@ void khCheck( ideal Q, intvec *w, bigintmat *hilb, int &eledeg, int &count,
 */
 void khCheck( ideal Q, intvec *w, poly hilb, const ring Qt, int &eledeg, int &count,
               kStrategy strat)
-  /* ideal S=strat->Shdl, poly p=strat->P.p */
+  /* ideal S=strat->getShdl(), poly p=strat->P.p */
 /*
 * compute the number eledeg of elements with a degree >= deg(p) going into kStd,
 * p is already in S and for all further q going into S yields deg(q) >= deg(p),
@@ -192,7 +192,7 @@ void khCheck( ideal Q, intvec *w, poly hilb, const ring Qt, int &eledeg, int &co
     l = p_FDeg(hilb,Qt);
     number lt=pGetcoeff(hilb);
     n_MPZ(mw,&lt,Qt->cf);
-    newhilb =hFirstSeries0m(strat->Shdl,Q,w,strat->kHomW,currRing,Qt);
+    newhilb =hFirstSeries0m(strat->getShdl(),Q,w,strat->kHomW,currRing,Qt);
     ln = p_FDeg(newhilb);
     deg = degp(strat->P.p,currRing);
     loop // compare the series in degree deg, try to increase deg -----------
@@ -260,9 +260,9 @@ so delete all the remaining pairs
   ideal Lm;
   bigintmat *newhilb;
 
-  Lm = id_Head(strat->Shdl,currRing);
+  Lm = id_Head(strat->getShdl(),currRing);
 
-  newhilb =hFirstSeries0b(strat->Shdl,Q,strat->kHomW,w,currRing,coeffs_BIGINT);
+  newhilb =hFirstSeries0b(strat->getShdl(),Q,strat->kHomW,w,currRing,coeffs_BIGINT);
 
   if(newhilb->compare(hilb) == 0)
   {
