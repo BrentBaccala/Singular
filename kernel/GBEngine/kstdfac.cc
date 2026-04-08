@@ -787,7 +787,7 @@ ideal bbafac (ideal /*F*/, ideal Q,intvec* /*w*/,kStrategy strat, ideal_list FL)
   exitBuchMora(strat);
   if (TEST_OPT_PROT) { PrintLn(); messageStat(0,strat); }
   if (Q!=NULL) updateResult(strat->Shdl,Q,strat);
-  return (strat->Shdl);
+  syncShdl(strat); return (strat->Shdl);
 }
 
 ideal_list kStdfac(ideal F, ideal Q, tHomog h,intvec ** w,ideal D)

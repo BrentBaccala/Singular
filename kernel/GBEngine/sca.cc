@@ -349,7 +349,7 @@ ideal k_sca_gr_bba(const ideal F, const ideal Q, const intvec *, const bigintmat
 
   if( currRing != save )     rChangeCurrRing(save);
 
-  return (strat->Shdl);
+  syncShdl(strat); return (strat->Shdl);
 }
 
 
@@ -818,7 +818,7 @@ ideal k_sca_bba (const ideal F, const ideal Q, const intvec */*w*/, const bigint
 
   if( currRing != save )     rChangeCurrRing(save);
 
-  return (strat->Shdl);
+  syncShdl(strat); return (strat->Shdl);
 }
 
 // //////////////////////////////////////////////////////////////////////////////
@@ -1147,6 +1147,6 @@ ideal k_sca_mora(const ideal F, const ideal Q, const intvec */*w*/, const bigint
 
   if( currRing != save )     rChangeCurrRing(save);
 
-  return (strat->Shdl);
+  syncShdl(strat); return (strat->Shdl);
 }
 

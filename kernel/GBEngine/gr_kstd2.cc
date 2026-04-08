@@ -1274,7 +1274,7 @@ ideal k_gnc_gr_bba(const ideal F, const ideal Q, const intvec *, const bigintmat
 
   if( currRing != save )     rChangeCurrRing(save);
 
-  return (strat->Shdl);
+  syncShdl(strat); return (strat->Shdl);
 }
 
 ideal k_gnc_gr_mora(const ideal F, const ideal Q, const intvec *, const bigintmat *, kStrategy strat, const ring _currRing)
