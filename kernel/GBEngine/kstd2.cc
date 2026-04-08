@@ -3188,8 +3188,18 @@ bba_post_loop:
 //  }
   if ((TEST_OPT_PROT) || (TEST_OPT_DEBUG)) messageStat(hilbcount,strat);
   SI_RESTORE_OPT1(save);
+#ifdef KDEBUG
+  for(int _ii=0; _ii < strat->S.size(); _ii++)
+    if (strat->S[_ii].p != NULL && strat->S[_ii].p->coef == NULL)
+    { fprintf(stderr, "bba BEFORE updateResult: S[%d].p=%p NULL coef! Q=%p\n", _ii, (void*)strat->S[_ii].p, (void*)Q); abort(); }
+#endif
   /* postprocessing for GB over Q-rings ------------------*/
   if ((Q!=NULL)&&(!errorreported)) updateResult(strat->Shdl,Q,strat);
+#ifdef KDEBUG
+  for(int _ii=0; _ii < strat->S.size(); _ii++)
+    if (strat->S[_ii].p != NULL && strat->S[_ii].p->coef == NULL)
+    { fprintf(stderr, "bba AFTER updateResult: S[%d].p=%p NULL coef! Q=%p\n", _ii, (void*)strat->S[_ii].p, (void*)Q); abort(); }
+#endif
 
   idTest(strat->Shdl);
 
@@ -5120,8 +5130,18 @@ ideal bbaShift(ideal F, ideal Q,intvec *w,bigintmat *hilb,kStrategy strat)
 //  }
   if ((TEST_OPT_PROT) || (TEST_OPT_DEBUG)) messageStat(hilbcount,strat);
   SI_RESTORE_OPT1(save);
+#ifdef KDEBUG
+  for(int _ii=0; _ii < strat->S.size(); _ii++)
+    if (strat->S[_ii].p != NULL && strat->S[_ii].p->coef == NULL)
+    { fprintf(stderr, "bba BEFORE updateResult: S[%d].p=%p NULL coef! Q=%p\n", _ii, (void*)strat->S[_ii].p, (void*)Q); abort(); }
+#endif
   /* postprocessing for GB over Q-rings ------------------*/
   if ((Q!=NULL)&&(!errorreported)) updateResult(strat->Shdl,Q,strat);
+#ifdef KDEBUG
+  for(int _ii=0; _ii < strat->S.size(); _ii++)
+    if (strat->S[_ii].p != NULL && strat->S[_ii].p->coef == NULL)
+    { fprintf(stderr, "bba AFTER updateResult: S[%d].p=%p NULL coef! Q=%p\n", _ii, (void*)strat->S[_ii].p, (void*)Q); abort(); }
+#endif
 
   idTest(strat->Shdl);
 

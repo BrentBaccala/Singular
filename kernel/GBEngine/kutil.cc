@@ -546,6 +546,18 @@ void cleanT (kStrategy strat)
     (strat->tailRing != currRing ?
      pGetShallowCopyDeleteProc(strat->tailRing, currRing) :
      NULL);
+
+#ifdef KDEBUG
+  // Validate all S entries before cleanT processing
+  for (i = 0; i < strat->S.size(); i++)
+  {
+    if (strat->S[i].p != NULL && strat->S[i].p->coef == NULL)
+    {
+      fprintf(stderr, "cleanT ENTRY: S[%d].p=%p already has NULL coef!\n", i, (void*)strat->S[i].p);
+    }
+  }
+#endif
+
   for (j=0; j < strat->T.size(); j++)
   {
     p = strat->T[j].p;
@@ -591,6 +603,21 @@ void cleanT (kStrategy strat)
         break;
       }
     }
+#ifdef KDEBUG
+    // Check all S entries after processing T[j]
+    for (int k = 0; k < strat->S.size(); k++)
+    {
+      if (strat->S[k].p != NULL && strat->S[k].p->coef == NULL)
+      {
+        fprintf(stderr, "cleanT: after T[%d] (p=%p, t_p=%p, matched S[%d]=%s), S[%d].p=%p got NULL coef!\n",
+                j, (void*)p, (void*)strat->T[j].t_p,
+                (i <= strat->S.size()-1) ? i : -1,
+                (i <= strat->S.size()-1) ? "found" : "not_found",
+                k, (void*)strat->S[k].p);
+        abort();
+      }
+    }
+#endif
   }
   strat->T.setsize(0);
 }
@@ -8207,7 +8234,9 @@ void syncShdl (kStrategy strat)
   {
     if (strat->S[i].p != NULL && strat->S[i].p->coef == NULL)
     {
-      fprintf(stderr, "BUG in syncShdl: S[%d].p=%p has NULL coef!\n", i, (void*)strat->S[i].p);
+      fprintf(stderr, "BUG in syncShdl: S[%d].p=%p has NULL coef! S.size=%d Shdl.ncols=%d\n",
+              i, (void*)strat->S[i].p, strat->S.size(), strat->Shdl->ncols);
+      // Print backtrace via abort
       abort();
     }
   }

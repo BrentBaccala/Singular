@@ -340,6 +340,13 @@ ideal k_sca_gr_bba(const ideal F, const ideal Q, const intvec *, const bigintmat
     assume(I!=erg);
     id_Delete(&I, currRing);
     strat->Shdl = erg;
+    // id_Delete freed the old polys; update S to match new Shdl
+    int newsize = IDELEMS(erg);
+    while (newsize > 0 && erg->m[newsize-1] == NULL) newsize--;
+    strat->S.ensure_capacity(newsize);
+    strat->S.setsize(newsize);
+    for (int ii = 0; ii < newsize; ii++)
+      strat->S[ii].p = erg->m[ii];
   }
 
 
@@ -810,6 +817,15 @@ ideal k_sca_bba (const ideal F, const ideal Q, const intvec */*w*/, const bigint
     assume(I!=erg);
     id_Delete(&I, currRing);
     strat->Shdl = erg;
+    // id_Delete freed the old Shdl polys that S[i].p still references.
+    // Update S to match the new Shdl, and adjust S.size since erg may
+    // have a different number of entries.
+    int newsize = IDELEMS(erg);
+    while (newsize > 0 && erg->m[newsize-1] == NULL) newsize--;
+    strat->S.ensure_capacity(newsize);
+    strat->S.setsize(newsize);
+    for (int ii = 0; ii < newsize; ii++)
+      strat->S[ii].p = erg->m[ii];
   }
 
 #if MYTEST
