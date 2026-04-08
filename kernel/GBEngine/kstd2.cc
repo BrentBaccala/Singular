@@ -3165,9 +3165,13 @@ bba_post_loop:
         }
       }
       finalReduceByMon(strat);
+      // finalReduceByMon modifies S[i].p in place and may NULL entries.
+      // Sync Shdl to match, then check leading coefficients.
+      for(int i = 0;i < strat->S.size();i++)
+        strat->Shdl->m[i] = strat->S[i].p;
       for(int i = 0;i < strat->S.size();i++)
       {
-        if(!nGreaterZero(pGetCoeff(strat->S[i].p)))
+        if(strat->S[i].p != NULL && !nGreaterZero(pGetCoeff(strat->S[i].p)))
         {
           strat->S[i].p = pNeg(strat->S[i].p);
           strat->Shdl->m[i] = strat->S[i].p;
@@ -5107,9 +5111,13 @@ ideal bbaShift(ideal F, ideal Q,intvec *w,bigintmat *hilb,kStrategy strat)
         }
       }
       finalReduceByMon(strat);
+      // finalReduceByMon modifies S[i].p in place and may NULL entries.
+      // Sync Shdl to match, then check leading coefficients.
+      for(int i = 0;i < strat->S.size();i++)
+        strat->Shdl->m[i] = strat->S[i].p;
       for(int i = 0;i < strat->S.size();i++)
       {
-        if(!nGreaterZero(pGetCoeff(strat->S[i].p)))
+        if(strat->S[i].p != NULL && !nGreaterZero(pGetCoeff(strat->S[i].p)))
         {
           strat->S[i].p = pNeg(strat->S[i].p);
           strat->Shdl->m[i] = strat->S[i].p;
