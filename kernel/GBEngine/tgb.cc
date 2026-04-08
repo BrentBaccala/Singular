@@ -3545,7 +3545,14 @@ slimgb_alg::~slimgb_alg ()
       }
     }
     if(!found)
+    {
       pDelete (&c->strat->S[i].p);
+      // With SElement, S[i].p and Shdl->m[i] are separate copies of
+      // the same pointer.  pDelete NULLs S[i].p, but Shdl->m[i] still
+      // holds the (now-freed) address.  NULL it so id_Delete(&Shdl)
+      // below won't double-free the polynomial.
+      c->strat->Shdl->m[i] = NULL;
+    }
   }
 //   for(i=0;i<c->n;i++)
 //   {
@@ -3594,8 +3601,15 @@ slimgb_alg::~slimgb_alg ()
   ideal I = c->S;
   IDELEMS (I) = c->n;
   idSkipZeroes (I);
+  // The result ideal I (= c->S) shares poly pointers with strat->S[i].p
+  // and strat->Shdl->m[i].  NULL both so that S.free_all() and
+  // id_Delete(&Shdl) below don't destroy the polynomials that the
+  // caller still needs via I.
   for(i = 0; i <= c->strat->S.size()-1; i++)
+  {
     c->strat->S[i].p = NULL;
+    c->strat->Shdl->m[i] = NULL;
+  }
   c->strat->S.free_all();
   id_Delete (&c->strat->Shdl, c->r);
   pDelete (&c->tmp_lm);
