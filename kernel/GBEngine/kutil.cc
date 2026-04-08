@@ -9487,7 +9487,21 @@ void updateResult(ideal Q, kStrategy strat)
       }
     }
   }
-  // idSkipZeroes handled by getShdl()
+  // Compact S: remove NULL gaps left by pDelete, matching old idSkipZeroes behavior.
+  // This matters because bba continues using S after updateResult returns.
+  {
+    int j = 0;
+    for (int k = 0; k < strat->S.size(); k++)
+    {
+      if (strat->S[k].p != NULL)
+      {
+        if (j != k)
+          strat->S[j] = strat->S[k];
+        j++;
+      }
+    }
+    strat->S.setsize(j);
+  }
 }
 
 void completeReduce (kStrategy strat, BOOLEAN withT)
