@@ -3516,8 +3516,6 @@ slimgb_alg::~slimgb_alg ()
   omFree (c->T_deg);
   omfree (c->T_deg_full); /*c->T_deg_full my be NULL*/
 
-  c->strat->S.free_all();
-
   for(i = 0; i < c->n; i++)
   {
     if(c->gcd_of_terms[i])
@@ -3598,6 +3596,7 @@ slimgb_alg::~slimgb_alg ()
   idSkipZeroes (I);
   for(i = 0; i <= c->strat->sl; i++)
     c->strat->S[i].p = NULL;
+  c->strat->S.free_all();
   id_Delete (&c->strat->Shdl, c->r);
   pDelete (&c->tmp_lm);
   omUnGetSpecBin (&lm_bin);
