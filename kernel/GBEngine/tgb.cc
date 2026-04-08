@@ -652,7 +652,7 @@ int kFindDivisibleByInS_easy (kStrategy strat, const red_object & obj)
   poly p = obj.p;
   if ((strat->syzComp>0) && (pGetComp(p)>strat->syzComp)) return -1;
   long not_sev = ~obj.sev;
-  for(int i = 0; i <= strat->sl; i++)
+  for(int i = 0; i < strat->S.size(); i++)
   {
     if(pLmShortDivisibleBy (strat->S[i].p, strat->S[i].sev, p, not_sev))
       return i;
@@ -664,7 +664,7 @@ int kFindDivisibleByInS_easy (kStrategy strat, poly p, long sev)
 {
   if ((strat->syzComp>0) && (pGetComp(p)>strat->syzComp)) return -1;
   long not_sev = ~sev;
-  for(int i = 0; i <= strat->sl; i++)
+  for(int i = 0; i < strat->S.size(); i++)
   {
     if(pLmShortDivisibleBy (strat->S[i].p, strat->S[i].sev, p, not_sev))
       return i;
@@ -871,7 +871,7 @@ BOOLEAN good_has_t_rep (int i, int j, slimgb_alg * c)
 BOOLEAN lenS_correct (kStrategy strat)
 {
   int i;
-  for(i = 0; i <= strat->sl; i++)
+  for(i = 0; i < strat->S.size(); i++)
   {
     if(strat->S[i].length != pLength (strat->S[i].p))
       return FALSE;
@@ -884,11 +884,11 @@ static void cleanS (kStrategy strat, slimgb_alg * c)
 {
   int i = 0;
   LObject P;
-  while(i <= strat->sl)
+  while(i < strat->S.size())
   {
     P.p = strat->S[i].p;
     P.sev = strat->S[i].sev;
-    //int dummy=strat->sl;
+    //int dummy=strat->S.size()-1;
     //if(kFindDivisibleByInS(strat,&dummy,&P)!=i)
     if(kFindDivisibleByInS_easy (strat, P.p, P.sev) != i)
     {
@@ -1259,9 +1259,9 @@ static void add_later (poly p, const char *prot, slimgb_alg * c)
 
 static int simple_posInS (kStrategy strat, poly p, int len, wlen_type wlen)
 {
-  if(strat->sl == -1)
+  if(strat->S.empty())
     return 0;
-  int length=strat->sl;
+  int length=strat->S.size()-1;
   int i;
   int an = 0;
   int en= length;
@@ -1748,7 +1748,7 @@ sorted_pair_node **add_to_basis_ideal_quotient (poly h, slimgb_alg * c,
   nodes = NULL;
 
   add_to_reductors (c, h, c->lengths[c->n - 1], ecart, TRUE);
-  //i=posInS(c->strat,c->strat->sl,h,0 ecart);
+  //i=posInS(c->strat,c->strat->S.size()-1,h,0 ecart);
   if(!(c->nc))
   {
     if(c->lengths[c->n - 1] == 1)
@@ -1756,7 +1756,7 @@ sorted_pair_node **add_to_basis_ideal_quotient (poly h, slimgb_alg * c,
   }
   //you should really update c->lengths, c->strat->lenS, and the order of polys in strat if you sort after lengths
 
-  //for(i=c->strat->sl; i>0;i--)
+  //for(i=c->strat->S.size()-1; i>0;i--)
   //  if(c->strat->S[i].length<c->strat->S[i-1].length) printf("fehler bei %d\n",i);
   if(c->Rcounter > 50)
   {
@@ -1833,7 +1833,7 @@ static poly redNF2 (poly h, slimgb_alg * c, int &len, number & m, int n)
 
   assume (len == (int)pLength (h));
   kStrategy strat = c->strat;
-  if(0 > strat->sl)
+  if(0 > strat->S.size()-1)
   {
     return h;
   }
@@ -1852,7 +1852,7 @@ static poly redNF2 (poly h, slimgb_alg * c, int &len, number & m, int n)
   //int max_pos=simple_posInS(strat,P.p);
   loop
   {
-    //int dummy=strat->sl;
+    //int dummy=strat->S.size()-1;
     j = kFindDivisibleByInS_easy (strat, P.p, P.sev);
     //j=kFindDivisibleByInS(strat,&dummy,&P);
     if((j >= 0) && ((!n) ||
@@ -1918,7 +1918,7 @@ static poly redTailShort (poly h, kStrategy strat)
   }
   int i;
   int len = pLength (h);
-  for(i = 0; i <= strat->sl; i++)
+  for(i = 0; i < strat->S.size(); i++)
   {
     if((strat->S[i].length > 2)
        || ((strat->use_lenSw) && (strat->S[i].wlength > 2)))
@@ -2698,7 +2698,7 @@ void noro_step (poly * p, int &pn, slimgb_alg * c)
     {
 #ifndef NORO_CACHE
 
-      h = redNFTail (h, c->strat->sl, c->strat, h_len);
+      h = redNFTail (h, c->strat->S.size()-1, c->strat, h_len);
       h_len = pLength (h);
 #endif
       reduced[reduced_c] = h;
@@ -2997,7 +2997,7 @@ static void go_on (slimgb_alg * c)
     //if (!c->nc) {
     if((c->tailReductions) || (lies_in_last_dp_block (p, c)))
     {
-      p = redNFTail (p, c->strat->sl, c->strat, 0);
+      p = redNFTail (p, c->strat->S.size()-1, c->strat, 0);
     }
     else
     {
@@ -3067,7 +3067,7 @@ static poly redNFTail (poly h, const int sl, kStrategy strat, int len)
     P.SetShortExpVector ();
     loop
     {
-      //int dummy=strat->sl;
+      //int dummy=strat->S.size()-1;
       j = kFindDivisibleByInS_easy (strat, P.p, P.sev); //kFindDivisibleByInS(strat,&dummy,&P);
       if(j >= 0)
       {
@@ -3348,7 +3348,7 @@ slimgb_alg::slimgb_alg (ideal I, int syz_comp, BOOLEAN F4, int deg_pos)
   strat->initEcart = initEcartBBA;
   strat->tailRing = r;
   strat->enterS = enterSBba;
-  strat->sl = -1;
+  strat->S.setsize(0);
   i = n;
   i = 1;                        //some strange bug else
   /* initS(c->S,NULL,c->strat); */
@@ -3365,7 +3365,7 @@ slimgb_alg::slimgb_alg (ideal I, int syz_comp, BOOLEAN F4, int deg_pos)
   assume (n > 0);
   add_to_basis_ideal_quotient (I->m[0], this, NULL);
 
-  assume (strat->sl == IDELEMS (strat->Shdl) - 1);
+  assume (strat->S.size()-1 == IDELEMS (strat->Shdl) - 1);
   if(!(F4_mode))
   {
     poly *array_arg = I->m;
@@ -3531,7 +3531,7 @@ slimgb_alg::~slimgb_alg ()
            c->normal_forms, c->easy_product_crit, c->extended_product_crit);
   }
 
-  for(i = 0; i <= c->strat->sl; i++)
+  for(i = 0; i <= c->strat->S.size()-1; i++)
   {
     if(!c->strat->S[i].p)
       continue;
@@ -3551,7 +3551,7 @@ slimgb_alg::~slimgb_alg ()
 //   {
 //     if (c->rep[i]!=i)
 //     {
-// //       for(j=0;j<=c->strat->sl;j++)
+// //       for(j=0;j<=c->strat->S.size()-1;j++)
 // {
 // //   if(c->strat->S[j].p==c->S->m[i])
 // {
@@ -3594,7 +3594,7 @@ slimgb_alg::~slimgb_alg ()
   ideal I = c->S;
   IDELEMS (I) = c->n;
   idSkipZeroes (I);
-  for(i = 0; i <= c->strat->sl; i++)
+  for(i = 0; i <= c->strat->S.size()-1; i++)
     c->strat->S[i].p = NULL;
   c->strat->S.free_all();
   id_Delete (&c->strat->Shdl, c->r);
@@ -3784,7 +3784,7 @@ static void shorten_tails (slimgb_alg * c, poly monom)
 
       int old_pos = -1;
       //assume new_pos<old_pos
-      for(int z = 0; z <= c->strat->sl; z++)
+      for(int z = 0; z <= c->strat->S.size()-1; z++)
       {
         if(c->strat->S[z].p == c->S->m[i])
         {
@@ -3843,7 +3843,7 @@ void slimgb_alg::cleanDegs (int lower, int upper)
       {
         poly h;
         h = S->m[i];
-        h = redNFTail (h, strat->sl, strat, lengths[i]);
+        h = redNFTail (h, strat->S.size()-1, strat, lengths[i]);
         if(TEST_OPT_INTSTRATEGY)
         {
           p_Cleardenom (h, r); //includes p_Content(h,r);
@@ -3861,7 +3861,7 @@ void slimgb_alg::cleanDegs (int lower, int upper)
         lengths[i] = len;
         assume (h == S->m[i]);
         int j;
-        for(j = 0; j <= strat->sl; j++)
+        for(j = 0; j < strat->S.size(); j++)
         {
           if(h == strat->S[j].p)
           {
@@ -4716,7 +4716,7 @@ static void multi_reduction (red_object * los, int &losl, slimgb_alg * c)
   poly *delay = (poly *) omAlloc (losl * sizeof (poly));
   int delay_s = 0;
   //initialize;
-  assume (c->strat->sl >= 0);
+  assume (c->(!strat->S.empty()));
   assume (losl > 0);
   int i;
   wlen_type max_initial_quality = 0;

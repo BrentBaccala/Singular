@@ -379,7 +379,7 @@ struct find_erg
 template <class len_type, class set_type>  int pos_helper(kStrategy strat, poly p, len_type len, set_type setL, polyset set)
 {
   //Print("POSHELER:%d",sizeof(wlen_type));
-  int length=strat->sl;
+  int length=strat->S.size()-1;
   int i;
   int an = 0;
   int en= length;

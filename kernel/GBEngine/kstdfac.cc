@@ -26,12 +26,12 @@ static void copyT (kStrategy o,kStrategy n)
 {
   int i,j;
   poly  p;
-  int needed = o->tl + 1;
+  int needed = o->T.size();
   if (needed < setmaxT) needed = setmaxT;
   n->T.ensure_capacity(needed);
   n->R.ensure_capacity(needed);
 
-  for (j=0; j<=o->tl; j++)
+  for (j=0; j < o->T.size(); j++)
   {
     n->T[j] = o->T[j];
     n->R[n->T[j].i_r] = n->T.addr(j);
@@ -40,7 +40,7 @@ static void copyT (kStrategy o,kStrategy n)
     loop
     {
       i++;
-      if (i>o->sl)
+      if (i>o->S.size()-1)
       {
         n->T[j].p=pCopy(p);
         break;
@@ -92,7 +92,7 @@ static void copyL (kStrategy o,kStrategy n)
     {
       if(p==NULL) break;
       i++;
-      if(i>o->tl)
+      if(i>o->T.size()-1)
       {
         WarnS("poly p1 not found in T:");wrp(p);PrintLn();
         Lp.p1=pCopy(p);
@@ -114,7 +114,7 @@ static void copyL (kStrategy o,kStrategy n)
     {
       if(p==NULL) break;
       i++;
-      if(i>o->tl)
+      if(i>o->T.size()-1)
       {
         WarnS("poly p2 not found in T:");wrp(p);PrintLn();
         Lp.p2=pCopy(p);
@@ -146,16 +146,16 @@ kStrategy kStratCopy(kStrategy o)
   s->compareLOld=o->compareLOld;
   s->enterOnePair=o->enterOnePair;
   s->chainCrit=o->chainCrit;
-  s->sl=o->sl;
+  s->S.setsize(o->S.size());
   s->Shdl=idCopy(o->Shdl);
   s->S.ensure_capacity(IDELEMS(s->Shdl));
-  for (int ii=0; ii<=s->sl; ii++)
+  for (int ii=0; ii < s->S.size(); ii++)
     s->S[ii].p = s->Shdl->m[ii];
   s->tailRing = o->tailRing;
   if (o->D!=NULL) s->D=idCopy(o->D);
   else            s->D=NULL;
   // Copy S metadata (ecart, sev, s_2_r, fromQ) from o->S to s->S
-  for (int ii=0; ii<=o->sl; ii++)
+  for (int ii=0; ii < o->S.size(); ii++)
   {
     s->S[ii].ecart = o->S[ii].ecart;
     s->S[ii].sev = o->S[ii].sev;
@@ -169,10 +169,10 @@ kStrategy kStratCopy(kStrategy o)
   s->use_lenSw = o->use_lenSw;
   // Copy sevT block-by-block
   {
-    int needed = o->tl + 1;
+    int needed = o->T.size();
     if (needed < setmaxT) needed = setmaxT;
     s->sevT.ensure_capacity(needed);
-    for (int ii = 0; ii <= o->tl; ii++)
+    for (int ii = 0; ii < o->T.size(); ii++)
       s->sevT[ii] = o->sevT[ii];
   }
   copyT(o,s);//s->T=...
@@ -194,9 +194,9 @@ kStrategy kStratCopy(kStrategy o)
 //   else
 //     s->kModW=NULL;
   s->pairtest=NULL;
-  s->sl=o->sl;
+  s->S.setsize(o->S.size());
   s->mu=o->mu;
-  s->tl=o->tl;
+  s->T.setsize(o->T.size());
   s->ak=o->ak;
   s->syzComp=o->syzComp;
   s->LazyPass=o->LazyPass;
@@ -268,9 +268,9 @@ static void completeReduceFac (kStrategy strat, ideal_list FL)
   }
   if (TEST_OPT_PROT)
   {
-    Print("(S:%d)",strat->sl);mflush();
+    Print("(S:%d)",strat->S.size()-1);mflush();
   }
-  for (si=strat->sl; si>0; si--)
+  for (si=strat->S.size()-1; si>0; si--)
   {
     strat->S[si].p = redtailBba(strat->S[si].p,si-1,strat);
     strat->Shdl->m[si] = strat->S[si].p;
@@ -286,7 +286,7 @@ static void completeReduceFac (kStrategy strat, ideal_list FL)
     int i;
     if (strat->redTailChange)
     {
-      for(i=strat->tl;i>=0;i--)
+      for(i=strat->T.size()-1;i>=0;i--)
       {
         strat->initEcart(&strat->T[i]);
       }
@@ -322,8 +322,8 @@ static void completeReduceFac (kStrategy strat, ideal_list FL)
       n->initEcart(&n->P);
       /* enter P.p into s and L */
       int pos;
-      if (n->sl==-1) pos=0;
-      else pos=posInS(n,n->sl,n->P.p,n->P.ecart);
+      if (n->S.empty()) pos=0;
+      else pos=posInS(n,n->S.size()-1,n->P.p,n->P.ecart);
       if (TEST_OPT_INTSTRATEGY)
       {
         n->P.p = redtailBba(n->P.p,pos-1,n);
@@ -340,9 +340,9 @@ static void completeReduceFac (kStrategy strat, ideal_list FL)
         Print("new s(%d)->S:",n->nr);
         pWrite(n->P.p);
       }
-      enterpairs(n->P.p,n->sl,n->P.ecart,pos,n);
+      enterpairs(n->P.p,n->S.size()-1,n->P.ecart,pos,n);
       enterT(n->P,n);
-      n->enterS(n->P,pos,n, n->tl);
+      n->enterS(n->P,pos,n, n->T.size()-1);
 
       /* construct D */
       if (IDELEMS(fac)>1)
@@ -388,24 +388,24 @@ static void completeReduceFac (kStrategy strat, ideal_list FL)
                 messageSets(n);
               }
               while (! n->L.empty()) n->L.pop_and_erase();
-              while (n->tl >= 0)
+              while ((!n->T.empty()))
               {
-                int i=n->sl;
+                int i=n->S.size()-1;
                 while (i>=0)
                 {
-                  if (n->S[i].p==n->T[n->tl].p)
+                  if (n->S[i].p==n->T[n->T.size()-1].p)
                   {
-                    n->T[n->tl].p=NULL; n->S[i].p=NULL;
+                    n->T[n->T.size()-1].p=NULL; n->S[i].p=NULL;
                     break;
                   }
                   i--;
                 }
-                pDelete(&n->T[n->tl].p);
-                n->tl--;
+                pDelete(&n->T[n->T.size()-1].p);
+                n->T.setsize(n->T.size()-1);
               }
               memset(n->Shdl->m,0,IDELEMS(n->Shdl)*sizeof(poly));
-              for (int ii=0; ii<=n->sl; ii++) n->S[ii].p = NULL;
-              n->sl=-1;
+              for (int ii=0; ii < n->S.size(); ii++) n->S[ii].p = NULL;
+              n->S.setsize(0);
               if (strat==n) si=-1;
               break;
             }
@@ -422,7 +422,7 @@ static void completeReduceFac (kStrategy strat, ideal_list FL)
         ideal_list Lj=FL;
         while (Lj!=NULL)
         {
-          if ((n->sl>=0)&&(n->S[0].p!=NULL))
+          if (((!n->S.empty()))&&(n->S[0].p!=NULL))
           {
             ideal r=kNF(n->Shdl,NULL,Lj->d,0,KSTD_NF_LAZY | KSTD_NF_NONORM);
             if (idIs0(r))
@@ -433,24 +433,24 @@ static void completeReduceFac (kStrategy strat, ideal_list FL)
                 iiWriteMatrix((matrix)Lj->d,"L",1,currRing,0);
               }
               while (! n->L.empty()) n->L.pop_and_erase();
-              while (n->tl >= 0)
+              while ((!n->T.empty()))
               {
-                int i=n->sl;
+                int i=n->S.size()-1;
                 while (i>=0)
                 {
-                  if (n->S[i].p==n->T[n->tl].p)
+                  if (n->S[i].p==n->T[n->T.size()-1].p)
                   {
-                    n->T[n->tl].p=NULL; n->S[i].p=NULL;
+                    n->T[n->T.size()-1].p=NULL; n->S[i].p=NULL;
                     break;
                   }
                   i--;
                 }
-                pDelete(&n->T[n->tl].p);
-                n->tl--;
+                pDelete(&n->T[n->T.size()-1].p);
+                n->T.setsize(n->T.size()-1);
               }
               memset(n->Shdl->m,0,IDELEMS(n->Shdl)*sizeof(poly));
-              for (int ii=0; ii<=n->sl; ii++) n->S[ii].p = NULL;
-              n->sl=-1;
+              for (int ii=0; ii < n->S.size(); ii++) n->S[ii].p = NULL;
+              n->S.setsize(0);
               if (strat==n) si=-1;
               idDelete(&r);
               break;
@@ -464,8 +464,8 @@ static void completeReduceFac (kStrategy strat, ideal_list FL)
     for(i=0;i<IDELEMS(fac);i++) fac->m[i]=NULL;
     idDelete(&fac);
     idDelete(&fac_copy);
-    if (! strat->L.empty() && (strat->sl>=0)) break;
-    else si=strat->sl+1;
+    if (! strat->L.empty() && ((!strat->S.empty()))) break;
+    else si=strat->S.size();
   }
 }
 
@@ -476,7 +476,7 @@ ideal bbafac (ideal /*F*/, ideal Q,intvec* /*w*/,kStrategy strat, ideal_list FL)
   int red_result = 1;
   reduc = olddeg = 0;
   /* compute------------------------------------------------------- */
-  if (strat->L.empty() && (strat->sl>=0))
+  if (strat->L.empty() && ((!strat->S.empty())))
   {
     if (TEST_OPT_REDSB) completeReduceFac(strat,FL);
   }
@@ -534,13 +534,13 @@ ideal bbafac (ideal /*F*/, ideal Q,intvec* /*w*/,kStrategy strat, ideal_list FL)
       {
         if (TEST_OPT_INTSTRATEGY)
         {
-          strat->P.p = redtailBba(strat->P.p,strat->sl,strat);
+          strat->P.p = redtailBba(strat->P.p,strat->S.size()-1,strat);
           if (strat->redTailChange) strat->P.pCleardenom();
         }
         else
         {
           pNorm(strat->P.p);
-          strat->P.p = redtailBba(strat->P.p,strat->sl,strat);
+          strat->P.p = redtailBba(strat->P.p,strat->S.size()-1,strat);
         }
         if (strat->redTailChange)
         {
@@ -584,8 +584,8 @@ ideal bbafac (ideal /*F*/, ideal Q,intvec* /*w*/,kStrategy strat, ideal_list FL)
 
         /* enter P.p into s and L */
         int pos;
-        if (n->sl==-1) pos=0;
-        else pos=posInS(n,n->sl,n->P.p,n->P.ecart);
+        if (n->S.empty()) pos=0;
+        else pos=posInS(n,n->S.size()-1,n->P.p,n->P.ecart);
 
         // we have already reduced all elements from fac....
         if (TEST_OPT_INTSTRATEGY)
@@ -614,18 +614,18 @@ ideal bbafac (ideal /*F*/, ideal Q,intvec* /*w*/,kStrategy strat, ideal_list FL)
           wrp(n->P.p);
           PrintLn();
         }
-        enterpairs(n->P.p,n->sl,n->P.ecart,pos,n);
+        enterpairs(n->P.p,n->S.size()-1,n->P.ecart,pos,n);
         enterT(n->P,n);
-        n->enterS(n->P,pos,n, n->tl);
+        n->enterS(n->P,pos,n, n->T.size()-1);
         {
           for (auto& Lp: n->L) {
             Lp.i_r1= -1;
-            for(ii=0; ii<=n->tl; ii++)
+            for(ii=0; ii < n->T.size(); ii++)
             {
               if (n->R[ii]->p==Lp.p1)  { Lp.i_r1=ii;break; }
             }
             Lp.i_r2= -1;
-            for(ii=0; ii<=n->tl; ii++)
+            for(ii=0; ii < n->T.size(); ii++)
             {
               if (n->R[ii]->p==Lp.p2)  { Lp.i_r2=ii;break; }
             }
@@ -678,25 +678,25 @@ ideal bbafac (ideal /*F*/, ideal Q,intvec* /*w*/,kStrategy strat, ideal_list FL)
                 }
                 //if (n->Ll >=0) Print("Ll:%d|",n->Ll);
                 while (! n->L.empty()) n->L.pop_and_erase();
-                //if (n->tl >=0) Print("tl:%d|",n->tl);
-                while (n->tl >= 0)
+                //if ((!n->T.empty())) Print("tl:%d|",n->T.size()-1);
+                while ((!n->T.empty()))
                 {
-                  int i=n->sl;
+                  int i=n->S.size()-1;
                   while (i>=0)
                   {
-                    if (n->S[i].p==n->T[n->tl].p)
+                    if (n->S[i].p==n->T[n->T.size()-1].p)
                     {
-                      n->T[n->tl].p=NULL; n->S[i].p=NULL;
+                      n->T[n->T.size()-1].p=NULL; n->S[i].p=NULL;
                       break;
                     }
                     i--;
                   }
-                  pDelete(&n->T[n->tl].p);
-                  n->tl--;
+                  pDelete(&n->T[n->T.size()-1].p);
+                  n->T.setsize(n->T.size()-1);
                 }
                 memset(n->Shdl->m,0,IDELEMS(n->Shdl)*sizeof(poly));
-              for (int ii=0; ii<=n->sl; ii++) n->S[ii].p = NULL;
-                n->sl=-1;
+              for (int ii=0; ii < n->S.size(); ii++) n->S[ii].p = NULL;
+                n->S.setsize(0);
                 break;
               }
               else
@@ -713,7 +713,7 @@ ideal bbafac (ideal /*F*/, ideal Q,intvec* /*w*/,kStrategy strat, ideal_list FL)
           ideal_list Lj=FL;
           while (Lj!=NULL)
           {
-            if ((n->sl>=0)&&(n->S[0].p!=NULL))
+            if (((!n->S.empty()))&&(n->S[0].p!=NULL))
             {
               ideal r=kNF(n->Shdl,NULL,Lj->d,0,
 	        KSTD_NF_LAZY | KSTD_NF_NONORM | KSTD_NF_NOLF);
@@ -729,24 +729,24 @@ ideal bbafac (ideal /*F*/, ideal Q,intvec* /*w*/,kStrategy strat, ideal_list FL)
                   iiWriteMatrix((matrix)Lj->d,"L",1,currRing,0);
                 }
                 while (! n->L.empty()) n->L.pop_and_erase();
-                while (n->tl >= 0)
+                while ((!n->T.empty()))
                 {
-                  int i=n->sl;
+                  int i=n->S.size()-1;
                   while (i>=0)
                   {
-                    if (n->S[i].p==n->T[n->tl].p)
+                    if (n->S[i].p==n->T[n->T.size()-1].p)
                     {
-                      n->T[n->tl].p=NULL; n->S[i].p=NULL;
+                      n->T[n->T.size()-1].p=NULL; n->S[i].p=NULL;
                       break;
                     }
                     i--;
                   }
-                  pDelete(&n->T[n->tl].p);
-                  n->tl--;
+                  pDelete(&n->T[n->T.size()-1].p);
+                  n->T.setsize(n->T.size()-1);
                 }
                 memset(n->Shdl->m,0,IDELEMS(n->Shdl)*sizeof(poly));
-              for (int ii=0; ii<=n->sl; ii++) n->S[ii].p = NULL;
-                n->sl=-1;
+              for (int ii=0; ii < n->S.size(); ii++) n->S[ii].p = NULL;
+                n->S.setsize(0);
                 idDelete(&r);
                 break;
               }
@@ -764,7 +764,7 @@ ideal bbafac (ideal /*F*/, ideal Q,intvec* /*w*/,kStrategy strat, ideal_list FL)
     strat->P.lcm=NULL;
 #endif
     kTest_TS(strat);
-    if (strat->L.empty() && (strat->sl>=0))
+    if (strat->L.empty() && ((!strat->S.empty())))
     {
       if (TEST_OPT_REDSB) completeReduceFac(strat,FL);
     }

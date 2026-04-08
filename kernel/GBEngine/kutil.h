@@ -68,8 +68,9 @@ class BlockArray {
   Elem **blocks;        // directory of block pointers
   int num_blocks;       // current number of allocated blocks
   int dir_capacity;     // allocated directory slots
+  int count;            // number of elements in use
 public:
-  BlockArray() : blocks(NULL), num_blocks(0), dir_capacity(0) {}
+  BlockArray() : blocks(NULL), num_blocks(0), dir_capacity(0), count(0) {}
 
   Elem& operator[](int i) {
     return blocks[i >> BLOCK_SHIFT][i & BLOCK_MASK];
@@ -82,6 +83,13 @@ public:
   Elem* addr(int i) {
     return &blocks[i >> BLOCK_SHIFT][i & BLOCK_MASK];
   }
+
+  // Number of elements in use
+  int size() const { return count; }
+  bool empty() const { return count == 0; }
+
+  // Set the count directly (for migration from external tl/sl counters)
+  void setsize(int n) { count = n; }
 
   // Ensure at least n elements are allocated (indices 0..n-1)
   void ensure_capacity(int n) {
@@ -109,23 +117,31 @@ public:
   // Return current capacity (total elements allocated)
   int capacity() const { return num_blocks * BLOCK_SIZE; }
 
-  // Insert val at position pos, shifting elements pos..count-1 up by one.
-  // Caller must ensure capacity is sufficient (call ensure_capacity first).
-  // count is the current number of valid elements.
-  void insert(int pos, const Elem& val, int count) {
+  // Insert val at position pos, shifting existing elements up.
+  // Automatically grows capacity and increments count.
+  void insert(int pos, const Elem& val) {
+    ensure_capacity(count + 1);
     for (int i = count; i > pos; i--)
       (*this)[i] = (*this)[i-1];
     (*this)[pos] = val;
+    count++;
   }
 
-  // Erase element at position pos, shifting elements pos+1..count-1 down by one.
-  // count is the current number of valid elements (before erase).
-  void erase(int pos, int count) {
+  // Append val at the end. Grows capacity and increments count.
+  void push_back(const Elem& val) {
+    ensure_capacity(count + 1);
+    (*this)[count] = val;
+    count++;
+  }
+
+  // Erase element at position pos, shifting elements down. Decrements count.
+  void erase(int pos) {
     for (int i = pos; i < count - 1; i++)
       (*this)[i] = (*this)[i+1];
+    count--;
   }
 
-  // Free all blocks and the directory
+  // Free all blocks and the directory, reset count
   void free_all() {
     for (int b = 0; b < num_blocks; b++) {
       free(blocks[b]);
@@ -134,6 +150,7 @@ public:
     blocks = NULL;
     num_blocks = 0;
     dir_capacity = 0;
+    count = 0;
   }
 };
 
@@ -710,9 +727,8 @@ public:
   omBin tailBin = NULL;
   int nr = 0;
   int cp = 0,c3 = 0;
-  int sl = 0,mu = 0;
+  int mu = 0;
   int syzl = 0,syzmax = 0,syzidxmax = 0;
-  int tl = 0;
   int ak = 0,LazyDegree = 0,LazyPass = 0;
   int syzComp = 0;
   int lastAxis = 0;

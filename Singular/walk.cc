@@ -155,15 +155,15 @@ static void initSSpecialCC (ideal F, ideal Q, ideal P,kStrategy strat)
         }
         if (h.p!=NULL)
         {
-          if (strat->sl==-1)
+          if (strat->S.empty())
             pos =0;
           else
           {
-            pos = posInS(strat,strat->sl,h.p,h.ecart);
+            pos = posInS(strat,strat->S.size()-1,h.p,h.ecart);
           }
           h.sev = pGetShortExpVector(h.p);
           h.SetpFDeg();
-          strat->enterS(h,pos,strat, strat->tl+1);
+          strat->enterS(h,pos,strat, strat->T.size());
           enterT(h, strat);
           strat->fromQ[pos]=1;
         }
@@ -179,8 +179,8 @@ static void initSSpecialCC (ideal F, ideal Q, ideal P,kStrategy strat)
       h.p = pCopy(F->m[i]);
       if (rHasGlobalOrdering(currRing))
       {
-        //h.p=redtailBba(h.p,strat->sl,strat);
-        h.p=redtailBba(h.p,strat->sl,strat);
+        //h.p=redtailBba(h.p,strat->S.size()-1,strat);
+        h.p=redtailBba(h.p,strat->S.size()-1,strat);
       }
       else
       {
@@ -189,12 +189,12 @@ static void initSSpecialCC (ideal F, ideal Q, ideal P,kStrategy strat)
       strat->initEcart(&h);
       if (h.p!=NULL)
       {
-        if (strat->sl==-1)
+        if (strat->S.empty())
           pos =0;
         else
-          pos = posInS(strat,strat->sl,h.p,h.ecart);
+          pos = posInS(strat,strat->S.size()-1,h.p,h.ecart);
         h.sev = pGetShortExpVector(h.p);
-        strat->enterS(h,pos,strat, strat->tl+1);
+        strat->enterS(h,pos,strat, strat->T.size());
         h.length = pLength(h.p);
         h.SetpFDeg();
         enterT(h,strat);
@@ -218,17 +218,17 @@ static void initSSpecialCC (ideal F, ideal Q, ideal P,kStrategy strat)
       {
         h.pNorm();
       }
-      if(strat->sl>=0)
+      if((!strat->S.empty()))
       {
         if (rHasGlobalOrdering(currRing))
         {
-          h.p=redBba(h.p,strat->sl,strat);
+          h.p=redBba(h.p,strat->S.size()-1,strat);
           if (h.p!=NULL)
-            h.p=redtailBba(h.p,strat->sl,strat);
+            h.p=redtailBba(h.p,strat->S.size()-1,strat);
         }
         else
         {
-          h.p=redMora(h.p,strat->sl,strat);
+          h.p=redMora(h.p,strat->S.size()-1,strat);
           strat->initEcart(&h);
         }
         if(h.p!=NULL)
@@ -244,9 +244,9 @@ static void initSSpecialCC (ideal F, ideal Q, ideal P,kStrategy strat)
           }
           h.sev = pGetShortExpVector(h.p);
           h.SetpFDeg();
-          pos = posInS(strat->S,strat->sl,h.p,h.ecart);
-          enterpairsSpecial(h.p,strat->sl,h.ecart,pos,strat,strat->tl+1);
-          strat->enterS(h,pos,strat, strat->tl+1);
+          pos = posInS(strat->S,strat->S.size()-1,h.p,h.ecart);
+          enterpairsSpecial(h.p,strat->S.size()-1,h.ecart,pos,strat,strat->T.size());
+          strat->enterS(h,pos,strat, strat->T.size());
           enterT(h,strat);
         }
       }
@@ -254,7 +254,7 @@ static void initSSpecialCC (ideal F, ideal Q, ideal P,kStrategy strat)
       {
         h.sev = pGetShortExpVector(h.p);
         h.SetpFDeg();
-        strat->enterS(h,0,strat, strat->tl+1);
+        strat->enterS(h,0,strat, strat->T.size());
         enterT(h,strat);
       }
     }
@@ -290,8 +290,8 @@ static ideal kInterRedCC(ideal F, ideal Q)
   strat->enterS      = enterSBba;
   strat->posInT      = posInT0;
   strat->initEcart   = initEcartNormal;
-  strat->sl   = -1;
-  strat->tl          = -1;
+  strat->S.setsize(0);
+  strat->T.setsize(0);
   initT(strat->T);
   initR(strat->R);
   initsevT(strat->sevT);

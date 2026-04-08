@@ -37,8 +37,8 @@
 
 KINLINE TObject* skStrategy::S_2_T(int i)
 {
-  assume(i>= 0 && i<=sl);
-  assume(S[i].s_2_r >= 0 && S[i].s_2_r <= tl);
+  assume(i>= 0 && i<S.size());
+  assume(S[i].s_2_r >= 0 && S[i].s_2_r < T.size());
   TObject* TT = R[S[i].s_2_r];
   assume(TT != NULL && TT->p == S[i].p);
   return TT;
@@ -46,17 +46,17 @@ KINLINE TObject* skStrategy::S_2_T(int i)
 
 KINLINE TObject* skStrategy::s_2_t(int i)
 {
-  if (i >= 0 && i <= sl)
+  if (i >= 0 && i < S.size())
   {
     int sri= S[i].s_2_r;
-    if ((sri >= 0) && (sri <= tl))
+    if ((sri >= 0) && (sri < T.size()))
     {
       TObject* t = R[sri];
       if ((t != NULL) && (t->p == S[i].p))
         return t;
     }
     // last but not least, try kFindInT
-    sri = kFindInT(S[i].p, T, tl);
+    sri = kFindInT(S[i].p, T, T.size() - 1);
     if (sri >= 0)
       return &(T[sri]);
   }
@@ -910,8 +910,8 @@ KINLINE sLObject& sLObject::operator=(const sTObject& t)
 KINLINE TObject* sLObject::T_1(const skStrategy* s)
 {
   if (p1 == NULL) return NULL;
-  if (i_r1 == -1) i_r1 = kFindInT(p1, s->T, s->tl);
-  assume(i_r1 >= 0 && i_r1 <= s->tl);
+  if (i_r1 == -1) i_r1 = kFindInT(p1, s->T, s->T.size()-1);
+  assume(i_r1 >= 0 && i_r1 < s->T.size());
   TObject* T = s->R[i_r1];
   assume(T->p == p1);
   return T;
@@ -921,8 +921,8 @@ KINLINE TObject* sLObject::T_2(const skStrategy* strat)
 {
   if (p1 == NULL) return NULL;
   assume(p2 != NULL);
-  if (i_r2 == -1) i_r2 = kFindInT(p2, strat->T, strat->tl);
-  assume(i_r2 >= 0 && i_r2 <= strat->tl);
+  if (i_r2 == -1) i_r2 = kFindInT(p2, strat->T, strat->T.size()-1);
+  assume(i_r2 >= 0 && i_r2 < strat->T.size());
   TObject* T = strat->R[i_r2];
   assume(T->p == p2);
   return T;
@@ -938,10 +938,10 @@ KINLINE void    sLObject::T_1_2(const skStrategy* strat,
     return;
   }
   assume(p1 != NULL && p2 != NULL);
-  if (i_r1 == -1) i_r1 = kFindInT(p1, strat->T, strat->tl);
-  if (i_r2 == -1) i_r2 = kFindInT(p2, strat->T, strat->tl);
-  assume(i_r1 >= 0 && i_r1 <= strat->tl);
-  assume(i_r2 >= 0 && i_r2 <= strat->tl);
+  if (i_r1 == -1) i_r1 = kFindInT(p1, strat->T, strat->T.size()-1);
+  if (i_r2 == -1) i_r2 = kFindInT(p2, strat->T, strat->T.size()-1);
+  assume(i_r1 >= 0 && i_r1 < strat->T.size());
+  assume(i_r2 >= 0 && i_r2 < strat->T.size());
   T_1 = strat->R[i_r1];
   T_2 = strat->R[i_r2];
   assume(T_1->p == p1);

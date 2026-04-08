@@ -28,9 +28,9 @@ void addLObject(LObject& h, kStrategy& strat)
   h.sev=0; // pGetShortExpVector(h.p);
 
   // add h into S and L
-  int pos=posInS(strat, strat->sl, h.p, h.ecart);
+  int pos=posInS(strat, strat->S.size()-1, h.p, h.ecart);
 
-  if ( (pos <= strat->sl) && (p_ComparePolys(h.p, strat->S[pos].p, currRing)) )
+  if ( (pos < strat->S.size()) && (p_ComparePolys(h.p, strat->S[pos].p, currRing)) )
   {
     if (TEST_OPT_PROT)
       PrintS("d\n");
@@ -77,11 +77,11 @@ void addLObject(LObject& h, kStrategy& strat)
     }
 #endif
 
-    enterpairs(h.p, strat->sl, h.ecart, 0, strat);
+    enterpairs(h.p, strat->S.size()-1, h.ecart, 0, strat);
 
     pos=0;
 
-    if (strat->sl!=-1) pos = posInS(strat, strat->sl, h.p, h.ecart);
+    if (strat->S.size()-1!=-1) pos = posInS(strat, strat->S.size()-1, h.p, h.ecart);
     strat->enterS(h, pos, strat, -1);
 //    enterT(h, strat); // ?!
 
@@ -602,7 +602,7 @@ ideal k_sca_bba (const ideal F, const ideal Q, const intvec */*w*/, const bigint
       // get the polynomial (canonicalize bucket, make sure P.p is set)
       strat->P.GetP(strat->lmBin);
 
-      int pos = posInS(strat,strat->sl,strat->P.p,strat->P.ecart);
+      int pos = posInS(strat,strat->S.size()-1,strat->P.p,strat->P.ecart);
 
       // reduce the tail and normalize poly
       if (TEST_OPT_INTSTRATEGY)
@@ -655,10 +655,10 @@ ideal k_sca_bba (const ideal F, const ideal Q, const intvec */*w*/, const bigint
       }
 
       // L
-      enterpairs(strat->P.p,strat->sl,strat->P.ecart,pos,strat, strat->tl);
+      enterpairs(strat->P.p,strat->S.size()-1,strat->P.ecart,pos,strat, strat->T.size()-1);
 
       // posInS only depends on the leading term
-      strat->enterS(strat->P, pos, strat, strat->tl);
+      strat->enterS(strat->P, pos, strat, strat->T.size()-1);
 
 //       if (hilb!=NULL) khCheck(Q,w,hilb,hilbeledeg,hilbcount,strat);
 
@@ -718,7 +718,7 @@ ideal k_sca_bba (const ideal F, const ideal Q, const intvec */*w*/, const bigint
         if (red_result != 1) continue;
 
 
-        int pos = posInS(strat,strat->sl,h.p,h.ecart);
+        int pos = posInS(strat,strat->S.size()-1,h.p,h.ecart);
 
         // reduce the tail and normalize poly
         if (TEST_OPT_INTSTRATEGY)
@@ -1034,7 +1034,7 @@ ideal k_sca_mora(const ideal F, const ideal Q, const intvec */*w*/, const bigint
       if (!TEST_OPT_INTSTRATEGY)
         strat->P.pNorm();
       // tailreduction
-      strat->P.p = redtail(&(strat->P),strat->sl,strat);
+      strat->P.p = redtail(&(strat->P),strat->S.size()-1,strat);
       // set ecart -- might have changed because of tail reductions
       if ((!strat->noTailReduction) && (!strat->honey))
         strat->initEcart(&strat->P);
@@ -1047,11 +1047,11 @@ ideal k_sca_mora(const ideal F, const ideal Q, const intvec */*w*/, const bigint
       // put in T
       enterT(strat->P,strat);
       // build new pairs
-      enterpairs(strat->P.p,strat->sl,strat->P.ecart,0,strat, strat->tl);
+      enterpairs(strat->P.p,strat->S.size()-1,strat->P.ecart,0,strat, strat->T.size()-1);
       // put in S
       strat->enterS(strat->P,
-                    posInS(strat,strat->sl,strat->P.p, strat->P.ecart),
-                    strat, strat->tl);
+                    posInS(strat,strat->S.size()-1,strat->P.p, strat->P.ecart),
+                    strat, strat->T.size()-1);
 
 
       // clear strat->P

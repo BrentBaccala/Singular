@@ -58,7 +58,7 @@ int redGrFirst (LObject* h,kStrategy strat)
   reddeg = strat->LazyDegree+d;
   loop
   {
-    if (j > strat->sl)
+    if (j > strat->S.size()-1)
     {
 #ifdef KDEBUG
       if (TEST_OPT_DEBUG) PrintLn();
@@ -133,7 +133,7 @@ int redGrFirst (LObject* h,kStrategy strat)
       {
         if (! strat->L.would_be_top(*h))
         {
-          i=strat->sl+1;
+          i=strat->S.size();
           do
           {
             i--;
@@ -237,7 +237,7 @@ int redGrRatGB (LObject* h,kStrategy strat)
   }
   loop
   {
-    if (j > strat->sl)
+    if (j > strat->S.size()-1)
     {
       if (c_j>=0)
       {
@@ -366,7 +366,7 @@ int redGrRatGB (LObject* h,kStrategy strat)
 // currently unused
 static int nc_redHomog (LObject* h,kStrategy strat)
 {
-  if (strat->tl<0)
+  if (strat->T.empty())
   {
     enterT((*h),strat);
     return 1;
@@ -413,7 +413,7 @@ static int nc_redHomog (LObject* h,kStrategy strat)
     }
     else
     {
-      if (j >= strat->sl)
+      if (j >= strat->S.size()-1)
       {
         enterT((*h),strat);
         return 1;
@@ -431,7 +431,7 @@ static int nc_redHomog (LObject* h,kStrategy strat)
 */
 static int nc_redHomog0 (LObject* h,kStrategy strat)
 {
-  if (strat->tl<0)
+  if (strat->T.empty())
   {
     enterT((*h),strat);
     return 0;
@@ -487,7 +487,7 @@ static int nc_redHomog0 (LObject* h,kStrategy strat)
     }
     else
     {
-      if (j >= strat->tl)
+      if (j >= strat->T.size()-1)
       {
         if (TEST_OPT_INTSTRATEGY)
         {
@@ -510,7 +510,7 @@ static int nc_redHomog0 (LObject* h,kStrategy strat)
 */
 static int nc_redLazy (LObject* h,kStrategy strat)
 {
-  if (strat->tl<0)
+  if (strat->T.empty())
   {
     enterT((*h),strat);
     return 0;
@@ -551,7 +551,7 @@ static int nc_redLazy (LObject* h,kStrategy strat)
 //        {
 //          if (TEST_OPT_DEBUG) PrintS(" > syzComp\n");
 //          if (TEST_OPT_INTSTRATEGY) p_Content(h->p,currRing);
-//          enterTBba((*h),strat->tl+1,strat);
+//          enterTBba((*h),strat->T.size(),strat);
 //          return;
 //        }
 //      }
@@ -576,7 +576,7 @@ static int nc_redLazy (LObject* h,kStrategy strat)
         assert(strat->compareL == compareL11);  // the code used to have L11 hard-wired, so check that that's what's being used
         if (! strat->L.would_be_top(*h))
         {
-          i=strat->sl+1;
+          i=strat->S.size();
           do
           {
             i--;
@@ -603,7 +603,7 @@ static int nc_redLazy (LObject* h,kStrategy strat)
     else
     {
       if (TEST_OPT_DEBUG) PrintS("-");
-      if (j >= strat->sl)
+      if (j >= strat->S.size()-1)
       {
         if (TEST_OPT_DEBUG) PrintLn();
         if (TEST_OPT_INTSTRATEGY)
@@ -625,7 +625,7 @@ static int nc_redLazy (LObject* h,kStrategy strat)
 */
 static int nc_redHoney (LObject*  h,kStrategy strat)
 {
-  if (strat->tl<0)
+  if (strat->T.empty())
   {
     enterT((*h),strat);
     return 0;
@@ -658,7 +658,7 @@ static int nc_redHoney (LObject*  h,kStrategy strat)
       {
         /*- takes the first possible with respect to ecart -*/
         i++;
-        if (i > strat->tl)
+        if (i > strat->T.size()-1)
           break;
         if ((!BTEST1(20)) && (ei <= (*h).ecart))
           break;
@@ -736,7 +736,7 @@ static int nc_redHoney (LObject*  h,kStrategy strat)
 //          if (TEST_OPT_DEBUG)
 //            PrintS("  >syzComp\n");
 //          if (TEST_OPT_INTSTRATEGY) p_Content(h->p,currRing);
-//          at=strat->posInT(strat->T,strat->tl,(*h));
+//          at=strat->posInT(strat->T,strat->T.size()-1,(*h));
 //          enterTBba((*h),at,strat);
 //          return;
 //        }
@@ -754,7 +754,7 @@ static int nc_redHoney (LObject*  h,kStrategy strat)
         if (! strat->L.would_be_top(*h))
         {
           /*test if h is already standardbasis element*/
-          i=strat->sl+1;
+          i=strat->S.size();
           do
           {
             i--;
@@ -781,7 +781,7 @@ static int nc_redHoney (LObject*  h,kStrategy strat)
     else
     {
       if (TEST_OPT_DEBUG) PrintS("-");
-      if (j >= strat->tl)
+      if (j >= strat->T.size()-1)
       {
         if (TEST_OPT_DEBUG) PrintLn();
         if (TEST_OPT_INTSTRATEGY)
@@ -802,7 +802,7 @@ static int nc_redHoney (LObject*  h,kStrategy strat)
 */
 static int nc_redBest (LObject*  h,kStrategy strat)
 {
-  if (strat->tl<0)
+  if (strat->T.empty())
   {
     enterT((*h),strat);
     return 0;
@@ -842,7 +842,7 @@ static int nc_redBest (LObject*  h,kStrategy strat)
           loop
           {
             j++;
-            if (j > strat->tl)
+            if (j > strat->T.size()-1)
               break;
             if (pDivisibleBy(strat->T[j].p,(*h).p))
             {
@@ -895,7 +895,7 @@ static int nc_redBest (LObject*  h,kStrategy strat)
 //          if (TEST_OPT_DEBUG)
 //            PrintS(" >syzComp\n");
 //          if (TEST_OPT_INTSTRATEGY) p_Content(h->p,currRing);
-//          at=strat->posInT(strat->T,strat->tl,(*h));
+//          at=strat->posInT(strat->T,strat->T.size()-1,(*h));
 //          enterTBba((*h),at,strat);
 //          return;
 //        }
@@ -926,7 +926,7 @@ static int nc_redBest (LObject*  h,kStrategy strat)
     }
     else
     {
-      if (j >= strat->tl)
+      if (j >= strat->T.size()-1)
       {
         if (TEST_OPT_INTSTRATEGY)
         {
@@ -1184,7 +1184,7 @@ ideal k_gnc_gr_bba(const ideal F, const ideal Q, const intvec *, const bigintmat
       }
 #endif
         strat->P.sev=0;
-        int pos=posInS(strat,strat->sl,strat->P.p, strat->P.ecart);
+        int pos=posInS(strat,strat->S.size()-1,strat->P.p, strat->P.ecart);
         {
           if (TEST_OPT_INTSTRATEGY)
           {
@@ -1217,10 +1217,10 @@ ideal k_gnc_gr_bba(const ideal F, const ideal Q, const intvec *, const bigintmat
           }
           // kTest(strat);
           //
-          enterpairs(strat->P.p,strat->sl,strat->P.ecart,pos,strat);
+          enterpairs(strat->P.p,strat->S.size()-1,strat->P.ecart,pos,strat);
 
-          if (strat->sl==-1) pos=0;
-          else pos=posInS(strat,strat->sl,strat->P.p,strat->P.ecart);
+          if (strat->S.empty()) pos=0;
+          else pos=posInS(strat,strat->S.size()-1,strat->P.p,strat->P.ecart);
 
           strat->enterS(strat->P,pos,strat,-1);
         }
@@ -1237,7 +1237,7 @@ ideal k_gnc_gr_bba(const ideal F, const ideal Q, const intvec *, const bigintmat
   {
     int k=1;
     int j;
-    while(k<=strat->sl)
+    while(k < strat->S.size())
     {
       j=0;
       loop

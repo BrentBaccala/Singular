@@ -36,9 +36,9 @@ BOOLEAN kVerify1(ideal F, ideal Q)
   /*initBuchMora:*/
     strat->tail = pInit();
     /*- set s -*/
-    strat->sl = -1;
+    strat->S.setsize(0);
     /*- set T -*/
-    strat->tl = -1;
+    strat->T.setsize(0);
     initT(strat->T);
     initR(strat->R);
     initsevT(strat->sevT);
@@ -53,14 +53,14 @@ BOOLEAN kVerify1(ideal F, ideal Q)
   /* build pairs */
   if (strat->hasFromQ)
   {
-    for(int i=1; i<=strat->sl;i++)
+    for(int i=1; i < strat->S.size();i++)
     {
       initenterpairs(strat->S[i].p,i-1,0,strat->S[i].fromQ,strat);
     }
   }
   else
   {
-    for(int i=1; i<=strat->sl;i++)
+    for(int i=1; i < strat->S.size();i++)
     {
       initenterpairs(strat->S[i].p,i-1,0,FALSE,strat);
     }
@@ -106,7 +106,7 @@ BOOLEAN kVerify1(ideal F, ideal Q)
       }
       else
       {
-        int sl=strat->sl;
+        int sl=strat->S.size()-1;
         strat->P.GetP();
         poly p=redNF(strat->P.p,sl,TRUE,strat);
         if (p==NULL) red_result=0;
@@ -146,9 +146,9 @@ BOOLEAN kVerify2(ideal F, ideal Q)
   /*initBuchMora:*/
     strat->tail = pInit();
     /*- set s -*/
-    strat->sl = -1;
+    strat->S.setsize(0);
     /*- set T -*/
-    strat->tl = -1;
+    strat->T.setsize(0);
     initT(strat->T);
     initR(strat->R);
     initsevT(strat->sevT);
@@ -163,14 +163,14 @@ BOOLEAN kVerify2(ideal F, ideal Q)
   /* build pairs */
   if (strat->hasFromQ)
   {
-    for(int i=1; i<=strat->sl;i++)
+    for(int i=1; i < strat->S.size();i++)
     {
       initenterpairs(strat->S[i].p,i-1,0,strat->S[i].fromQ,strat);
     }
   }
   else
   {
-    for(int i=1; i<=strat->sl;i++)
+    for(int i=1; i < strat->S.size();i++)
     {
       initenterpairs(strat->S[i].p,i-1,0,FALSE,strat);
     }
@@ -263,7 +263,7 @@ BOOLEAN kVerify2(ideal F, ideal Q)
       else
       {
         /* reduction */
-        int sl=strat->sl;
+        int sl=strat->S.size()-1;
         P.GetP();
         poly p=redNF(P.p,sl,TRUE,strat);
         if (p==NULL) red_result=0;

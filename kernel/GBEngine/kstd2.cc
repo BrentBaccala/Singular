@@ -212,7 +212,7 @@ int kFindSameLMInT_Z(const kStrategy strat, const LObject* L, const int start)
 
     loop
     {
-      if (j > strat->tl) return o;
+      if (j > strat->T.size()-1) return o;
       if (p_LmShortDivisibleBy(T[j].p, sevT[j],p, not_sev, r) && p_LmEqual(T[j].p, p, r))
       {
         gcd = n_Gcd(pGetCoeff(p), pGetCoeff(T[j].p), r->cf);
@@ -233,7 +233,7 @@ int kFindSameLMInT_Z(const kStrategy strat, const LObject* L, const int start)
     ogcd = pGetCoeff(p);
     loop
     {
-      if (j > strat->tl) return o;
+      if (j > strat->T.size()-1) return o;
       if (p_LmShortDivisibleBy(T[j].p, sevT[j],p, not_sev, r) && p_LmEqual(T[j].p, p, r))
       {
         gcd = n_Gcd(pGetCoeff(p), pGetCoeff(T[j].p), r->cf);
@@ -254,7 +254,7 @@ int kFindSameLMInT_Z(const kStrategy strat, const LObject* L, const int start)
 // (only for euclidean rings (n_QuotRem)
 int kTestDivisibleByT0_Z(const kStrategy strat, const LObject* L)
 {
-    if (strat->tl < 1)
+    if (strat->T.size()-1 < 1)
         return -1;
 
     unsigned long not_sev     = ~L->sev;
@@ -338,7 +338,7 @@ int kFindDivisibleByInT_Z(const kStrategy strat, const LObject* L, const int sta
 
     loop
     {
-      if (j > strat->tl) return o;
+      if (j > strat->T.size()-1) return o;
 #if defined(PDEBUG) || defined(PDIV_DEBUG)
       if (p_LmShortDivisibleBy(T[j].p, sevT[j],p, not_sev, r))
 #else
@@ -362,7 +362,7 @@ int kFindDivisibleByInT_Z(const kStrategy strat, const LObject* L, const int sta
     orest = pGetCoeff(p);
     loop
     {
-      if (j > strat->tl) return o;
+      if (j > strat->T.size()-1) return o;
 #if defined(PDEBUG) || defined(PDIV_DEBUG)
       if (p_LmShortDivisibleBy(T[j].t_p, sevT[j],
             p, not_sev, r))
@@ -400,7 +400,7 @@ static int kFindDivisibleByInS_Z(const kStrategy strat, LObject* L)
 
     loop
     {
-      if (j > strat->sl) return o;
+      if (j > strat->S.size()-1) return o;
 #if defined(PDEBUG) || defined(PDIV_DEBUG)
       if (p_LmShortDivisibleBy(strat->S[j].p, strat->S[j].sev,p, not_sev, r))
 #else
@@ -444,7 +444,7 @@ int kFindDivisibleByInT(const kStrategy strat, const LObject* L, const int start
     {
       loop
       {
-        if (j > strat->tl) return -1;
+        if (j > strat->T.size()-1) return -1;
 #if defined(PDEBUG) || defined(PDIV_DEBUG)
         if ((T[j].p!=NULL)
         && p_LmShortDivisibleBy(T[j].p, sevT[j],p, not_sev, r))
@@ -467,7 +467,7 @@ int kFindDivisibleByInT(const kStrategy strat, const LObject* L, const int start
       // AVX2 tests 4 entries (256-bit), SSE4 tests 2 entries (128-bit).
       if (__builtin_cpu_supports("avx2"))
       {
-        const int tl = strat->tl;
+        const int tl = strat->T.size()-1;
         loop
         {
           j = kSevScanAVX2(sevT, not_sev, j, tl);
@@ -487,7 +487,7 @@ int kFindDivisibleByInT(const kStrategy strat, const LObject* L, const int start
       }
       else if (__builtin_cpu_supports("sse4.1"))
       {
-        const int tl = strat->tl;
+        const int tl = strat->T.size()-1;
         loop
         {
           j = kSevScanSSE4(sevT, not_sev, j, tl);
@@ -510,7 +510,7 @@ int kFindDivisibleByInT(const kStrategy strat, const LObject* L, const int start
       {
       loop
       {
-        if (j > strat->tl) return -1;
+        if (j > strat->T.size()-1) return -1;
 #if defined(PDEBUG) || defined(PDIV_DEBUG)
         if ((T[j].p!=NULL)
         && p_LmShortDivisibleBy(T[j].p, sevT[j],p, not_sev, r))
@@ -535,7 +535,7 @@ int kFindDivisibleByInT(const kStrategy strat, const LObject* L, const int start
     {
       loop
       {
-        if (j > strat->tl) return -1;
+        if (j > strat->T.size()-1) return -1;
 #if defined(PDEBUG) || defined(PDIV_DEBUG)
         if (p_LmShortDivisibleBy(T[j].t_p, sevT[j],
                                p, not_sev, r))
@@ -556,7 +556,7 @@ int kFindDivisibleByInT(const kStrategy strat, const LObject* L, const int start
       // SIMD fast path for t_p: scan sevT in batches to skip non-candidates.
       if (__builtin_cpu_supports("avx2"))
       {
-        const int tl = strat->tl;
+        const int tl = strat->T.size()-1;
         loop
         {
           j = kSevScanAVX2(sevT, not_sev, j, tl);
@@ -575,7 +575,7 @@ int kFindDivisibleByInT(const kStrategy strat, const LObject* L, const int start
       }
       else if (__builtin_cpu_supports("sse4.1"))
       {
-        const int tl = strat->tl;
+        const int tl = strat->T.size()-1;
         loop
         {
           j = kSevScanSSE4(sevT, not_sev, j, tl);
@@ -597,7 +597,7 @@ int kFindDivisibleByInT(const kStrategy strat, const LObject* L, const int start
       {
       loop
       {
-        if (j > strat->tl) return -1;
+        if (j > strat->T.size()-1) return -1;
 #if defined(PDEBUG) || defined(PDIV_DEBUG)
         if (p_LmShortDivisibleBy(T[j].t_p, sevT[j],
                                p, not_sev, r))
@@ -677,14 +677,14 @@ int kFindDivisibleByInS(const kStrategy strat, int* max_ind, LObject* L)
   if (is_Ring
   || (strat->ak>0)
   || currRing->pLexOrder)
-    ende=strat->sl;
+    ende=strat->S.size()-1;
   else
   {
     ende=posInS(strat,*max_ind,p,0)+1;
     if (ende>(*max_ind)) ende=(*max_ind);
   }
 #else
-  int ende=strat->sl;
+  int ende=strat->S.size()-1;
 #endif
   if(is_Ring)
   {
@@ -740,14 +740,14 @@ int kFindDivisibleByInS_noCF(const kStrategy strat, int* max_ind, LObject* L)
   if (is_Ring
   || (strat->ak>0)
   || currRing->pLexOrder)
-    ende=strat->sl;
+    ende=strat->S.size()-1;
   else
   {
     ende=posInS(strat,*max_ind,p,0)+1;
     if (ende>(*max_ind)) ende=(*max_ind);
   }
 #else
-  int ende=strat->sl;
+  int ende=strat->S.size()-1;
 #endif
   loop
   {
@@ -776,7 +776,7 @@ int kFindNextDivisibleByInS(const kStrategy strat, int start,int max_ind, LObjec
 #if 1
   int ende=max_ind;
 #else
-  int ende=strat->sl;
+  int ende=strat->S.size()-1;
 #endif
   loop
   {
@@ -922,7 +922,7 @@ poly kFindZeroPoly(poly input_p, ring leadRing, ring tailRing)
 int redRing_Z (LObject* h,kStrategy strat)
 {
   if (h->IsNull()) return 0; // spoly is zero (can only occur with zero divisors)
-  if (strat->tl<0) return 1;
+  if (strat->T.empty()) return 1;
 
   long d;
   int j = 0;
@@ -964,8 +964,8 @@ int redRing_Z (LObject* h,kStrategy strat)
           j = kFindDivisibleByInT(strat, h);
           if(j < 0)
           {
-            if(strat->tl >= 0)
-              h->i_r1 = strat->tl;
+            if((!strat->T.empty()))
+              h->i_r1 = strat->T.size()-1;
             else
               h->i_r1 = -1;
             if (h->GetLmTailRing() == NULL)
@@ -1076,7 +1076,7 @@ int redRing_Z (LObject* h,kStrategy strat)
 static int redRing_Z_S (LObject* h,kStrategy strat)
 {
   if (h->IsNull()) return 0; // spoly is zero (can only occur with zero divisors)
-  if (strat->sl<0) return 1;
+  if (strat->S.empty()) return 1;
 
   int j = 0;
   int pass = 0;
@@ -1085,12 +1085,12 @@ static int redRing_Z_S (LObject* h,kStrategy strat)
   h->SetpFDeg();
   assume(h->pFDeg() == h->FDeg);
   h->SetShortExpVector();
-  int max_ind=strat->sl;
+  int max_ind=strat->S.size()-1;
 
   loop
   {
     /* check if a reducer of the lead term exists */
-    max_ind=strat->sl;
+    max_ind=strat->S.size()-1;
     j = kFindDivisibleByInS(strat,&max_ind, h);
     if (j < 0)
     {
@@ -1114,7 +1114,7 @@ static int redRing_Z_S (LObject* h,kStrategy strat)
             return 0;
           }
           if(nIsZero(pGetCoeff(h->p))) return 2;
-          max_ind=strat->sl;
+          max_ind=strat->S.size()-1;
           j = kFindDivisibleByInS(strat, &max_ind, h);
           if(j < 0)
           {
@@ -1185,7 +1185,7 @@ static int redRing_Z_S (LObject* h,kStrategy strat)
 
 int redRing (LObject* h,kStrategy strat)
 {
-  if (strat->tl<0) return 1;
+  if (strat->T.empty()) return 1;
   if (h->IsNull()) return 0; // spoly is zero (can only occur with zero divisors)
 
   long d;
@@ -1216,8 +1216,8 @@ int redRing (LObject* h,kStrategy strat)
       j = kFindDivisibleByInT(strat, h);
       if(j < 0)
       {
-        if(strat->tl >= 0)
-            h->i_r1 = strat->tl;
+        if((!strat->T.empty()))
+            h->i_r1 = strat->T.size()-1;
         else
             h->i_r1 = -1;
         if (h->GetLmTailRing() == NULL)
@@ -1283,7 +1283,7 @@ int redRing (LObject* h,kStrategy strat)
 
 static int redRing_S (LObject* h,kStrategy strat)
 {
-  if (strat->sl<0) return 1;
+  if (strat->S.empty()) return 1;
   if (h->IsNull()) return 0; // spoly is zero (can only occur with zero divisors)
 
   int j = 0;
@@ -1297,7 +1297,7 @@ static int redRing_S (LObject* h,kStrategy strat)
   h->SetShortExpVector();
   loop
   {
-    max_ind=strat->sl;
+    max_ind=strat->S.size()-1;
     j = kFindDivisibleByInS(strat, &max_ind, h);
     if (j < 0)
     {
@@ -1309,7 +1309,7 @@ static int redRing_S (LObject* h,kStrategy strat)
         return 0;
       }
       if(nIsZero(pGetCoeff(h->p))) return 2;
-      max_ind=strat->sl;
+      max_ind=strat->S.size()-1;
       j = kFindDivisibleByInS(strat, &max_ind,h);
       if(j < 0)
       {
@@ -1343,7 +1343,7 @@ static int redRing_S (LObject* h,kStrategy strat)
 */
 int redHomog (LObject* h,kStrategy strat)
 {
-  if (strat->tl<0) return 1;
+  if (strat->T.empty()) return 1;
   //if (h->GetLmTailRing()==NULL) return 0; // HS: SHOULD NOT BE NEEDED!
   assume(h->FDeg == h->pFDeg());
 
@@ -1381,7 +1381,7 @@ int redHomog (LObject* h,kStrategy strat)
         {
           /*- search the shortest possible with respect to length -*/
           i++;
-          if (i > strat->tl)
+          if (i > strat->T.size()-1)
             break;
           if ((strat->T[i].pLength < li)
              &&
@@ -1499,7 +1499,7 @@ int redHomog (LObject* h,kStrategy strat)
         else
 #endif
         {
-          int dummy=strat->sl;
+          int dummy=strat->S.size()-1;
           if (kFindDivisibleByInS(strat, &dummy, h) < 0)
             return 1;
         }
@@ -1561,7 +1561,7 @@ KINLINE int ksReducePolyTailSig(LObject* PR, TObject* PW, LObject* Red, kStrateg
 
 int redSig (LObject* h,kStrategy strat)
 {
-  if (strat->tl<0) return 1;
+  if (strat->T.empty()) return 1;
   //if (h->GetLmTailRing()==NULL) return 0; // HS: SHOULD NOT BE NEEDED!
   //printf("FDEGS: %ld -- %ld\n",h->FDeg, h->pFDeg());
   assume(h->FDeg == h->pFDeg());
@@ -1611,7 +1611,7 @@ int redSig (LObject* h,kStrategy strat)
     {
       /*- search the shortest possible with respect to length -*/
       i++;
-      if (i > strat->tl)
+      if (i > strat->T.size()-1)
         break;
       if (li==1)
         break;
@@ -1706,7 +1706,7 @@ int redSig (LObject* h,kStrategy strat)
         h->SetLmCurrRing();
         if (! strat->L.would_be_top(*h))
         {
-          int dummy=strat->sl;
+          int dummy=strat->S.size()-1;
           if (kFindDivisibleByInS(strat, &dummy, h) < 0)
           {
             return 1;
@@ -1740,7 +1740,7 @@ int redSigRing (LObject* h,kStrategy strat)
   poly beforeredsig;
   beforeredsig = pCopy(h->sig);
 
-  if (strat->tl<0) return 1;
+  if (strat->T.empty()) return 1;
   //if (h->GetLmTailRing()==NULL) return 0; // HS: SHOULD NOT BE NEEDED!
   //printf("FDEGS: %ld -- %ld\n",h->FDeg, h->pFDeg());
   assume(h->FDeg == h->pFDeg());
@@ -1787,8 +1787,8 @@ int redSigRing (LObject* h,kStrategy strat)
       j = kFindDivisibleByInT(strat, h,start);
       if(j < 0)
       {
-        if(strat->tl >= 0)
-            h->i_r1 = strat->tl;
+        if((!strat->T.empty()))
+            h->i_r1 = strat->T.size()-1;
         else
             h->i_r1 = -1;
         if (h->GetLmTailRing() == NULL)
@@ -1812,7 +1812,7 @@ int redSigRing (LObject* h,kStrategy strat)
           }
           else
           {
-            //strat->enterS(*h, strat->sl+1, strat, strat->tl);
+            //strat->enterS(*h, strat->S.size(), strat, strat->T.size()-1);
             return 0;
           }
         }
@@ -1834,7 +1834,7 @@ int redSigRing (LObject* h,kStrategy strat)
     {
       /*- search the shortest possible with respect to length -*/
       i++;
-      if (i > strat->tl)
+      if (i > strat->T.size()-1)
         break;
       if (li==1)
         break;
@@ -1954,7 +1954,7 @@ int redSigRing (LObject* h,kStrategy strat)
         h->SetLmCurrRing();
         if (! strat->L.would_be_top(*h))
         {
-          int dummy=strat->sl;
+          int dummy=strat->S.size()-1;
           if (kFindDivisibleByInS(strat, &dummy, h) < 0)
           {
             return 1;
@@ -1983,7 +1983,7 @@ poly redtailSba (LObject* L, int pos, kStrategy strat, BOOLEAN withT, BOOLEAN no
     return L->GetLmCurrRing();
 
   TObject* With;
-  // placeholder in case strat->tl < 0
+  // placeholder in case strat->T.empty()
   TObject  With_s(strat->tailRing);
 
   LObject Ln(pNext(h), strat->tailRing);
@@ -2095,7 +2095,7 @@ poly redtailSba (LObject* L, int pos, kStrategy strat, BOOLEAN withT, BOOLEAN no
 */
 int redLazy (LObject* h,kStrategy strat)
 {
-  if (strat->tl<0) return 1;
+  if (strat->T.empty()) return 1;
   int i,ii,li;
   int j = 0;
   int pass = 0;
@@ -2132,7 +2132,7 @@ int redLazy (LObject* h,kStrategy strat)
         {
           /*- search the shortest possible with respect to length -*/
           i++;
-          if (i > strat->tl)
+          if (i > strat->T.size()-1)
             break;
           if ((strat->T[i].pLength < li)
              &&
@@ -2250,7 +2250,7 @@ int redLazy (LObject* h,kStrategy strat)
         else
 #endif
         {
-          int dummy=strat->sl;
+          int dummy=strat->S.size()-1;
           if (kFindDivisibleByInS(strat, &dummy, h) < 0)
             return 1;
         }
@@ -2298,7 +2298,7 @@ int redLazy (LObject* h,kStrategy strat)
 */
 int redHoney (LObject* h, kStrategy strat)
 {
-  if (strat->tl<0) return 1;
+  if (strat->T.empty()) return 1;
   //if (h->GetLmTailRing()==NULL) return 0; // HS: SHOULD NOT BE NEEDED!
   assume(h->FDeg == h->pFDeg());
   int j,pass,ei, ii, h_d;
@@ -2449,7 +2449,7 @@ int redHoney (LObject* h, kStrategy strat)
         else
 #endif
         {
-          int dummy=strat->sl;
+          int dummy=strat->S.size()-1;
           if (kFindDivisibleByInS(strat, &dummy, h) < 0)
             return 1;
         }
@@ -2495,9 +2495,9 @@ poly redNF (poly h,int &max_ind,int nonorm,kStrategy strat)
   if (h==NULL) return NULL;
   int j,j_ring;
   int cnt=REDNF_CANONICALIZE;
-  max_ind=strat->sl;
+  max_ind=strat->S.size()-1;
 
-  if (0 > strat->sl)
+  if (0 > strat->S.size()-1)
   {
     return h;
   }
@@ -2691,9 +2691,9 @@ poly redNFBound (poly h,int &max_ind,int nonorm,kStrategy strat,int bound)
   h = pJet(h,bound);
   if (h==NULL) return NULL;
   int j;
-  max_ind=strat->sl;
+  max_ind=strat->S.size()-1;
 
-  if (0 > strat->sl)
+  if (0 > strat->S.size()-1)
   {
     return h;
   }
@@ -2960,7 +2960,7 @@ ideal bba (ideal F, ideal Q,intvec *w,bigintmat *hilb,kStrategy strat)
       /* statistic */
       if (TEST_OPT_PROT) PrintS("s");
 
-      int pos=posInS(strat,strat->sl,strat->P.p,strat->P.ecart);
+      int pos=posInS(strat,strat->S.size()-1,strat->P.p,strat->P.ecart);
 
       // reduce the tail and normalize poly
       // in the ring case we cannot expect LC(f) = 1,
@@ -2970,7 +2970,7 @@ ideal bba (ideal F, ideal Q,intvec *w,bigintmat *hilb,kStrategy strat)
        * the coefficients in the tail terms */
       if (rField_is_Z(currRing) && !rHasLocalOrMixedOrdering(currRing))
       {
-        redtailBbaAlsoLC_Z(&(strat->P), strat->tl, strat);
+        redtailBbaAlsoLC_Z(&(strat->P), strat->T.size()-1, strat);
       }
 
       if (TEST_OPT_INTSTRATEGY)
@@ -3024,11 +3024,11 @@ ideal bba (ideal F, ideal Q,intvec *w,bigintmat *hilb,kStrategy strat)
         strat->P.SetShortExpVector();
         enterT(strat->P, strat);
         if (rField_is_Ring(currRing))
-          superenterpairs(strat->P.p,strat->sl,strat->P.ecart,pos,strat, strat->tl);
+          superenterpairs(strat->P.p,strat->S.size()-1,strat->P.ecart,pos,strat, strat->T.size()-1);
         else
-          enterpairs(strat->P.p,strat->sl,strat->P.ecart,pos,strat, strat->tl);
+          enterpairs(strat->P.p,strat->S.size()-1,strat->P.ecart,pos,strat, strat->T.size()-1);
         // posInS only depends on the leading term
-        strat->enterS(strat->P, pos, strat, strat->tl);
+        strat->enterS(strat->P, pos, strat, strat->T.size()-1);
 #if 0
         int pl=pLength(strat->P.p);
         if (pl==1)
@@ -3056,13 +3056,13 @@ ideal bba (ideal F, ideal Q,intvec *w,bigintmat *hilb,kStrategy strat)
           // we are called AFTER enterS, i.e. if we change P
           // we have to add it also to S/T
           // and add pairs
-          int pos=posInS(strat,strat->sl,strat->P.p,strat->P.ecart);
+          int pos=posInS(strat,strat->S.size()-1,strat->P.p,strat->P.ecart);
           enterT(strat->P, strat);
           if (rField_is_Ring(currRing))
-            superenterpairs(strat->P.p,strat->sl,strat->P.ecart,pos,strat, strat->tl);
+            superenterpairs(strat->P.p,strat->S.size()-1,strat->P.ecart,pos,strat, strat->T.size()-1);
           else
-            enterpairs(strat->P.p,strat->sl,strat->P.ecart,pos,strat, strat->tl);
-          strat->enterS(strat->P, pos, strat, strat->tl);
+            enterpairs(strat->P.p,strat->S.size()-1,strat->P.ecart,pos,strat, strat->T.size()-1);
+          strat->enterS(strat->P, pos, strat, strat->T.size()-1);
         }
       }
     }
@@ -3088,7 +3088,7 @@ bba_post_loop:
     {
       int k = 1;
       int j;
-      while (k <= strat->sl)
+      while (k < strat->S.size())
       {
         j = 0;
         loop
@@ -3112,7 +3112,7 @@ bba_post_loop:
     {
       int k=1;
       int j;
-      while(k<=strat->sl)
+      while(k < strat->S.size())
       {
         j=0;
         loop
@@ -3140,7 +3140,7 @@ bba_post_loop:
         strat->completeReduce_retry=FALSE;
         cleanT(strat);strat->tailRing=currRing;
         int i;
-        for(i=strat->sl;i>=0;i--) strat->S[i].s_2_r=-1;
+        for(i=strat->S.size()-1;i>=0;i--) strat->S[i].s_2_r=-1;
         completeReduce(strat);
       }
       if (strat->completeReduce_retry)
@@ -3156,7 +3156,7 @@ bba_post_loop:
   {
     if(rField_is_Z(currRing))
     {
-      for(int i = 0;i<=strat->sl;i++)
+      for(int i = 0;i < strat->S.size();i++)
       {
         if(!nGreaterZero(pGetCoeff(strat->S[i].p)))
         {
@@ -3165,7 +3165,7 @@ bba_post_loop:
         }
       }
       finalReduceByMon(strat);
-      for(int i = 0;i<=strat->sl;i++)
+      for(int i = 0;i < strat->S.size();i++)
       {
         if(!nGreaterZero(pGetCoeff(strat->S[i].p)))
         {
@@ -3350,7 +3350,7 @@ ideal sba (ideal F0, ideal Q,intvec *w,bigintmat *hilb,kStrategy strat)
   /*Shdl=*/initSbaBuchMora(F, Q,strat);
   idTest(strat->Shdl);
   if (strat->minim>0) strat->M=idInit(IDELEMS(F),F->rank);
-  srmax = strat->sl;
+  srmax = strat->S.size()-1;
   reduc = olddeg = 0;
 #ifndef NO_BUCKETS
   if (!TEST_OPT_NOT_BUCKETS)
@@ -3378,7 +3378,7 @@ ideal sba (ideal F0, ideal Q,intvec *w,bigintmat *hilb,kStrategy strat)
       auto Lp = strat->L.top();
       strat->L.pop();
       enterT(Lp,strat);
-      strat->enterS(Lp, strat->sl+1, strat, strat->tl);
+      strat->enterS(Lp, strat->S.size(), strat, strat->T.size()-1);
     }
     strat->sbaEnterS = -1;
   }
@@ -3554,7 +3554,7 @@ ideal sba (ideal F0, ideal Q,intvec *w,bigintmat *hilb,kStrategy strat)
       }
       else
       {
-        strat->enterS(strat->P, 0, strat, strat->tl);
+        strat->enterS(strat->P, 0, strat, strat->T.size()-1);
         if (TEST_OPT_PROT)
           PrintS("-");
         break;
@@ -3610,10 +3610,10 @@ ideal sba (ideal F0, ideal Q,intvec *w,bigintmat *hilb,kStrategy strat)
       /* statistic */
       if (TEST_OPT_PROT) PrintS("s");
 
-      //int pos=posInS(strat,strat->sl,strat->P.p,strat->P.ecart);
+      //int pos=posInS(strat,strat->S.size()-1,strat->P.p,strat->P.ecart);
       // in F5E we know that the last reduced element is already the
       // the one with highest signature
-      int pos = strat->sl+1;
+      int pos = strat->S.size();
 
       // reduce the tail and normalize poly
       // in the ring case we cannot expect LC(f) = 1,
@@ -3652,7 +3652,7 @@ ideal sba (ideal F0, ideal Q,intvec *w,bigintmat *hilb,kStrategy strat)
       // Best case scenario: remains the leading term
       if(rField_is_Ring(currRing) && strat->sigdrop)
       {
-        strat->enterS(strat->P, 0, strat, strat->tl);
+        strat->enterS(strat->P, 0, strat, strat->T.size()-1);
         break;
       }
 #endif
@@ -3671,7 +3671,7 @@ ideal sba (ideal F0, ideal Q,intvec *w,bigintmat *hilb,kStrategy strat)
         }
         else
         {
-          strat->enterS(strat->P, 0, strat, strat->tl);
+          strat->enterS(strat->P, 0, strat, strat->T.size()-1);
           break;
         }
       }
@@ -3684,7 +3684,7 @@ ideal sba (ideal F0, ideal Q,intvec *w,bigintmat *hilb,kStrategy strat)
     // be reduced
     if (strat->sbaOrder == 1)
     {
-      for (int jj = 0; jj<strat->tl+1; jj++)
+      for (int jj = 0; jj<strat->T.size(); jj++)
       {
         if (pGetComp(strat->T[jj].sig) == strat->currIdx)
         {
@@ -3694,7 +3694,7 @@ ideal sba (ideal F0, ideal Q,intvec *w,bigintmat *hilb,kStrategy strat)
     }
     else
     {
-      for (int jj = 0; jj<strat->tl+1; jj++)
+      for (int jj = 0; jj<strat->T.size(); jj++)
       {
         strat->T[jj].is_sigsafe = FALSE;
       }
@@ -3727,29 +3727,29 @@ ideal sba (ideal F0, ideal Q,intvec *w,bigintmat *hilb,kStrategy strat)
       // enter into S, L, and T
       //if ((!TEST_OPT_IDLIFT) || (pGetComp(strat->P.p) <= strat->syzComp))
       enterT(strat->P, strat);
-      strat->T[strat->tl].is_sigsafe = FALSE;
+      strat->T[strat->T.size()-1].is_sigsafe = FALSE;
       /*
       printf("hier\n");
       pWrite(strat->P.GetLmCurrRing());
       pWrite(strat->P.sig);
       */
       if (rField_is_Ring(currRing))
-        superenterpairsSig(strat->P.p,strat->P.sig,strat->sl+1,strat->sl,strat->P.ecart,pos,strat, strat->tl);
+        superenterpairsSig(strat->P.p,strat->P.sig,strat->S.size(),strat->S.size()-1,strat->P.ecart,pos,strat, strat->T.size()-1);
       else
-        enterpairsSig(strat->P.p,strat->P.sig,strat->sl+1,strat->sl,strat->P.ecart,pos,strat, strat->tl);
+        enterpairsSig(strat->P.p,strat->P.sig,strat->S.size(),strat->S.size()-1,strat->P.ecart,pos,strat, strat->T.size()-1);
       if(rField_is_Ring(currRing) && strat->sigdrop)
         break;
       if(rField_is_Ring(currRing))
         strat->P.sevSig = p_GetShortExpVector(strat->P.sig,currRing);
-      strat->enterS(strat->P, pos, strat, strat->tl);
+      strat->enterS(strat->P, pos, strat, strat->T.size()-1);
       if(strat->sbaOrder != 1)
       {
         BOOLEAN overwrite = FALSE;
-        for (int tk=0; tk<strat->sl+1; tk++)
+        for (int tk=0; tk<strat->S.size(); tk++)
         {
           if (pGetComp(strat->sig[tk]) == pGetComp(strat->P.sig))
           {
-            //printf("TK %d / %d\n",tk,strat->sl);
+            //printf("TK %d / %d\n",tk,strat->S.size()-1);
             overwrite = FALSE;
             break;
           }
@@ -3766,7 +3766,7 @@ ideal sba (ideal F0, ideal Q,intvec *w,bigintmat *hilb,kStrategy strat)
           strat->P.sevSig = pGetShortExpVector (strat->P.sig);
           int i;
           LObject Q;
-          for(int ps=0;ps<strat->sl+1;ps++)
+          for(int ps=0;ps<strat->S.size();ps++)
           {
 
             strat->newt = TRUE;
@@ -3818,7 +3818,7 @@ ideal sba (ideal F0, ideal Q,intvec *w,bigintmat *hilb,kStrategy strat)
         // if new element is the first one in this index
         if (strat->currIdx < idx)
         {
-          for (int i=0; i<strat->sl; ++i)
+          for (int i=0; i<strat->S.size()-1; ++i)
           {
             Q.sig = p_Copy(strat->P.sig,currRing);
             p_ExpVectorAdd(Q.sig,strat->S[i].p,currRing);
@@ -3838,7 +3838,7 @@ ideal sba (ideal F0, ideal Q,intvec *w,bigintmat *hilb,kStrategy strat)
           for (unsigned i=cmp+1; i<=max_cmp; ++i)
           {
             pos = -1;
-            for (int j=0; j<strat->sl; ++j)
+            for (int j=0; j<strat->S.size()-1; ++j)
             {
               if (__p_GetComp(strat->sig[j],currRing) == i)
               {
@@ -3877,9 +3877,9 @@ ideal sba (ideal F0, ideal Q,intvec *w,bigintmat *hilb,kStrategy strat)
 //#if 1
 #if DEBUGF50
     printf("---------------------------\n");
-    Print(" %d. ELEMENT ADDED TO GCURR:\n",strat->sl+1);
-    PrintS("LEAD POLY:  "); pWrite(pHead(strat->S[strat->sl].p));
-    PrintS("SIGNATURE:  "); pWrite(strat->sig[strat->sl]);
+    Print(" %d. ELEMENT ADDED TO GCURR:\n",strat->S.size());
+    PrintS("LEAD POLY:  "); pWrite(pHead(strat->S[strat->S.size()-1].p));
+    PrintS("SIGNATURE:  "); pWrite(strat->sig[strat->S.size()-1]);
 #endif
       /*
       if (newrules)
@@ -3903,7 +3903,7 @@ ideal sba (ideal F0, ideal Q,intvec *w,bigintmat *hilb,kStrategy strat)
       if (hilb!=NULL) khCheck(Q,w,hilb,hilbeledeg,hilbcount,strat);
 //      Print("[%d]",hilbeledeg);
       kDeleteLcm(&strat->P);
-      if (strat->sl>srmax) srmax = strat->sl;
+      if (strat->S.size()-1>srmax) srmax = strat->S.size()-1;
     }
     else
     {
@@ -3972,7 +3972,7 @@ ideal sba (ideal F0, ideal Q,intvec *w,bigintmat *hilb,kStrategy strat)
     {
       int k=1;
       int j;
-      while(k<=strat->sl)
+      while(k < strat->S.size())
       {
         j=0;
         loop
@@ -4000,7 +4000,7 @@ ideal sba (ideal F0, ideal Q,intvec *w,bigintmat *hilb,kStrategy strat)
         strat->completeReduce_retry=FALSE;
         cleanT(strat);strat->tailRing=currRing;
         int i;
-        for(i=strat->sl;i>=0;i--) strat->S[i].s_2_r=-1;
+        for(i=strat->S.size()-1;i>=0;i--) strat->S[i].s_2_r=-1;
         completeReduce(strat);
       }
       if (strat->completeReduce_retry)
@@ -4033,7 +4033,7 @@ ideal sba (ideal F0, ideal Q,intvec *w,bigintmat *hilb,kStrategy strat)
   // I have to add the initial input polynomials which where not used (p1 and p2 = NULL)
   if(rField_is_Ring(currRing))
   {
-    //for(int k = strat->sl;k>=0;k--)
+    //for(int k = strat->S.size()-1;k>=0;k--)
     //  {printf("\nS[%i] = %p\n",k,strat->S[k]);pWrite(strat->S[k]);}
     #if 1
     // 1 - adds just the unused ones, 0 - adds everything
@@ -4043,22 +4043,22 @@ ideal sba (ideal F0, ideal Q,intvec *w,bigintmat *hilb,kStrategy strat)
       strat->L.pop_and_erase();
     }
     #endif
-    //for(int kk = strat->sl;kk>=0;kk--)
+    //for(int kk = strat->S.size()-1;kk>=0;kk--)
     //  {printf("\nS[%i] = %p\n",kk,strat->S[kk]);pWrite(strat->S[kk]);}
     //idPrint(strat->Shdl);
     //printf("\nk = %i\n",k);
     for (auto it=strat->L.begin(); it != strat->L.end() && it->p1 == NULL && it->p2 == NULL; it++)
     {
       //printf("\nAdded k = %i\n",k);
-      strat->enterS(*it, strat->sl+1, strat, strat->tl);
-      //printf("\nThis elements was added from L on pos %i\n",strat->sl);pWrite(strat->S[strat->sl].p);pWrite(strat->sig[strat->sl]);
+      strat->enterS(*it, strat->S.size(), strat, strat->T.size()-1);
+      //printf("\nThis elements was added from L on pos %i\n",strat->S.size()-1);pWrite(strat->S[strat->S.size()-1].p);pWrite(strat->sig[strat->S.size()-1]);
     }
   }
   // Find the "sigdrop element" and put the same signature as the previous one - do we really need this?? - now i put it on the 0 position - no more comparing needed
   #if 0
   if(strat->sigdrop && rField_is_Ring(currRing))
   {
-    for(k=strat->sl;k>=0;k--)
+    for(k=strat->S.size()-1;k>=0;k--)
     {
       printf("\nsig[%i] = ",i);pWrite(strat->sig[k]);
       if(strat->sig[k] == NULL)
@@ -4191,13 +4191,13 @@ poly kNF2 (ideal F,ideal Q,poly q,kStrategy strat, int lazyReduce)
   strat->use_buckets = (!TEST_OPT_NOT_BUCKETS) && (!rIsPluralRing(currRing));
 #endif
   /*- set S -*/
-  strat->sl = -1;
+  strat->S.setsize(0);
   /*- init local data struct.---------------------------------------- -*/
   /*Shdl=*/initS(F,Q,strat);
   /*- compute------------------------------------------------------- -*/
   //if ((TEST_OPT_INTSTRATEGY)&&(lazyReduce==0))
   //{
-  //  for (i=strat->sl;i>=0;i--)
+  //  for (i=strat->S.size()-1;i>=0;i--)
   //    pNorm(strat->S[i].p);
   //}
   kTest(strat);
@@ -4257,13 +4257,13 @@ poly kNF2Bound (ideal F,ideal Q,poly q,int bound,kStrategy strat, int lazyReduce
   strat->use_buckets = (!TEST_OPT_NOT_BUCKETS) && (!rIsPluralRing(currRing));
 #endif
   /*- set S -*/
-  strat->sl = -1;
+  strat->S.setsize(0);
   /*- init local data struct.---------------------------------------- -*/
   /*Shdl=*/initS(F,Q,strat);
   /*- compute------------------------------------------------------- -*/
   //if ((TEST_OPT_INTSTRATEGY)&&(lazyReduce==0))
   //{
-  //  for (i=strat->sl;i>=0;i--)
+  //  for (i=strat->S.size()-1;i>=0;i--)
   //    pNorm(strat->S[i].p);
   //}
   kTest(strat);
@@ -4334,7 +4334,7 @@ ideal kNF2 (ideal F,ideal Q,ideal q,kStrategy strat, int lazyReduce)
     strat->enterS = enterSBba;
   }
   /*- set S -*/
-  strat->sl = -1;
+  strat->S.setsize(0);
 #ifndef NO_BUCKETS
   strat->use_buckets = (!TEST_OPT_NOT_BUCKETS) && (!rIsPluralRing(currRing));
 #endif
@@ -4403,7 +4403,7 @@ ideal kNF2Bound (ideal F,ideal Q,ideal q,int bound,kStrategy strat, int lazyRedu
   strat->initEcart = initEcartBBA;
   strat->enterS = enterSBba;
   /*- set S -*/
-  strat->sl = -1;
+  strat->S.setsize(0);
 #ifndef NO_BUCKETS
   strat->use_buckets = (!TEST_OPT_NOT_BUCKETS) && (!rIsPluralRing(currRing));
 #endif
@@ -4466,25 +4466,25 @@ void f5c (kStrategy strat, int& olddeg, int& minimcnt, int& hilbeledeg,
   hilbeledeg=1;
   hilbcount=0;
   minimcnt=0;
-  srmax = 0; // strat->sl is 0 at this point
+  srmax = 0; // strat->S.size()-1 is 0 at this point
   reduc = olddeg = 0;
   // we cannot use strat->T anymore
   //cleanT(strat);
-  //strat->tl = -1;
+  //strat->T.setsize(0);
   localL.key_comp().strat = strat;
   if(rField_is_Ring(currRing)) {
     localL.key_comp().compareL = compareL11Ring;
   } else {
     localL.key_comp().compareL = compareLF5C;
   }
-  while (strat->tl >= 0)
+  while ((!strat->T.empty()))
   {
-    if(!strat->T[strat->tl].is_redundant)
+    if(!strat->T[strat->T.size()-1].is_redundant)
     {
       LObject h;
-      h.p = strat->T[strat->tl].p;
-      h.tailRing = strat->T[strat->tl].tailRing;
-      h.t_p = strat->T[strat->tl].t_p;
+      h.p = strat->T[strat->T.size()-1].p;
+      h.tailRing = strat->T[strat->T.size()-1].tailRing;
+      h.t_p = strat->T[strat->T.size()-1].t_p;
       if (h.p!=NULL)
       {
         if (currRing->OrdSgn==-1)
@@ -4508,16 +4508,16 @@ void f5c (kStrategy strat, int& olddeg, int& minimcnt, int& hilbeledeg,
         }
       }
     }
-    strat->tl--;
+    strat->T.setsize(strat->T.size()-1);
   }
-  strat->sl = -1;
+  strat->S.setsize(0);
 #if 0
 //#ifdef HAVE_TAIL_RING
   if(!rField_is_Ring())  // create strong gcd poly computes with tailring and S[i] ->to be fixed
     kStratInitChangeTailRing(strat);
 #endif
-  //enterpairs(pOne(),0,0,-1,strat,strat->tl);
-  //strat->sl = -1;
+  //enterpairs(pOne(),0,0,-1,strat,strat->T.size()-1);
+  //strat->S.setsize(0);
   /* picks the last element from the lazyset localL */
   while (! localL.empty())
   {
@@ -4530,7 +4530,7 @@ void f5c (kStrategy strat, int& olddeg, int& minimcnt, int& hilbeledeg,
     pWrite(pHead(strat->P.p));
     pWrite(pHead(strat->P.p1));
     pWrite(pHead(strat->P.p2));
-    printf("%d\n",strat->tl);
+    printf("%d\n",strat->T.size()-1);
     PrintS("-------------------------------------------------\n");
 #endif
     if (pNext(strat->P.p) == strat->tail)
@@ -4612,11 +4612,11 @@ void f5c (kStrategy strat, int& olddeg, int& minimcnt, int& hilbeledeg,
       int pos;
       #if 1
       if(!rField_is_Ring(currRing))
-        pos = posInS(strat,strat->sl,strat->P.p,strat->P.ecart);
+        pos = posInS(strat,strat->S.size()-1,strat->P.p,strat->P.ecart);
       else
-        pos = posInSMonFirst(strat,strat->sl,strat->P.p);
+        pos = posInSMonFirst(strat,strat->S.size()-1,strat->P.p);
       #else
-      pos = posInS(strat,strat->sl,strat->P.p,strat->P.ecart);
+      pos = posInS(strat,strat->S.size()-1,strat->P.p,strat->P.ecart);
       #endif
       // reduce the tail and normalize poly
       // in the ring case we cannot expect LC(f) = 1,
@@ -4669,18 +4669,18 @@ void f5c (kStrategy strat, int& olddeg, int& minimcnt, int& hilbeledeg,
       {
         enterT(strat->P, strat);
         // posInS only depends on the leading term
-        strat->enterS(strat->P, pos, strat, strat->tl);
+        strat->enterS(strat->P, pos, strat, strat->T.size()-1);
 //#if 1
 #ifdef DEBUGF5
         PrintS("ELEMENT ADDED TO GCURR DURING INTERRED: ");
-        pWrite(pHead(strat->S[strat->sl].p));
-        pWrite(strat->sig[strat->sl]);
+        pWrite(pHead(strat->S[strat->S.size()-1].p));
+        pWrite(strat->sig[strat->S.size()-1]);
 #endif
         if (hilb!=NULL) khCheck(Q,w,hilb,hilbeledeg,hilbcount,strat);
       }
       //      Print("[%d]",hilbeledeg);
       kDeleteLcm(&strat->P);
-      if (strat->sl>srmax) srmax = strat->sl;
+      if (strat->S.size()-1>srmax) srmax = strat->S.size()-1;
     }
     else
     {
@@ -4700,7 +4700,7 @@ void f5c (kStrategy strat, int& olddeg, int& minimcnt, int& hilbeledeg,
 #endif /* KDEBUG */
   }
   int cc = 0;
-  while (cc<strat->tl+1)
+  while (cc<strat->T.size())
   {
     strat->T[cc].sig        = pOne();
     p_SetComp(strat->T[cc].sig,cc+1,currRing);
@@ -4710,7 +4710,7 @@ void f5c (kStrategy strat, int& olddeg, int& minimcnt, int& hilbeledeg,
     strat->T[cc].is_sigsafe = TRUE;
     cc++;
   }
-  strat->max_lower_index = strat->tl;
+  strat->max_lower_index = strat->T.size()-1;
   // set current signature index of upcoming iteration step
   // NOTE:  this needs to be set here, as otherwise initSyzRules cannot compute
   //        the corresponding syzygy rules correctly
@@ -4720,12 +4720,12 @@ void f5c (kStrategy strat, int& olddeg, int& minimcnt, int& hilbeledeg,
     p_SetComp(Lp.sig,cc+1,currRing);
     cc++;
   }
-  for (cc=strat->sl+1; cc<IDELEMS(strat->Shdl); ++cc)
+  for (cc=strat->S.size(); cc<IDELEMS(strat->Shdl); ++cc)
     strat->S[cc].p  = NULL;
     strat->Shdl->m[cc] = strat->S[cc].p;
   #if 0
   printf("\nAfter f5c sorting\n");
-  for(int i=0;i<=strat->sl;i++)
+  for(int i=0;i < strat->S.size();i++)
   pWrite(pHead(strat->S[i].p));
   getchar();
   #endif
@@ -4733,7 +4733,7 @@ void f5c (kStrategy strat, int& olddeg, int& minimcnt, int& hilbeledeg,
 #if DEBUGF5
   PrintS("------------------- STRAT S ---------------------\n");
   cc = 0;
-  while (cc<strat->tl+1)
+  while (cc<strat->T.size())
   {
     pWrite(pHead(strat->S[cc].p));
     pWrite(strat->sig[cc]);
@@ -4743,7 +4743,7 @@ void f5c (kStrategy strat, int& olddeg, int& minimcnt, int& hilbeledeg,
   PrintS("-------------------------------------------------\n");
   PrintS("------------------- STRAT T ---------------------\n");
   cc = 0;
-  while (cc<strat->tl+1)
+  while (cc<strat->T.size())
   {
     pWrite(pHead(strat->T[cc].p));
     pWrite(strat->T[cc].sig);
@@ -4761,7 +4761,7 @@ void f5c (kStrategy strat, int& olddeg, int& minimcnt, int& hilbeledeg,
     printf("- - - - - -\n");
   }
   PrintS("-------------------------------------------------\n");
-  printf("F5C DONE\nSTRAT SL: %d -- %d\n",strat->sl, strat->currIdx);
+  printf("F5C DONE\nSTRAT SL: %d -- %d\n",strat->S.size()-1, strat->currIdx);
 #endif
 
 }
@@ -4914,7 +4914,7 @@ ideal bbaShift(ideal F, ideal Q,intvec *w,bigintmat *hilb,kStrategy strat)
       /* statistic */
       if (TEST_OPT_PROT) PrintS("s");
 
-      int pos=posInS(strat,strat->sl,strat->P.p,strat->P.ecart);
+      int pos=posInS(strat,strat->S.size()-1,strat->P.p,strat->P.ecart);
 
       // reduce the tail and normalize poly
       // in the ring case we cannot expect LC(f) = 1,
@@ -4924,7 +4924,7 @@ ideal bbaShift(ideal F, ideal Q,intvec *w,bigintmat *hilb,kStrategy strat)
        * the coefficients in the tail terms */
       if (rField_is_Z(currRing) && !rHasLocalOrMixedOrdering(currRing))
       {
-        redtailBbaAlsoLC_Z(&(strat->P), strat->tl, strat);
+        redtailBbaAlsoLC_Z(&(strat->P), strat->T.size()-1, strat);
       }
 
       if (TEST_OPT_INTSTRATEGY)
@@ -4985,9 +4985,9 @@ ideal bbaShift(ideal F, ideal Q,intvec *w,bigintmat *hilb,kStrategy strat)
       if ((!TEST_OPT_IDLIFT) || (pGetComp(strat->P.p) <= strat->syzComp))
       {
         enterT(strat->P, strat);
-        enterpairsShift(strat->P.p,strat->sl,strat->P.ecart,pos,strat, strat->tl);
+        enterpairsShift(strat->P.p,strat->S.size()-1,strat->P.ecart,pos,strat, strat->T.size()-1);
         // posInS only depends on the leading term
-        strat->enterS(strat->P, pos, strat, strat->tl);
+        strat->enterS(strat->P, pos, strat, strat->T.size()-1);
         if (!strat->rightGB)
           enterTShift(strat->P, strat);
       }
@@ -5005,10 +5005,10 @@ ideal bbaShift(ideal F, ideal Q,intvec *w,bigintmat *hilb,kStrategy strat)
           // we are called AFTER enterS, i.e. if we change P
           // we have to add it also to S/T
           // and add pairs
-          int pos=posInS(strat,strat->sl,strat->P.p,strat->P.ecart);
+          int pos=posInS(strat,strat->S.size()-1,strat->P.p,strat->P.ecart);
           enterT(strat->P, strat);
-          enterpairsShift(strat->P.p,strat->sl,strat->P.ecart,pos,strat, strat->tl);
-          strat->enterS(strat->P, pos, strat, strat->tl);
+          enterpairsShift(strat->P.p,strat->S.size()-1,strat->P.ecart,pos,strat, strat->T.size()-1);
+          strat->enterS(strat->P, pos, strat, strat->T.size()-1);
           if (!strat->rightGB)
             enterTShift(strat->P,strat);
         }
@@ -5031,10 +5031,10 @@ ideal bbaShift(ideal F, ideal Q,intvec *w,bigintmat *hilb,kStrategy strat)
   {
     if(!rField_is_Ring(currRing))
     {
-      for (int k = 0; k <= strat->sl; ++k)
+      for (int k = 0; k < strat->S.size(); ++k)
       {
         if ((strat->hasFromQ) && (strat->S[k].fromQ)) continue; // do not reduce Q_k
-        for (int j = 0; j<=strat->tl; ++j)
+        for (int j = 0; j < strat->T.size(); ++j)
         {
           if (strat->T[j].p!=NULL)
           {
@@ -5070,7 +5070,7 @@ ideal bbaShift(ideal F, ideal Q,intvec *w,bigintmat *hilb,kStrategy strat)
         strat->completeReduce_retry=FALSE;
         cleanT(strat);strat->tailRing=currRing;
         int i;
-        for(i=strat->sl;i>=0;i--) strat->S[i].s_2_r=-1;
+        for(i=strat->S.size()-1;i>=0;i--) strat->S[i].s_2_r=-1;
         WarnS("reduction with S is not yet supported by Letterplace"); // if this ever happens, we'll know
         completeReduce(strat);
       }
@@ -5088,7 +5088,7 @@ ideal bbaShift(ideal F, ideal Q,intvec *w,bigintmat *hilb,kStrategy strat)
   {
     if(rField_is_Z(currRing))
     {
-      for(int i = 0;i<=strat->sl;i++)
+      for(int i = 0;i < strat->S.size();i++)
       {
         if(!nGreaterZero(pGetCoeff(strat->S[i].p)))
         {
@@ -5097,7 +5097,7 @@ ideal bbaShift(ideal F, ideal Q,intvec *w,bigintmat *hilb,kStrategy strat)
         }
       }
       finalReduceByMon(strat);
-      for(int i = 0;i<=strat->sl;i++)
+      for(int i = 0;i < strat->S.size();i++)
       {
         if(!nGreaterZero(pGetCoeff(strat->S[i].p)))
         {
@@ -5243,7 +5243,7 @@ int redFirstShift (LObject* h,kStrategy strat)
           h->SetLength(strat->length_pLength);
         if (! strat->L.would_be_top(*h))
         {
-          //int dummy=strat->sl;
+          //int dummy=strat->S.size()-1;
           /*          if (kFindDivisibleByInS(strat,&dummy, h) < 0) */
           //if (kFindDivisibleByInT(strat->T,strat->sevT, dummy, h) < 0)
           if (kFindDivisibleByInT(strat, h) < 0)

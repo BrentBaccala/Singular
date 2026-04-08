@@ -246,7 +246,7 @@ static const int SWEEP_CHUNK = 64;
 static void sweep_phase(SweepContext *ctx, int thread_id)
 {
   kStrategy strat = ctx->strat;
-  int tl = strat->tl;
+  int tl = strat->T.size()-1;
   int max_active = ctx->max_active;
 
   while (true)
@@ -500,12 +500,12 @@ static void process_survivor(SweepContext *ctx, ActivePoly *ap)
 
   if (TEST_OPT_PROT) PrintS("s");
 
-  int pos = posInS(strat, strat->sl, ap->P.p, ap->P.ecart);
+  int pos = posInS(strat, strat->S.size()-1, ap->P.p, ap->P.ecart);
 
   strat->redTailChange = FALSE;
 
   if (rField_is_Z(currRing) && !rHasLocalOrMixedOrdering(currRing))
-    redtailBbaAlsoLC_Z(&(ap->P), strat->tl, strat);
+    redtailBbaAlsoLC_Z(&(ap->P), strat->T.size()-1, strat);
 
   if (TEST_OPT_INTSTRATEGY)
   {
@@ -534,11 +534,11 @@ static void process_survivor(SweepContext *ctx, ActivePoly *ap)
     enterT(ap->P, strat);
 
     if (rField_is_Ring(currRing))
-      superenterpairs(ap->P.p, strat->sl, ap->P.ecart, pos, strat, strat->tl);
+      superenterpairs(ap->P.p, strat->S.size()-1, ap->P.ecart, pos, strat, strat->T.size()-1);
     else
-      enterpairs(ap->P.p, strat->sl, ap->P.ecart, pos, strat, strat->tl);
+      enterpairs(ap->P.p, strat->S.size()-1, ap->P.ecart, pos, strat, strat->T.size()-1);
 
-    strat->enterS(ap->P, pos, strat, strat->tl);
+    strat->enterS(ap->P, pos, strat, strat->T.size()-1);
   }
 
   kDeleteLcm(&ap->P);
@@ -654,7 +654,7 @@ void bba_parallel_loop(SweepContext *ctx)
 
   // Pre-compute pLength for all T entries to avoid lazy init during parallel phase
   // (must be done BEFORE startup barrier so workers don't race ahead)
-  for (int j = 0; j <= strat->tl; j++)
+  for (int j = 0; j < strat->T.size(); j++)
   {
     if (strat->T[j].pLength <= 0)
       strat->T[j].pLength = pLength(strat->T[j].p ? strat->T[j].p : strat->T[j].t_p);
@@ -711,7 +711,7 @@ void bba_parallel_loop(SweepContext *ctx)
       if (had_survivor)
       {
         // Re-compute pLength for new T entries
-        for (int j = 0; j <= strat->tl; j++)
+        for (int j = 0; j < strat->T.size(); j++)
         {
           if (strat->T[j].pLength <= 0)
             strat->T[j].pLength = pLength(strat->T[j].p ? strat->T[j].p : strat->T[j].t_p);
@@ -781,7 +781,7 @@ void bba_parallel_loop(SweepContext *ctx)
     // Re-compute pLength for any new T entries added by process_survivor
     if (had_survivor)
     {
-      for (int j = 0; j <= strat->tl; j++)
+      for (int j = 0; j < strat->T.size(); j++)
       {
         if (strat->T[j].pLength <= 0)
           strat->T[j].pLength = pLength(strat->T[j].p ? strat->T[j].p : strat->T[j].t_p);

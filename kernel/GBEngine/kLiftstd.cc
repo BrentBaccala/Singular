@@ -166,7 +166,7 @@ static poly lazyComp(number* A, poly* M,poly* T,int index,poly s,int *l,const ri
 */
 int redLiftstd (LObject* h, kStrategy strat)
 {
-  if (strat->tl<0) return 1;
+  if (strat->T.empty()) return 1;
   assume(h->FDeg == h->pFDeg());
   assume(TEST_OPT_IDLIFT);
   poly h_p;
@@ -224,7 +224,7 @@ int redLiftstd (LObject* h, kStrategy strat)
       {
         /*- possible with respect to ecart, minimal nSize -*/
         i++;
-        if (i > strat->tl)
+        if (i >= (int)strat->T.size())
           break;
         //if (ei < h->ecart)
         //  break;

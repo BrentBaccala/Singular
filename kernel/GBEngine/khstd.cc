@@ -56,7 +56,7 @@ void khCheck( ideal Q, intvec *w, bigintmat *hilb, int &eledeg, int &count,
     {
       char *used_comp=(char*)omAlloc0(strat->ak+1);
       int i;
-      for(i=strat->sl;i>0;i--)
+      for(i=strat->S.size()-1;i>0;i--)
       {
         used_comp[pGetComp(strat->S[i].p)]='\1';
       }
@@ -170,7 +170,7 @@ void khCheck( ideal Q, intvec *w, poly hilb, const ring Qt, int &eledeg, int &co
     {
       char *used_comp=(char*)omAlloc0(strat->ak+1);
       int i;
-      for(i=strat->sl;i>0;i--)
+      for(i=strat->S.size()-1;i>0;i--)
       {
         used_comp[pGetComp(strat->S[i].p)]='\1';
       }
