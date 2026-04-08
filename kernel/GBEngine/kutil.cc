@@ -8201,6 +8201,17 @@ void updateS(BOOLEAN toT,kStrategy strat)
 */
 void syncShdl (kStrategy strat)
 {
+#ifdef KDEBUG
+  // Validate S polys before syncing to Shdl
+  for (int i = 0; i < strat->S.size(); i++)
+  {
+    if (strat->S[i].p != NULL && strat->S[i].p->coef == NULL)
+    {
+      fprintf(stderr, "BUG in syncShdl: S[%d].p=%p has NULL coef!\n", i, (void*)strat->S[i].p);
+      abort();
+    }
+  }
+#endif
   // Ensure Shdl has enough space
   if (strat->S.size()-1 >= IDELEMS(strat->Shdl))
   {
