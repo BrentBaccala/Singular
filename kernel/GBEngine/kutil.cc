@@ -9482,10 +9482,14 @@ void updateResult(ideal r,ideal Q, kStrategy strat)
                 (pLength(r->m[q]) == pLength(r->m[l]) && nGreaterZero(r->m[q]->coef))))
                 {
                   pDelete(&r->m[l]);
+                  if (l < strat->S.size()) strat->S[l].p = r->m[l];
                   break;
                 }
                 else
+                {
                   pDelete(&r->m[q]);
+                  if (q < strat->S.size()) strat->S[q].p = r->m[q];
+                }
               }
             }
           }
@@ -9510,10 +9514,14 @@ void updateResult(ideal r,ideal Q, kStrategy strat)
                 (pLength(r->m[q]) == pLength(r->m[l]) && nGreaterZero(r->m[q]->coef))))
                 {
                   pDelete(&r->m[l]);
+                  if (l < strat->S.size()) strat->S[l].p = r->m[l];
                   break;
                 }
                 else
+                {
                   pDelete(&r->m[q]);
+                  if (q < strat->S.size()) strat->S[q].p = r->m[q];
+                }
               }
             }
           }
