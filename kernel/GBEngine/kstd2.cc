@@ -4076,21 +4076,16 @@ ideal sba (ideal F0, ideal Q,intvec *w,bigintmat *hilb,kStrategy strat)
   //idSkipZeroes(strat->Shdl);
   //idPrint(strat->Shdl);
 
+  // Get the result ideal from S once. All subsequent operations
+  // (ring move, id_DelDiv) work on this ideal directly.
+  // S is not used again after this point.
+  ideal result = strat->getShdl();
+
   if ((strat->sbaOrder == 1 || strat->sbaOrder == 3) && sRing!=currRingOld)
   {
     rChangeCurrRing (currRingOld);
     F0          = idrMoveR (F1, sRing, currRing);
-    {
-      ideal tmpShdl = strat->getShdl();
-      tmpShdl = idrMoveR_NoSort (tmpShdl, sRing, currRing);
-      // Update S from the moved ideal
-      strat->S.setsize(IDELEMS(tmpShdl));
-      strat->S.ensure_capacity(IDELEMS(tmpShdl));
-      for (int ii = 0; ii < IDELEMS(tmpShdl); ii++)
-        strat->S[ii].p = tmpShdl->m[ii];
-      strat->Srank = tmpShdl->rank;
-      for (int ii = 0; ii < IDELEMS(tmpShdl); ii++) tmpShdl->m[ii] = NULL; id_Delete(&tmpShdl, currRing);
-    }
+    result = idrMoveR_NoSort (result, sRing, currRing);
     rChangeCurrRing (sRing);
     if(rField_is_Ring(currRing))
       exitSba(strat);
@@ -4099,43 +4094,22 @@ ideal sba (ideal F0, ideal Q,intvec *w,bigintmat *hilb,kStrategy strat)
       strat->tailRing = currRing;
     rDelete (sRing);
   }
-  // id_DelDiv removes divisible elements. We do this on S directly
-  // to keep sig/sevSig/ecart/sev in sync with the surviving polys.
-  {
-    // Build a temp ideal for id_DelDiv, but track which entries survive
-    ideal tmpShdl = strat->getShdl();
-    if(rField_is_Ring(currRing) && !strat->sigdrop)
-      id_DelDiv(tmpShdl, currRing);
-    if(!rField_is_Ring(currRing))
-      id_DelDiv(tmpShdl, currRing);
-    // Compact S to match: keep only entries where tmpShdl->m[i] is non-NULL
-    int j = 0;
-    for (int ii = 0; ii < strat->S.size(); ii++)
-    {
-      if (tmpShdl->m[ii] != NULL)
-      {
-        if (j != ii)
-          strat->S[j] = strat->S[ii]; // shift entire SElement
-        strat->S[j].p = tmpShdl->m[ii]; // use the (possibly moved) poly
-        j++;
-      }
-    }
-    strat->S.setsize(j);
-    strat->Srank = tmpShdl->rank;
-    for (int ii = 0; ii < IDELEMS(tmpShdl); ii++) tmpShdl->m[ii] = NULL;
-    id_Delete(&tmpShdl, currRing);
-  }
+  if(rField_is_Ring(currRing) && !strat->sigdrop)
+    id_DelDiv(result, currRing);
+  if(!rField_is_Ring(currRing))
+    id_DelDiv(result, currRing);
+  idSkipZeroes(result);
 
 #if SBA_PRINT_SIZE_G
-  size_g   = strat->S.size();
+  size_g   = IDELEMS(result);
 #endif
 #ifdef DEBUGF5
-  printf("SIZE OF SHDL: %d\n",strat->S.size());
+  printf("SIZE OF RESULT: %d\n",IDELEMS(result));
   int oo = 0;
-  while (oo<strat->S.size())
+  while (oo<IDELEMS(result))
   {
     printf(" %d.   ",oo+1);
-    pWrite(pHead(strat->S[oo].p));
+    pWrite(pHead(result->m[oo]));
     oo++;
   }
 #endif
@@ -4184,7 +4158,7 @@ ideal sba (ideal F0, ideal Q,intvec *w,bigintmat *hilb,kStrategy strat)
   printf("PRODUCT CRITERIA:           %ld\n",product_criterion);
   product_criterion = 0;
 #endif
-  return strat->getShdl();
+  return result;
 }
 
 poly kNF2 (ideal F,ideal Q,poly q,kStrategy strat, int lazyReduce)
