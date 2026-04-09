@@ -4623,29 +4623,13 @@ void reorderS (int* suc,kStrategy strat)
     if (at != i)
     {
       if (new_suc > at) new_suc = at;
-      p = strat->S[i].p;
-      ecart = strat->S[i].ecart;
-      sev = strat->S[i].sev;
-      s2r = strat->S[i].s_2_r;
-      if (strat->hasFromQ) fq=strat->S[i].fromQ;
-      for (j=i; j>=at+1; j--)
       {
-        strat->S[j].p = strat->S[j-1].p;
-        strat->S[j].ecart = strat->S[j-1].ecart;
-        strat->S[j].sev = strat->S[j-1].sev;
-        strat->S[j].s_2_r = strat->S[j-1].s_2_r;
-      }
-      strat->S[at].p = p;
-      strat->S[at].ecart = ecart;
-      strat->S[at].sev = sev;
-      strat->S[at].s_2_r = s2r;
-      if (strat->hasFromQ)
-      {
+        // Shift entire SElements (not just individual fields) so all
+        // fields (length, wlength, sig, sevSig, fromQ, etc.) stay in sync.
+        SElement tmp = strat->S[i];
         for (j=i; j>=at+1; j--)
-        {
-          strat->S[j].fromQ = strat->S[j-1].fromQ;
-        }
-        strat->S[at].fromQ=fq;
+          strat->S[j] = strat->S[j-1];
+        strat->S[at] = tmp;
       }
     }
   }
