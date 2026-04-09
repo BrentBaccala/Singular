@@ -4099,17 +4099,28 @@ ideal sba (ideal F0, ideal Q,intvec *w,bigintmat *hilb,kStrategy strat)
       strat->tailRing = currRing;
     rDelete (sRing);
   }
+  // id_DelDiv removes divisible elements. We do this on S directly
+  // to keep sig/sevSig/ecart/sev in sync with the surviving polys.
   {
+    // Build a temp ideal for id_DelDiv, but track which entries survive
     ideal tmpShdl = strat->getShdl();
     if(rField_is_Ring(currRing) && !strat->sigdrop)
       id_DelDiv(tmpShdl, currRing);
     if(!rField_is_Ring(currRing))
       id_DelDiv(tmpShdl, currRing);
-    idSkipZeroes(tmpShdl);
-    // Update S from the cleaned ideal
-    strat->S.setsize(IDELEMS(tmpShdl));
-    for (int ii = 0; ii < IDELEMS(tmpShdl); ii++)
-      strat->S[ii].p = tmpShdl->m[ii];
+    // Compact S to match: keep only entries where tmpShdl->m[i] is non-NULL
+    int j = 0;
+    for (int ii = 0; ii < strat->S.size(); ii++)
+    {
+      if (tmpShdl->m[ii] != NULL)
+      {
+        if (j != ii)
+          strat->S[j] = strat->S[ii]; // shift entire SElement
+        strat->S[j].p = tmpShdl->m[ii]; // use the (possibly moved) poly
+        j++;
+      }
+    }
+    strat->S.setsize(j);
     strat->Srank = tmpShdl->rank;
     for (int ii = 0; ii < IDELEMS(tmpShdl); ii++) tmpShdl->m[ii] = NULL;
     id_Delete(&tmpShdl, currRing);
