@@ -7122,6 +7122,7 @@ void initSL (ideal F, ideal Q,kStrategy strat)
   /*- put polys into S -*/
   if (Q!=NULL)
   {
+    strat->hasFromQ=TRUE;
     for (i=0; i<IDELEMS(Q); i++)
     {
       if (Q->m[i]!=NULL)
@@ -7225,6 +7226,7 @@ void initSLSba (ideal F, ideal Q,kStrategy strat)
   /*- put polys into S -*/
   if (Q!=NULL)
   {
+    strat->hasFromQ=TRUE;
     for (i=0; i<IDELEMS(Q); i++)
     {
       if (Q->m[i]!=NULL)
@@ -7521,6 +7523,7 @@ void initSSpecial (ideal F, ideal Q, ideal P,kStrategy strat)
   /*- put polys into S -*/
   if (Q!=NULL)
   {
+    strat->hasFromQ=TRUE;
     for (i=0; i<IDELEMS(Q); i++)
     {
       if (Q->m[i]!=NULL)
