@@ -8261,13 +8261,9 @@ void enterSSba (LObject &p,int atS,kStrategy strat, int atR)
   strat->news = TRUE;
   /*- puts p to the standardbasis s at position at -*/
   strat->S.ensure_capacity(strat->S.size()-1 + 2);
-  if (atS < strat->S.size())
-  {
-    memmove(&(strat->S[atS+1].sig), &(strat->S[atS].sig),
-            (strat->S.size()-1 - atS + 1)*sizeof(poly));
-    memmove(&(strat->S[atS+1].sevSig), &(strat->S[atS].sevSig),
-            (strat->S.size()-1 - atS + 1)*sizeof(unsigned long));
-  }
+  // sig and sevSig are fields of SElement, so S.insert() shifts them
+  // automatically. No separate memmove needed (and memmove would be
+  // wrong anyway since BlockArray elements aren't contiguous in memory).
 
   /*- save result -*/
   SElement sobj;
