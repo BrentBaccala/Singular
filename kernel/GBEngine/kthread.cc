@@ -499,66 +499,121 @@ static int fill_active_slots(SweepContext *ctx)
 }
 
 /* ------------------------------------------------------------------ */
-/*  Process survivor (main thread only)                                */
+/*  Process survivor LObject                                           */
+/*                                                                     */
+/*  Runs the serial enterT / enterpairs / enterS sequence for one      */
+/*  survivor polynomial. The caller guarantees mutual exclusion (at    */
+/*  most one thread runs this at a time) via ctx->enterpairs_mutex.    */
+/*                                                                     */
+/*  This function does NOT touch any ActivePoly slot. The caller       */
+/*  moves/copies the LObject into the queue and clears the slot        */
+/*  independently.                                                     */
 /* ------------------------------------------------------------------ */
 
-static void process_survivor(SweepContext *ctx, ActivePoly *ap)
+static void process_survivor_lobject(SweepContext *ctx, LObject *P)
 {
   kStrategy strat = ctx->strat;
   BOOLEAN withT = ctx->withT;
 
-  ap->P.GetP(strat->lmBin);
-  if (strat->homog) strat->initEcart(&(ap->P));
+  P->GetP(strat->lmBin);
+  if (strat->homog) strat->initEcart(P);
 
   if (TEST_OPT_PROT) PrintS("s");
 
-  int pos = posInS(strat, strat->S.size()-1, ap->P.p, ap->P.ecart);
+  int pos = posInS(strat, strat->S.size()-1, P->p, P->ecart);
 
   strat->redTailChange = FALSE;
 
   if (rField_is_Z(currRing) && !rHasLocalOrMixedOrdering(currRing))
-    redtailBbaAlsoLC_Z(&(ap->P), strat->T.size()-1, strat);
+    redtailBbaAlsoLC_Z(P, strat->T.size()-1, strat);
 
   if (TEST_OPT_INTSTRATEGY)
   {
-    ap->P.pCleardenom();
+    P->pCleardenom();
     if ((TEST_OPT_REDSB) || (TEST_OPT_REDTAIL))
     {
-      ap->P.p = redtailBba(&(ap->P), pos - 1, strat, withT,
-                            !TEST_OPT_CONTENTSB);
-      ap->P.pCleardenom();
-      if (strat->redTailChange) ap->P.t_p = NULL;
+      P->p = redtailBba(P, pos - 1, strat, withT,
+                        !TEST_OPT_CONTENTSB);
+      P->pCleardenom();
+      if (strat->redTailChange) P->t_p = NULL;
     }
   }
   else
   {
-    ap->P.pNorm();
+    P->pNorm();
     if ((TEST_OPT_REDSB) || (TEST_OPT_REDTAIL))
     {
-      ap->P.p = redtailBba(&(ap->P), pos - 1, strat, withT);
-      if (strat->redTailChange) ap->P.t_p = NULL;
+      P->p = redtailBba(P, pos - 1, strat, withT);
+      if (strat->redTailChange) P->t_p = NULL;
     }
   }
 
-  if ((!TEST_OPT_IDLIFT) || (pGetComp(ap->P.p) <= strat->syzComp))
+  if ((!TEST_OPT_IDLIFT) || (pGetComp(P->p) <= strat->syzComp))
   {
-    ap->P.SetShortExpVector();
-    enterT(ap->P, strat);
+    P->SetShortExpVector();
+    enterT(*P, strat);
 
     if (rField_is_Ring(currRing))
-      superenterpairs(ap->P.p, strat->S.size()-1, ap->P.ecart, pos, strat, strat->T.size()-1);
+      superenterpairs(P->p, strat->S.size()-1, P->ecart, pos, strat, strat->T.size()-1);
     else
-      enterpairs(ap->P.p, strat->S.size()-1, ap->P.ecart, pos, strat, strat->T.size()-1);
+      enterpairs(P->p, strat->S.size()-1, P->ecart, pos, strat, strat->T.size()-1);
 
-    strat->enterS(ap->P, strat, strat->T.size()-1, -1);
+    strat->enterS(*P, strat, strat->T.size()-1, -1);
   }
 
-  kDeleteLcm(&ap->P);
+  kDeleteLcm(P);
   ctx->stat_survivors.fetch_add(1, std::memory_order_relaxed);
 
+  P->Init();
+}
+
+/* ------------------------------------------------------------------ */
+/*  Queue a survivor from an ActivePoly slot.                          */
+/*                                                                     */
+/*  Transfers ownership of ap->P into the survivor_queue and clears    */
+/*  the slot. Updates max-depth statistic.                             */
+/* ------------------------------------------------------------------ */
+
+static void queue_survivor(SweepContext *ctx, ActivePoly *ap)
+{
+  pthread_mutex_lock(&ctx->survivor_queue_mutex);
+  ctx->survivor_queue->push_back(ap->P);
+  long depth = (long)ctx->survivor_queue->size();
+  long prev = ctx->stat_max_queue_depth.load(std::memory_order_relaxed);
+  while (depth > prev &&
+         !ctx->stat_max_queue_depth.compare_exchange_weak(
+             prev, depth, std::memory_order_relaxed))
+    /* retry */;
+  pthread_mutex_unlock(&ctx->survivor_queue_mutex);
+
+  // Clear slot — ownership has been transferred to the queue.
   ap->P.Init();
   ap->occupied = false;
   ap->is_survivor = false;
+}
+
+/* ------------------------------------------------------------------ */
+/*  Drain the survivor FIFO synchronously on the calling thread.      */
+/*  Caller must hold ctx->enterpairs_mutex.                            */
+/* ------------------------------------------------------------------ */
+
+static void drain_survivor_queue_locked(SweepContext *ctx)
+{
+  while (true)
+  {
+    LObject P;
+    pthread_mutex_lock(&ctx->survivor_queue_mutex);
+    if (ctx->survivor_queue->empty())
+    {
+      pthread_mutex_unlock(&ctx->survivor_queue_mutex);
+      break;
+    }
+    P = ctx->survivor_queue->front();
+    ctx->survivor_queue->pop_front();
+    pthread_mutex_unlock(&ctx->survivor_queue_mutex);
+
+    process_survivor_lobject(ctx, &P);
+  }
 }
 
 /* (batch_reduce removed — replaced by cooperative sweep_phase) */
@@ -709,15 +764,21 @@ void bba_parallel_loop(SweepContext *ctx)
     // If no occupied slots (all done or L empty), check for remaining work
     if (occupied == 0)
     {
-      // Process any remaining survivors
+      // Queue any remaining survivors and drain synchronously.
       bool had_survivor = false;
       for (int i = 0; i < ctx->max_active; i++)
       {
         if (ctx->active[i].occupied && ctx->active[i].is_survivor)
         {
-          process_survivor(ctx, &ctx->active[i]);
+          queue_survivor(ctx, &ctx->active[i]);
           had_survivor = true;
         }
+      }
+      if (had_survivor)
+      {
+        pthread_mutex_lock(&ctx->enterpairs_mutex);
+        drain_survivor_queue_locked(ctx);
+        pthread_mutex_unlock(&ctx->enterpairs_mutex);
       }
 
       if (had_survivor)
@@ -779,15 +840,22 @@ void bba_parallel_loop(SweepContext *ctx)
       break;
     }
 
-    // Process all survivors (main thread only, serialized)
+    // Queue all survivors into the FIFO, then drain synchronously on the
+    // main thread. (A later commit moves the drain off the main thread.)
     bool had_survivor = false;
     for (int i = 0; i < ctx->max_active; i++)
     {
       if (ctx->active[i].occupied && ctx->active[i].is_survivor)
       {
-        process_survivor(ctx, &ctx->active[i]);
+        queue_survivor(ctx, &ctx->active[i]);
         had_survivor = true;
       }
+    }
+    if (had_survivor)
+    {
+      pthread_mutex_lock(&ctx->enterpairs_mutex);
+      drain_survivor_queue_locked(ctx);
+      pthread_mutex_unlock(&ctx->enterpairs_mutex);
     }
 
     // Re-compute pLength for any new T entries added by process_survivor
