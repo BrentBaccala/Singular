@@ -8537,6 +8537,8 @@ void sBasisSet::enter_bba(LObject &p, kStrategy strat, int atR, int atS)
   int pos;
   if (atS >= 0)
     pos = atS;
+  else if (order_ == SORDER_APPEND)
+    pos = size();
   else
   {
     iterator pos_it = find_pos(strat, p.p, p.ecart);
@@ -8606,6 +8608,8 @@ void sBasisSet::enter_sba(LObject &p, kStrategy strat, int atR, int atS)
   int pos;
   if (atS >= 0)
     pos = atS;
+  else if (order_ == SORDER_APPEND)
+    pos = size();
   else
   {
     iterator pos_it = find_pos(strat, p.p, p.ecart);
