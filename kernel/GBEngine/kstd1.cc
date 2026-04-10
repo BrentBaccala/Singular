@@ -3687,7 +3687,7 @@ ideal kInterRedBba (ideal F, ideal Q, int &need_retry)
             #ifdef KDEBUG
             if (TEST_OPT_DEBUG)
             {
-              Print("move S[%d] -> L[%d]: ",ii,pos);
+              Print("move S[%d] -> L[%d]: ",sit.index(),pos);
               p_wrp(h.p,currRing, strat->tailRing);
               PrintLn();
             }

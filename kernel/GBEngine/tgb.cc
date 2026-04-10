@@ -960,6 +960,23 @@ add_to_reductors (slimgb_alg * c, poly h, int len, int ecart,
   wlen_type pq = pQuality (h, c, len);
   i = simple_posInS (c->strat, h, len, pq);
   c->strat->enterS (P, c->strat, c->strat->T.size()-1);
+  // enter_bba in SORDER_APPEND mode put it at the end. Move it to position i
+  // (inline shift since move_forward_in_S is defined later as static).
+  {
+    int appended_pos = c->strat->S.size() - 1;
+    if (i < appended_pos)
+    {
+      auto src_it = c->strat->S.iterator_at(appended_pos);
+      SElement saved = *src_it;
+      for (int k = appended_pos; k > i; k--)
+      {
+        auto dst = c->strat->S.iterator_at(k);
+        auto src = c->strat->S.iterator_at(k - 1);
+        *dst = *src;
+      }
+      *c->strat->S.iterator_at(i) = saved;
+    }
+  }
 
   auto sit = c->strat->S.iterator_at(i);
   sit->length = len;
@@ -3364,6 +3381,10 @@ slimgb_alg::slimgb_alg (ideal I, int syz_comp, BOOLEAN F4, int deg_pos)
   strat->initEcart = initEcartBBA;
   strat->tailRing = r;
   strat->enterS = enterSBba;
+  // slimgb manages its own S ordering via simple_posInS + move_forward_in_S.
+  // Use SORDER_APPEND so enter_bba just appends; move_forward shifts to the
+  // right position.
+  strat->S.set_order(SORDER_APPEND);
   strat->S.setsize(0);
   i = n;
   i = 1;                        //some strange bug else
