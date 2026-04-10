@@ -595,10 +595,18 @@ static void queue_survivor(SweepContext *ctx, ActivePoly *ap)
 /* ------------------------------------------------------------------ */
 /*  Drain the survivor FIFO synchronously on the calling thread.      */
 /*  Caller must hold ctx->enterpairs_mutex.                            */
+/*                                                                     */
+/*  This function also acquires ctx->L_lock for the duration of the    */
+/*  drain because process_survivor_lobject → enterpairs → kMergeBintoL */
+/*  mutates strat->L, and fill_active_slots on the main thread reads   */
+/*  strat->L under L_lock. Holding L_lock across the drain prevents    */
+/*  concurrent push and pop on strat->L (the push_queue inside L is    */
+/*  not itself thread-safe, so we cannot release L_lock between pops). */
 /* ------------------------------------------------------------------ */
 
 static void drain_survivor_queue_locked(SweepContext *ctx)
 {
+  pthread_mutex_lock(&ctx->L_lock);
   while (true)
   {
     LObject P;
@@ -614,6 +622,7 @@ static void drain_survivor_queue_locked(SweepContext *ctx)
 
     process_survivor_lobject(ctx, &P);
   }
+  pthread_mutex_unlock(&ctx->L_lock);
 }
 
 /* (batch_reduce removed — replaced by cooperative sweep_phase) */
@@ -665,7 +674,37 @@ static void *worker_thread(void *arg)
     if (ctx->done.load(std::memory_order_acquire)) break;
 
     // Phase 1: cooperative sweep
-    sweep_phase(ctx, thread_id);
+    //
+    // Before sweeping, try to become this round's drainer for the
+    // survivor FIFO. At most one worker succeeds (trylock on
+    // enterpairs_mutex). The drainer skips sweep_phase this round
+    // and runs process_survivor_lobject on each queued survivor.
+    // The cooperative sweep_cursor naturally absorbs the missing
+    // participant: other sweepers and the main thread will scan T
+    // in the drainer's place.
+    //
+    // The drainer must reach barrier_B1 after draining, so drain
+    // duration is bounded by how many items are in the queue. If
+    // drain exceeds sweep time, the other workers wait at B1 — the
+    // round takes max(sweep_time, drain_time), no deadlock.
+    bool did_drain = false;
+    if (pthread_mutex_trylock(&ctx->enterpairs_mutex) == 0)
+    {
+      ctx->enterpairs_active.store(true, std::memory_order_release);
+      drain_survivor_queue_locked(ctx);
+      ctx->enterpairs_active.store(false, std::memory_order_release);
+      pthread_mutex_unlock(&ctx->enterpairs_mutex);
+
+      // Wake main thread if it is waiting on CV for L to refill /
+      // for enterpairs to finish.
+      pthread_mutex_lock(&ctx->L_lock);
+      pthread_cond_broadcast(&ctx->pairs_available);
+      pthread_mutex_unlock(&ctx->L_lock);
+      did_drain = true;
+    }
+
+    if (!did_drain)
+      sweep_phase(ctx, thread_id);
     pthread_barrier_wait(&ctx->barrier_B1);
 
     // Phase 2: parallel reduction (main merges first, then signals)
@@ -764,24 +803,36 @@ void bba_parallel_loop(SweepContext *ctx)
     // If no occupied slots (all done or L empty), check for remaining work
     if (occupied == 0)
     {
-      // Queue any remaining survivors and drain synchronously.
-      bool had_survivor = false;
+      // Queue any remaining active-slot survivors.
       for (int i = 0; i < ctx->max_active; i++)
       {
         if (ctx->active[i].occupied && ctx->active[i].is_survivor)
-        {
           queue_survivor(ctx, &ctx->active[i]);
-          had_survivor = true;
-        }
-      }
-      if (had_survivor)
-      {
-        pthread_mutex_lock(&ctx->enterpairs_mutex);
-        drain_survivor_queue_locked(ctx);
-        pthread_mutex_unlock(&ctx->enterpairs_mutex);
       }
 
-      if (had_survivor)
+      // Idle-drain: main thread only drains the FIFO when it has
+      // nothing else to do. During active rounds, main leaves
+      // draining to workers so it can drive round progression; but
+      // when occupied==0 there IS no round to drive, so the main
+      // thread may as well do the work itself. Blocking-lock the
+      // enterpairs_mutex to serialize with any worker drainer.
+      bool drained_something = false;
+      {
+        pthread_mutex_lock(&ctx->survivor_queue_mutex);
+        bool queue_empty = ctx->survivor_queue->empty();
+        pthread_mutex_unlock(&ctx->survivor_queue_mutex);
+        if (!queue_empty)
+        {
+          pthread_mutex_lock(&ctx->enterpairs_mutex);
+          ctx->enterpairs_active.store(true, std::memory_order_release);
+          drain_survivor_queue_locked(ctx);
+          ctx->enterpairs_active.store(false, std::memory_order_release);
+          pthread_mutex_unlock(&ctx->enterpairs_mutex);
+          drained_something = true;
+        }
+      }
+
+      if (drained_something)
       {
         // Re-compute pLength for new T entries
         for (int j = 0; j < strat->T.size(); j++)
@@ -793,10 +844,11 @@ void bba_parallel_loop(SweepContext *ctx)
         continue;
       }
 
-      // Nothing left to do
+      // Nothing queued and no survivors. Either L is now populated
+      // (loop back and fill) or we are done.
       if (strat->L.empty())
         break;
-      // L has new entries from enterpairs, loop back to fill
+      // L has new entries, loop back to fill
       continue;
     }
 
@@ -840,32 +892,22 @@ void bba_parallel_loop(SweepContext *ctx)
       break;
     }
 
-    // Queue all survivors into the FIFO, then drain synchronously on the
-    // main thread. (A later commit moves the drain off the main thread.)
-    bool had_survivor = false;
+    // Queue all survivors into the FIFO. They will be drained
+    // asynchronously by a worker thread at the start of the next
+    // sweep round (or on the main thread at termination).
     for (int i = 0; i < ctx->max_active; i++)
     {
       if (ctx->active[i].occupied && ctx->active[i].is_survivor)
-      {
         queue_survivor(ctx, &ctx->active[i]);
-        had_survivor = true;
-      }
-    }
-    if (had_survivor)
-    {
-      pthread_mutex_lock(&ctx->enterpairs_mutex);
-      drain_survivor_queue_locked(ctx);
-      pthread_mutex_unlock(&ctx->enterpairs_mutex);
     }
 
-    // Re-compute pLength for any new T entries added by process_survivor
-    if (had_survivor)
+    // Re-compute pLength for any new T entries. A worker may have
+    // drained the queue during the sweep phase, adding new T entries
+    // via enterT, so we unconditionally refresh pLength here.
+    for (int j = 0; j < strat->T.size(); j++)
     {
-      for (int j = 0; j < strat->T.size(); j++)
-      {
-        if (strat->T[j].pLength <= 0)
-          strat->T[j].pLength = pLength(strat->T[j].p ? strat->T[j].p : strat->T[j].t_p);
-      }
+      if (strat->T[j].pLength <= 0)
+        strat->T[j].pLength = pLength(strat->T[j].p ? strat->T[j].p : strat->T[j].t_p);
     }
 
     // Slots may still be occupied and need more reduction rounds.
