@@ -17,6 +17,7 @@
 #include "kernel/GBEngine/kutil.h"
 #include <pthread.h>
 #include <atomic>
+#include <deque>
 
 /**
  * Per-thread, per-slot sweep result — avoids contention on shared fields.
@@ -95,6 +96,30 @@ struct SweepContext
   std::atomic<long> stat_zeros;
   std::atomic<long> stat_survivors;
   std::atomic<long> stat_rounds;
+
+  // ---- Asynchronous survivor enterpairs drain ---------------------
+  // FIFO of survivor LObjects waiting for enterT/enterpairs/enterS
+  // processing. Pushed by main thread at end of round; drained by a
+  // single worker thread holding enterpairs_mutex.
+  pthread_mutex_t survivor_queue_mutex;
+  std::deque<LObject> *survivor_queue;
+
+  // Serializes any drainer of survivor_queue (at most one thread at
+  // a time runs process_survivor). Acquired by workers via trylock.
+  // Main thread never acquires this (see kthread.cc comment).
+  pthread_mutex_t enterpairs_mutex;
+
+  // Signaled when enterpairs has added new entries to L, or when
+  // the drain worker finishes draining. Used by the main thread to
+  // wait for work while enterpairs is in progress. Protected by
+  // L_lock.
+  pthread_cond_t pairs_available;
+
+  // True while a worker holds enterpairs_mutex and is draining.
+  std::atomic<bool> enterpairs_active;
+
+  // Max survivor queue depth observed (for diagnostics).
+  std::atomic<long> stat_max_queue_depth;
 };
 
 /* Public API */

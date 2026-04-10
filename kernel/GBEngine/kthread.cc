@@ -128,6 +128,14 @@ SweepContext *sweep_context_init(kStrategy strat, int nthreads)
   ctx->stat_survivors.store(0, std::memory_order_relaxed);
   ctx->stat_rounds.store(0, std::memory_order_relaxed);
 
+  // Asynchronous survivor drain: queue + mutex + CV + flag
+  pthread_mutex_init(&ctx->survivor_queue_mutex, NULL);
+  ctx->survivor_queue = new std::deque<LObject>();
+  pthread_mutex_init(&ctx->enterpairs_mutex, NULL);
+  pthread_cond_init(&ctx->pairs_available, NULL);
+  ctx->enterpairs_active.store(false, std::memory_order_relaxed);
+  ctx->stat_max_queue_depth.store(0, std::memory_order_relaxed);
+
   return ctx;
 }
 
@@ -138,6 +146,10 @@ void sweep_context_destroy(SweepContext *ctx)
   pthread_barrier_destroy(&ctx->barrier_B1);
   pthread_barrier_destroy(&ctx->startup_barrier);
   pthread_mutex_destroy(&ctx->L_lock);
+  pthread_mutex_destroy(&ctx->survivor_queue_mutex);
+  pthread_mutex_destroy(&ctx->enterpairs_mutex);
+  pthread_cond_destroy(&ctx->pairs_available);
+  delete ctx->survivor_queue;
   free(ctx->active);
   free(ctx->sweep_results);
   free(ctx->threads);
