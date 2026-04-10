@@ -36,19 +36,22 @@ static void copyT (kStrategy o,kStrategy n)
     n->T[j] = o->T[j];
     n->R[n->T[j].i_r] = n->T.addr(j);
     p = o->T[j].p;
-    i = -1;
-    loop
     {
-      i++;
-      if (i>o->S.size()-1)
+      auto osit = o->S.begin();
+      auto nsit = n->S.begin();
+      bool found = false;
+      for (; osit != o->S.end(); ++osit, ++nsit)
+      {
+        if (p == osit->p)
+        {
+          n->T[j].p = nsit->p;
+          found = true;
+          break;
+        }
+      }
+      if (!found)
       {
         n->T[j].p=pCopy(p);
-        break;
-      }
-      if (p == o->S[i].p)
-      {
-        n->T[j].p=n->S[i].p;
-        break;
       }
     }
     n->T[j].t_p = NULL; // ?? or n->T[j].p ??
@@ -146,13 +149,13 @@ kStrategy kStratCopy(kStrategy o)
   s->compareLOld=o->compareLOld;
   s->enterOnePair=o->enterOnePair;
   s->chainCrit=o->chainCrit;
-  s->S.setsize(o->S.size());
   s->Srank = o->Srank;
-  s->S.ensure_capacity(s->S.size());
-  for (int ii = 0; ii < s->S.size(); ii++)
+  s->S.ensure_capacity(o->S.size());
+  for (auto osit = o->S.begin(); osit != o->S.end(); ++osit)
   {
-    s->S[ii] = o->S[ii];            // copy all SElement fields
-    s->S[ii].p = pCopy(o->S[ii].p); // deep copy the polynomial
+    SElement se = *osit;             // copy all SElement fields
+    se.p = pCopy(osit->p);          // deep copy the polynomial
+    s->S.push_back(se);
   }
   s->hasFromQ = o->hasFromQ;
   s->use_lenS = o->use_lenS;
@@ -186,8 +189,8 @@ kStrategy kStratCopy(kStrategy o)
 //     s->kModW=ivCopy(o->kModW);
 //   else
 //     s->kModW=NULL;
-  s->pairtest=NULL;
-  s->S.setsize(o->S.size());
+  // pairtest is now per-SElement, no initialization needed
+  // S size already set by push_back loop above
   s->mu=o->mu;
   s->T.setsize(o->T.size());
   s->ak=o->ak;
@@ -265,10 +268,11 @@ static void completeReduceFac (kStrategy strat, ideal_list FL)
   }
   for (si=strat->S.size()-1; si>0; si--)
   {
-    strat->S[si].p = redtailBba(strat->S[si].p,si-1,strat);
+    auto sit = strat->S.iterator_at(si);
+    sit->p = redtailBba(sit->p,si-1,strat);
     if (TEST_OPT_INTSTRATEGY)
     {
-      strat->S[si].p=p_Cleardenom(strat->S[si].p, currRing);
+      sit->p=p_Cleardenom(sit->p, currRing);
     }
     if (TEST_OPT_PROT)
     {
@@ -285,7 +289,7 @@ static void completeReduceFac (kStrategy strat, ideal_list FL)
     ideal fac;
     ideal fac_copy;
 
-    if (!k_factorize(strat->S[si].p,fac,fac_copy))
+    if (!k_factorize(sit->p,fac,fac_copy))
     {
       idDelete(&fac);
       idDelete(&fac_copy);
@@ -381,21 +385,19 @@ static void completeReduceFac (kStrategy strat, ideal_list FL)
               while (! n->L.empty()) n->L.pop_and_erase();
               while ((!n->T.empty()))
               {
-                int i=n->S.size()-1;
-                while (i>=0)
+                for (auto ssit = n->S.begin(); ssit != n->S.end(); ++ssit)
                 {
-                  if (n->S[i].p==n->T[n->T.size()-1].p)
+                  if (ssit->p==n->T[n->T.size()-1].p)
                   {
-                    n->T[n->T.size()-1].p=NULL; n->S[i].p=NULL;
+                    n->T[n->T.size()-1].p=NULL; ssit->p=NULL;
                     break;
                   }
-                  i--;
                 }
                 pDelete(&n->T[n->T.size()-1].p);
                 n->T.setsize(n->T.size()-1);
               }
-                            for (int ii=0; ii < n->S.size(); ii++) n->S[ii].p = NULL;
-              n->S.setsize(0);
+              for (auto ssit = n->S.begin(); ssit != n->S.end(); ++ssit) ssit->p = NULL;
+              while (!n->S.empty()) n->S.erase(--n->S.end());
               if (strat==n) si=-1;
               break;
             }
@@ -412,7 +414,7 @@ static void completeReduceFac (kStrategy strat, ideal_list FL)
         ideal_list Lj=FL;
         while (Lj!=NULL)
         {
-          if (((!n->S.empty()))&&(n->S[0].p!=NULL))
+          if (((!n->S.empty()))&&(n->S.begin()->p!=NULL))
           {
             ideal r=kNF(n->getShdl(),NULL,Lj->d,0,KSTD_NF_LAZY | KSTD_NF_NONORM);
             if (idIs0(r))
@@ -425,21 +427,19 @@ static void completeReduceFac (kStrategy strat, ideal_list FL)
               while (! n->L.empty()) n->L.pop_and_erase();
               while ((!n->T.empty()))
               {
-                int i=n->S.size()-1;
-                while (i>=0)
+                for (auto ssit = n->S.begin(); ssit != n->S.end(); ++ssit)
                 {
-                  if (n->S[i].p==n->T[n->T.size()-1].p)
+                  if (ssit->p==n->T[n->T.size()-1].p)
                   {
-                    n->T[n->T.size()-1].p=NULL; n->S[i].p=NULL;
+                    n->T[n->T.size()-1].p=NULL; ssit->p=NULL;
                     break;
                   }
-                  i--;
                 }
                 pDelete(&n->T[n->T.size()-1].p);
                 n->T.setsize(n->T.size()-1);
               }
-                            for (int ii=0; ii < n->S.size(); ii++) n->S[ii].p = NULL;
-              n->S.setsize(0);
+              for (auto ssit = n->S.begin(); ssit != n->S.end(); ++ssit) ssit->p = NULL;
+              while (!n->S.empty()) n->S.erase(--n->S.end());
               if (strat==n) si=-1;
               idDelete(&r);
               break;
@@ -670,21 +670,19 @@ ideal bbafac (ideal /*F*/, ideal Q,intvec* /*w*/,kStrategy strat, ideal_list FL)
                 //if ((!n->T.empty())) Print("tl:%d|",n->T.size()-1);
                 while ((!n->T.empty()))
                 {
-                  int i=n->S.size()-1;
-                  while (i>=0)
+                  for (auto ssit = n->S.begin(); ssit != n->S.end(); ++ssit)
                   {
-                    if (n->S[i].p==n->T[n->T.size()-1].p)
+                    if (ssit->p==n->T[n->T.size()-1].p)
                     {
-                      n->T[n->T.size()-1].p=NULL; n->S[i].p=NULL;
+                      n->T[n->T.size()-1].p=NULL; ssit->p=NULL;
                       break;
                     }
-                    i--;
                   }
                   pDelete(&n->T[n->T.size()-1].p);
                   n->T.setsize(n->T.size()-1);
                 }
-                              for (int ii=0; ii < n->S.size(); ii++) n->S[ii].p = NULL;
-                n->S.setsize(0);
+                for (auto ssit = n->S.begin(); ssit != n->S.end(); ++ssit) ssit->p = NULL;
+                while (!n->S.empty()) n->S.erase(--n->S.end());
                 break;
               }
               else
@@ -701,7 +699,7 @@ ideal bbafac (ideal /*F*/, ideal Q,intvec* /*w*/,kStrategy strat, ideal_list FL)
           ideal_list Lj=FL;
           while (Lj!=NULL)
           {
-            if (((!n->S.empty()))&&(n->S[0].p!=NULL))
+            if (((!n->S.empty()))&&(n->S.begin()->p!=NULL))
             {
               ideal r=kNF(n->getShdl(),NULL,Lj->d,0,
 	        KSTD_NF_LAZY | KSTD_NF_NONORM | KSTD_NF_NOLF);
@@ -719,21 +717,19 @@ ideal bbafac (ideal /*F*/, ideal Q,intvec* /*w*/,kStrategy strat, ideal_list FL)
                 while (! n->L.empty()) n->L.pop_and_erase();
                 while ((!n->T.empty()))
                 {
-                  int i=n->S.size()-1;
-                  while (i>=0)
+                  for (auto ssit = n->S.begin(); ssit != n->S.end(); ++ssit)
                   {
-                    if (n->S[i].p==n->T[n->T.size()-1].p)
+                    if (ssit->p==n->T[n->T.size()-1].p)
                     {
-                      n->T[n->T.size()-1].p=NULL; n->S[i].p=NULL;
+                      n->T[n->T.size()-1].p=NULL; ssit->p=NULL;
                       break;
                     }
-                    i--;
                   }
                   pDelete(&n->T[n->T.size()-1].p);
                   n->T.setsize(n->T.size()-1);
                 }
-                              for (int ii=0; ii < n->S.size(); ii++) n->S[ii].p = NULL;
-                n->S.setsize(0);
+                for (auto ssit = n->S.begin(); ssit != n->S.end(); ++ssit) ssit->p = NULL;
+                while (!n->S.empty()) n->S.erase(--n->S.end());
                 idDelete(&r);
                 break;
               }

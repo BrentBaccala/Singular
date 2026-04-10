@@ -68,6 +68,7 @@ class BlockArray {
   Elem **blocks;        // directory of block pointers
   int num_blocks;       // current number of allocated blocks
   int dir_capacity;     // allocated directory slots
+protected:
   int count;            // number of elements in use
 public:
   BlockArray() : blocks(NULL), num_blocks(0), dir_capacity(0), count(0) {}
@@ -658,9 +659,275 @@ struct SElement {
   int fromQ;           // from quotient ideal
   poly sig;            // signature (sba only)
   unsigned long sevSig;// short exponent vector of signature (sba only)
+  bool deleted;              // lazy-delete flag for parallel phase
+  mutable bool pairtest;     // transient: true if spoly(this, h)==0 during enterOnePair
 
   SElement() : p(NULL), ecart(0), sev(0), s_2_r(0), length(0), wlength(0),
-               fromQ(0), sig(NULL), sevSig(0) {}
+               fromQ(0), sig(NULL), sevSig(0), deleted(false), pairtest(false) {}
+};
+
+/**
+ * @class sBasisSet
+ * @brief The S-set (standard basis) for Groebner basis computation.
+ *
+ * Inherits privately from BlockArray<SElement> — all element access is
+ * through iterators, not integer indices. Supports two modes:
+ *
+ *   Normal mode: insert() at a sorted position (shifts elements),
+ *                erase() removes and shifts. Like the old S array.
+ *
+ *   Lazy mode:   insert() appends at end (no sorting, no shifting),
+ *                erase() sets the deleted flag (no shifting).
+ *                compact() removes deleted entries afterward.
+ *
+ * The mode is selected with set_lazy(). During the parallel phase,
+ * lazy mode ensures elements never move, so concurrent readers are safe.
+ */
+class sBasisSet : private BlockArray<SElement> {
+public:
+  // --- Iterator (skips deleted entries) ---
+  class iterator {
+    sBasisSet* set_;
+    int pos_;
+    friend class sBasisSet;
+
+    void skip_deleted_forward() {
+      while (pos_ < set_->count && set_->elem(pos_).deleted) pos_++;
+    }
+    void skip_deleted_backward() {
+      while (pos_ > 0 && set_->elem(pos_).deleted) pos_--;
+    }
+
+    iterator(sBasisSet* s, int pos) : set_(s), pos_(pos) { }
+
+  public:
+    iterator() : set_(NULL), pos_(0) {}
+
+    SElement& operator*() const { return set_->elem(pos_); }
+    SElement* operator->() const { return &set_->elem(pos_); }
+
+    // Raw index — available for internal use (e.g., pairtest migration).
+    // Prefer iterator-based APIs in new code.
+    int index() const { return pos_; }
+
+    iterator& operator++() {
+      pos_++;
+      skip_deleted_forward();
+      return *this;
+    }
+    iterator operator++(int) {
+      iterator tmp = *this;
+      ++(*this);
+      return tmp;
+    }
+    iterator& operator--() {
+      pos_--;
+      skip_deleted_backward();
+      return *this;
+    }
+    iterator operator--(int) {
+      iterator tmp = *this;
+      --(*this);
+      return tmp;
+    }
+
+    bool operator==(const iterator& other) const { return pos_ == other.pos_; }
+    bool operator!=(const iterator& other) const { return pos_ != other.pos_; }
+  };
+
+  class const_iterator {
+    const sBasisSet* set_;
+    int pos_;
+    friend class sBasisSet;
+
+    void skip_deleted_forward() {
+      while (pos_ < set_->count && set_->elem(pos_).deleted) pos_++;
+    }
+
+    const_iterator(const sBasisSet* s, int pos) : set_(s), pos_(pos) { }
+
+  public:
+    const_iterator() : set_(NULL), pos_(0) {}
+    const_iterator(const iterator& it) : set_(it.set_), pos_(it.pos_) {}
+
+    const SElement& operator*() const { return set_->elem(pos_); }
+    const SElement* operator->() const { return &set_->elem(pos_); }
+    int index() const { return pos_; }
+
+    const_iterator& operator++() {
+      pos_++;
+      skip_deleted_forward();
+      return *this;
+    }
+    const_iterator operator++(int) {
+      const_iterator tmp = *this;
+      ++(*this);
+      return tmp;
+    }
+
+    bool operator==(const const_iterator& other) const { return pos_ == other.pos_; }
+    bool operator!=(const const_iterator& other) const { return pos_ != other.pos_; }
+  };
+
+  // --- Construction / mode ---
+  sBasisSet() : lazy_(false), live_count_(0), pairtest_any_(false) {}
+
+  bool is_lazy() const { return lazy_; }
+  void set_lazy(bool on) { lazy_ = on; }
+
+  // --- Iterators ---
+  iterator begin() {
+    iterator it(this, 0);
+    it.skip_deleted_forward();
+    return it;
+  }
+  iterator end() { return iterator(this, count); }
+
+  const_iterator begin() const {
+    const_iterator it(this, 0);
+    it.skip_deleted_forward();
+    return it;
+  }
+  const_iterator end() const { return const_iterator(this, count); }
+
+  // --- Size ---
+  int size() const { return live_count_; }
+  bool empty() const { return live_count_ == 0; }
+
+  // --- Insert ---
+  // Normal mode: insert at pos, shifting elements up.
+  // Lazy mode: append at end (pos ignored).
+  iterator insert(int pos, const SElement& val) {
+    if (lazy_) {
+      BlockArray<SElement>::push_back(val);
+      live_count_++;
+      return iterator(this, count - 1);
+    } else {
+      BlockArray<SElement>::insert(pos, val);
+      live_count_++;
+      return iterator(this, pos);
+    }
+  }
+
+  // Append at end (both modes).
+  iterator push_back(const SElement& val) {
+    BlockArray<SElement>::push_back(val);
+    live_count_++;
+    return iterator(this, count - 1);
+  }
+
+  // --- Erase ---
+  // Normal mode: shift elements down.
+  // Lazy mode: set deleted flag.
+  void erase(iterator it) {
+    if (lazy_) {
+      elem(it.pos_).deleted = true;
+    } else {
+      BlockArray<SElement>::erase(it.pos_);
+    }
+    live_count_--;
+  }
+
+  // --- Capacity / storage ---
+  using BlockArray<SElement>::ensure_capacity;
+  using BlockArray<SElement>::capacity;
+  using BlockArray<SElement>::free_all;
+
+  // Set element count directly (used during initialization).
+  void setsize(int n) {
+    BlockArray<SElement>::setsize(n);
+    live_count_ = n;
+  }
+
+  // --- Pairtest ---
+  // Clear all pairtest flags and the sentinel.
+  void clear_pairtest() {
+    for (int i = 0; i < count; i++) elem(i).pairtest = false;
+    pairtest_any_ = false;
+  }
+  // Set the sentinel (some zero spoly was found).
+  void set_pairtest_any() { pairtest_any_ = true; }
+  bool has_pairtest() const { return pairtest_any_; }
+
+  // Compact: remove deleted entries, pack remaining entries contiguously.
+  // Only meaningful after lazy mode. Resets to non-lazy mode.
+  void compact() {
+    int dst = 0;
+    for (int src = 0; src < count; src++) {
+      if (!elem(src).deleted) {
+        if (dst != src)
+          elem(dst) = elem(src);
+        dst++;
+      }
+    }
+    count = dst;
+    live_count_ = dst;
+    lazy_ = false;
+  }
+
+  // --- Stable pointer access (valid as long as element exists) ---
+  SElement* addr(iterator it) {
+    return BlockArray<SElement>::addr(it.pos_);
+  }
+
+  // --- Member methods (use private elem() for random access) ---
+  // Implementations in kutil.cc since they need skStrategy, which is
+  // defined after this class.
+
+  // Binary search for sorted insertion position. Returns iterator at
+  // the position where p should be inserted to maintain sort order.
+  iterator find_pos(kStrategy strat, const poly p, int ecart_p);
+
+  // Insert a new basis element (replaces enterSBba).
+  // Finds the sorted position, creates an SElement from p, inserts it.
+  void enter_bba(LObject &p, kStrategy strat);
+
+  // Insert for signature-based algorithms (replaces enterSSba).
+  void enter_sba(LObject &p, kStrategy strat);
+
+  // Delete element at iterator and update related structures.
+  // In non-lazy mode, shifts elements down (like old deleteInS).
+  // Returns next valid iterator after the erased position.
+  iterator erase_and_next(iterator it);
+
+  // Reorder S after inter-reduction may have changed leading monomials.
+  // (replaces reorderS)
+  void reorder(int *suc, kStrategy strat);
+
+  // S-to-T lookups (replace skStrategy::S_2_T / s_2_t).
+  // Return the TObject corresponding to the S element at the iterator.
+  TObject* S_2_T(const_iterator it, kStrategy strat);
+  TObject* s_2_t(const_iterator it, kStrategy strat);
+
+  // clearS: if p divides *at, delete *at and adjust the iterator.
+  // (replaces the clearS inline in kInline.h)
+  void clear_if_divisible(poly p, unsigned long p_sev,
+                          iterator &at, kStrategy strat);
+
+  // For tgb.cc: binary search variant with different comparison.
+  iterator simple_find_pos(kStrategy strat, poly p);
+
+  // For tgb.cc: move an element from one position to another,
+  // shifting intervening elements. old_it and new_it provide the
+  // element positions.
+  void move_elem(iterator old_it, iterator new_it);
+
+  // Construct an iterator at a raw index (no skip).
+  // Transitional: used by code migrating from int-based to iterator-based API.
+  // In lazy mode, the element at index i may be deleted — caller must check.
+  iterator iterator_at(int i) { return iterator(this, i); }
+  const_iterator const_iterator_at(int i) const { return const_iterator(this, i); }
+
+private:
+  bool lazy_;
+  int live_count_;
+  bool pairtest_any_;  // sentinel: true if any SElement.pairtest was set
+
+  // Internal raw element access (used by iterators and member functions)
+  SElement& elem(int i) { return (*static_cast<BlockArray<SElement>*>(this))[i]; }
+  const SElement& elem(int i) const { return (*static_cast<const BlockArray<SElement>*>(this))[i]; }
+
+  friend class skStrategy;
 };
 
 class skStrategy
@@ -678,7 +945,7 @@ public:
   int (*compareLOld) (const LObject &lhs, const LObject &rhs, const kStrategy strat) = NULL;
   void (*enterS)(LObject &h, int pos,kStrategy strat, int atR/* =-1*/ ) = NULL;
   void (*initEcartPair)(LObject * h, poly f, poly g, int ecartF, int ecartG) = NULL;
-  void (*enterOnePair) (int i,poly p,int ecart, int isFromQ,kStrategy strat, int atR /*= -1*/) = NULL;
+  void (*enterOnePair) (const SElement &si,poly p,int ecart, int isFromQ,kStrategy strat, int atR /*= -1*/) = NULL;
   void (*chainCrit) (poly p,int ecart,kStrategy strat) = NULL;
   BOOLEAN (*syzCrit) (poly sig, unsigned long not_sevSig, kStrategy strat) = NULL;
   BOOLEAN (*rewCrit1) (poly sig, unsigned long not_sevSig, poly lm, kStrategy strat, int start /*= 0*/) = NULL;
@@ -693,7 +960,7 @@ public:
   LObject P;
   ideal D = NULL; /*V(S) is in D(D)*/
   ideal M = NULL; /*set of minimal generators*/
-  BlockArray<SElement> S;
+  sBasisSet S;
   int Srank = 1;       // rank for getShdl() result ideal
   polyset syz = NULL;
   intset syzIdx = NULL;// index in the syz array at which the first
@@ -717,7 +984,7 @@ public:
   poly    t_kNoether = NULL; // same polys in tailring
   KINLINE poly    kNoetherTail();
   BOOLEAN * NotUsedAxis = NULL;
-  BOOLEAN * pairtest = NULL;/*used for enterOnePair*/
+  // pairtest is now per-SElement (SElement::pairtest) + sBasisSet::pairtest_any_
   poly tail = NULL;
   intvec * kModW = NULL;
   intvec * kHomW = NULL;
@@ -941,7 +1208,7 @@ void exitSba (kStrategy strat);
 void updateResult(ideal Q,kStrategy strat);
 void completeReduce (kStrategy strat, BOOLEAN withT=FALSE);
 void kFreeStrat(kStrategy strat);
-void enterOnePairNormal (int i,poly p,int ecart, int isFromQ,kStrategy strat, int atR);
+void enterOnePairNormal (const SElement &si,poly p,int ecart, int isFromQ,kStrategy strat, int atR);
 void chainCritNormal (poly p,int ecart,kStrategy strat);
 void chainCritOpt_1 (poly,int,kStrategy strat);
 void chainCritSig (poly p,int ecart,kStrategy strat);

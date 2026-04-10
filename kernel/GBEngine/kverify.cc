@@ -53,16 +53,18 @@ BOOLEAN kVerify1(ideal F, ideal Q)
   /* build pairs */
   if (strat->hasFromQ)
   {
-    for(int i=1; i < strat->S.size();i++)
+    int i=0;
+    for(auto sit=strat->S.begin(); sit!=strat->S.end(); ++sit, ++i)
     {
-      initenterpairs(strat->S[i].p,i-1,0,strat->S[i].fromQ,strat);
+      if (i>0) initenterpairs(sit->p,i-1,0,sit->fromQ,strat);
     }
   }
   else
   {
-    for(int i=1; i < strat->S.size();i++)
+    int i=0;
+    for(auto sit=strat->S.begin(); sit!=strat->S.end(); ++sit, ++i)
     {
-      initenterpairs(strat->S[i].p,i-1,0,FALSE,strat);
+      if (i>0) initenterpairs(sit->p,i-1,0,FALSE,strat);
     }
   }
   if (TEST_OPT_PROT) printf("%d pairs created\n",(int)strat->L.size());
@@ -163,16 +165,18 @@ BOOLEAN kVerify2(ideal F, ideal Q)
   /* build pairs */
   if (strat->hasFromQ)
   {
-    for(int i=1; i < strat->S.size();i++)
+    int i=0;
+    for(auto sit=strat->S.begin(); sit!=strat->S.end(); ++sit, ++i)
     {
-      initenterpairs(strat->S[i].p,i-1,0,strat->S[i].fromQ,strat);
+      if (i>0) initenterpairs(sit->p,i-1,0,sit->fromQ,strat);
     }
   }
   else
   {
-    for(int i=1; i < strat->S.size();i++)
+    int i=0;
+    for(auto sit=strat->S.begin(); sit!=strat->S.end(); ++sit, ++i)
     {
-      initenterpairs(strat->S[i].p,i-1,0,FALSE,strat);
+      if (i>0) initenterpairs(sit->p,i-1,0,FALSE,strat);
     }
   }
   if (TEST_OPT_PROT) printf("%d pairs created\n",(int)strat->L.size());

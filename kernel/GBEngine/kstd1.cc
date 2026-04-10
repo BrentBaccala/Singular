@@ -2180,18 +2180,18 @@ poly kNF1 (ideal F,ideal Q,poly q, kStrategy strat, int lazyReduce)
   if (((lazyReduce & KSTD_NF_LAZY)==0)
   && (!rField_is_Ring(currRing)))
   {
-    for (i=strat->S.size()-1; i>=0; i--)
-      pNorm(strat->S[i].p);
+    for (auto sit=strat->S.begin(); sit!=strat->S.end(); ++sit)
+      pNorm(sit->p);
   }
   /*- puts the elements of S also to T -*/
-  for (i=0; i < strat->S.size(); i++)
+  for (auto sit=strat->S.begin(); sit!=strat->S.end(); ++sit)
   {
-    h.p = strat->S[i].p;
-    h.ecart = strat->S[i].ecart;
-    if (strat->S[i].sev == 0) strat->S[i].sev = pGetShortExpVector(h.p);
-    else assume(strat->S[i].sev == pGetShortExpVector(h.p));
+    h.p = sit->p;
+    h.ecart = sit->ecart;
+    if (sit->sev == 0) sit->sev = pGetShortExpVector(h.p);
+    else assume(sit->sev == pGetShortExpVector(h.p));
     h.length = pLength(h.p);
-    h.sev = strat->S[i].sev;
+    h.sev = sit->sev;
     h.SetpFDeg();
     enterT(h,strat);
   }
@@ -2313,8 +2313,8 @@ ideal kNF1 (ideal F,ideal Q,ideal q, kStrategy strat, int lazyReduce)
   if (((lazyReduce & KSTD_NF_LAZY)==0)
   && (!rField_is_Ring(currRing)))
   {
-    for (i=strat->S.size()-1; i>=0; i--)
-      pNorm(strat->S[i].p);
+    for (auto sit=strat->S.begin(); sit!=strat->S.end(); ++sit)
+      pNorm(sit->p);
   }
   /*- compute------------------------------------------- -*/
   res=idInit(IDELEMS(q),strat->ak);
@@ -2327,14 +2327,14 @@ ideal kNF1 (ideal F,ideal Q,ideal q, kStrategy strat, int lazyReduce)
       if (p!=NULL)
       {
         /*- puts the elements of S also to T -*/
-        for (j=0; j < strat->S.size(); j++)
+        for (auto sit=strat->S.begin(); sit!=strat->S.end(); ++sit)
         {
-          h.p = strat->S[j].p;
-          h.ecart = strat->S[j].ecart;
+          h.p = sit->p;
+          h.ecart = sit->ecart;
           h.pLength = h.length = pLength(h.p);
-          if (strat->S[j].sev == 0) strat->S[j].sev = pGetShortExpVector(h.p);
-          else assume(strat->S[j].sev == pGetShortExpVector(h.p));
-          h.sev = strat->S[j].sev;
+          if (sit->sev == 0) sit->sev = pGetShortExpVector(h.p);
+          else assume(sit->sev == pGetShortExpVector(h.p));
+          h.sev = sit->sev;
           h.SetpFDeg();
           if(rField_is_Ring(currRing) && rHasLocalOrMixedOrdering(currRing))
             enterT_strong(h,strat);
@@ -3492,9 +3492,9 @@ ideal kInterRedOld (ideal F,const ideal Q)
 
   if (strat->hasFromQ)
   {
-    for (j=strat->S.size()-1;j>=0;j--)
+    for (auto sit=strat->S.begin(); sit!=strat->S.end(); ++sit)
     {
-      if(strat->S[j].fromQ) pDelete(&strat->S[j].p);
+      if(sit->fromQ) pDelete(&sit->p);
     }
     strat->hasFromQ=FALSE;
   }
@@ -3657,15 +3657,15 @@ ideal kInterRedBba (ideal F, ideal Q, int &need_retry)
           need_retry++;
           // move all "larger" elements fromS to L
           // remove them from T
-          int ii=pos+1;
-          for(;ii < strat->S.size();ii++)
+          auto sit=strat->S.iterator_at(pos+1);
+          for(;sit != strat->S.end();++sit)
           {
             LObject h;
             h.Clear();
             h.tailRing=strat->tailRing;
-            h.p=strat->S[ii].p; strat->S[ii].p=NULL;
+            h.p=sit->p; sit->p=NULL;
             strat->initEcart(&h);
-            h.sev=strat->S[ii].sev;
+            h.sev=sit->sev;
             int jj=strat->T.size()-1;
             while (jj>=0)
             {
@@ -3697,7 +3697,7 @@ ideal kInterRedBba (ideal F, ideal Q, int &need_retry)
           }
           if (strat->hasFromQ)
           {
-            for(ii=pos+1;ii < strat->S.size();ii++) strat->S[ii].fromQ=0;
+            for(auto sit2=strat->S.iterator_at(pos+1);sit2!=strat->S.end();++sit2) sit2->fromQ=0;
           }
           strat->S.setsize(pos+1);
         }
@@ -3742,7 +3742,7 @@ ideal kInterRedBba (ideal F, ideal Q, int &need_retry)
           strat->completeReduce_retry=FALSE;
           cleanT(strat);strat->tailRing=currRing;
           int i;
-          for(i=strat->S.size()-1;i>=0;i--) strat->S[i].s_2_r=-1;
+          for(auto sit=strat->S.begin();sit!=strat->S.end();++sit) sit->s_2_r=-1;
           completeReduce(strat);
         }
         if (strat->completeReduce_retry)

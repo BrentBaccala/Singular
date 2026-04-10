@@ -652,9 +652,10 @@ int kFindDivisibleByInS_easy (kStrategy strat, const red_object & obj)
   poly p = obj.p;
   if ((strat->syzComp>0) && (pGetComp(p)>strat->syzComp)) return -1;
   long not_sev = ~obj.sev;
-  for(int i = 0; i < strat->S.size(); i++)
+  int i = 0;
+  for(auto sit = strat->S.begin(); sit != strat->S.end(); ++sit, i++)
   {
-    if(pLmShortDivisibleBy (strat->S[i].p, strat->S[i].sev, p, not_sev))
+    if(pLmShortDivisibleBy (sit->p, sit->sev, p, not_sev))
       return i;
   }
   return -1;
@@ -664,9 +665,10 @@ int kFindDivisibleByInS_easy (kStrategy strat, poly p, long sev)
 {
   if ((strat->syzComp>0) && (pGetComp(p)>strat->syzComp)) return -1;
   long not_sev = ~sev;
-  for(int i = 0; i < strat->S.size(); i++)
+  int i = 0;
+  for(auto sit = strat->S.begin(); sit != strat->S.end(); ++sit, i++)
   {
-    if(pLmShortDivisibleBy (strat->S[i].p, strat->S[i].sev, p, not_sev))
+    if(pLmShortDivisibleBy (sit->p, sit->sev, p, not_sev))
       return i;
   }
   return -1;
@@ -870,10 +872,9 @@ BOOLEAN good_has_t_rep (int i, int j, slimgb_alg * c)
 
 BOOLEAN lenS_correct (kStrategy strat)
 {
-  int i;
-  for(i = 0; i < strat->S.size(); i++)
+  for(auto sit = strat->S.begin(); sit != strat->S.end(); ++sit)
   {
-    if(strat->S[i].length != pLength (strat->S[i].p))
+    if(sit->length != pLength (sit->p))
       return FALSE;
   }
   return TRUE;
@@ -886,8 +887,9 @@ static void cleanS (kStrategy strat, slimgb_alg * c)
   LObject P;
   while(i < strat->S.size())
   {
-    P.p = strat->S[i].p;
-    P.sev = strat->S[i].sev;
+    auto sit = strat->S.iterator_at(i);
+    P.p = sit->p;
+    P.sev = sit->sev;
     //int dummy=strat->S.size()-1;
     //if(kFindDivisibleByInS(strat,&dummy,&P)!=i)
     if(kFindDivisibleByInS_easy (strat, P.p, P.sev) != i)
@@ -959,10 +961,11 @@ add_to_reductors (slimgb_alg * c, poly h, int len, int ecart,
   i = simple_posInS (c->strat, h, len, pq);
   c->strat->enterS (P, i, c->strat, -1);
 
-  c->strat->S[i].length = len;
-  assume (pLength (c->strat->S[i].p) == c->strat->S[i].length);
+  auto sit = c->strat->S.iterator_at(i);
+  sit->length = len;
+  assume (pLength (sit->p) == sit->length);
   if(c->strat->use_lenSw)
-    c->strat->S[i].wlength = pq;
+    sit->wlength = pq;
 }
 
 static void length_one_crit (slimgb_alg * c, int pos, int len)
@@ -990,74 +993,72 @@ static void length_one_crit (slimgb_alg * c, int pos, int len)
 static void move_forward_in_S (int old_pos, int new_pos, kStrategy strat)
 {
   assume (old_pos >= new_pos);
-  poly p = strat->S[old_pos].p;
-  int ecart = strat->S[old_pos].ecart;
-  long sev = strat->S[old_pos].sev;
-  int s_2_r = strat->S[old_pos].s_2_r;
-  int length = strat->S[old_pos].length;
-  assume (length == (int)pLength (strat->S[old_pos].p));
-  wlen_type length_w;
-  if(strat->use_lenSw)
-    length_w = strat->S[old_pos].wlength;
+  auto old_it = strat->S.iterator_at(old_pos);
+  SElement saved = *old_it;
+  assume (saved.length == (int)pLength (saved.p));
   int i;
   for(i = old_pos; i > new_pos; i--)
   {
-    strat->S[i].p = strat->S[i - 1].p;
-    strat->S[i].ecart = strat->S[i - 1].ecart;
-    strat->S[i].sev = strat->S[i - 1].sev;
-    strat->S[i].s_2_r = strat->S[i - 1].s_2_r;
+    auto dst = strat->S.iterator_at(i);
+    auto src = strat->S.iterator_at(i - 1);
+    dst->p = src->p;
+    dst->ecart = src->ecart;
+    dst->sev = src->sev;
+    dst->s_2_r = src->s_2_r;
   }
   if(strat->use_lenS)
     for(i = old_pos; i > new_pos; i--)
-      strat->S[i].length = strat->S[i - 1].length;
+    {
+      auto dst = strat->S.iterator_at(i);
+      auto src = strat->S.iterator_at(i - 1);
+      dst->length = src->length;
+    }
   if(strat->use_lenSw)
     for(i = old_pos; i > new_pos; i--)
-      strat->S[i].wlength = strat->S[i - 1].wlength;
+    {
+      auto dst = strat->S.iterator_at(i);
+      auto src = strat->S.iterator_at(i - 1);
+      dst->wlength = src->wlength;
+    }
 
-  strat->S[new_pos].p = p;
-  strat->S[new_pos].ecart = ecart;
-  strat->S[new_pos].sev = sev;
-  strat->S[new_pos].s_2_r = s_2_r;
-  strat->S[new_pos].length = length;
-  if(strat->use_lenSw)
-    strat->S[new_pos].wlength = length_w;
+  auto new_it = strat->S.iterator_at(new_pos);
+  *new_it = saved;
   //assume(lenS_correct(strat));
 }
 
 static void move_backward_in_S (int old_pos, int new_pos, kStrategy strat)
 {
   assume (old_pos <= new_pos);
-  poly p = strat->S[old_pos].p;
-  int ecart = strat->S[old_pos].ecart;
-  long sev = strat->S[old_pos].sev;
-  int s_2_r = strat->S[old_pos].s_2_r;
-  int length = strat->S[old_pos].length;
-  assume (length == (int)pLength (strat->S[old_pos].p));
-  wlen_type length_w;
-  if(strat->use_lenSw)
-    length_w = strat->S[old_pos].wlength;
+  auto old_it = strat->S.iterator_at(old_pos);
+  SElement saved = *old_it;
+  assume (saved.length == (int)pLength (saved.p));
   int i;
   for(i = old_pos; i < new_pos; i++)
   {
-    strat->S[i].p = strat->S[i + 1].p;
-    strat->S[i].ecart = strat->S[i + 1].ecart;
-    strat->S[i].sev = strat->S[i + 1].sev;
-    strat->S[i].s_2_r = strat->S[i + 1].s_2_r;
+    auto dst = strat->S.iterator_at(i);
+    auto src = strat->S.iterator_at(i + 1);
+    dst->p = src->p;
+    dst->ecart = src->ecart;
+    dst->sev = src->sev;
+    dst->s_2_r = src->s_2_r;
   }
   if(strat->use_lenS)
     for(i = old_pos; i < new_pos; i++)
-      strat->S[i].length = strat->S[i + 1].length;
+    {
+      auto dst = strat->S.iterator_at(i);
+      auto src = strat->S.iterator_at(i + 1);
+      dst->length = src->length;
+    }
   if(strat->use_lenSw)
     for(i = old_pos; i < new_pos; i++)
-      strat->S[i].wlength = strat->S[i + 1].wlength;
+    {
+      auto dst = strat->S.iterator_at(i);
+      auto src = strat->S.iterator_at(i + 1);
+      dst->wlength = src->wlength;
+    }
 
-  strat->S[new_pos].p = p;
-  strat->S[new_pos].ecart = ecart;
-  strat->S[new_pos].sev = sev;
-  strat->S[new_pos].s_2_r = s_2_r;
-  strat->S[new_pos].length = length;
-  if(strat->use_lenSw)
-    strat->S[new_pos].wlength = length_w;
+  auto new_it = strat->S.iterator_at(new_pos);
+  *new_it = saved;
   //assume(lenS_correct(strat));
 }
 
@@ -1268,39 +1269,45 @@ static int simple_posInS (kStrategy strat, poly p, int len, wlen_type wlen)
   if(strat->use_lenSw)
   {
     wlen_type wl = wlen;
-    if ((wl>strat->S[length].wlength)
-        || ((wl==strat->S[length].wlength) && (pLmCmp(strat->S[length].p,p)== -1)))
+    auto sit_length = strat->S.iterator_at(length);
+    if ((wl>sit_length->wlength)
+        || ((wl==sit_length->wlength) && (pLmCmp(sit_length->p,p)== -1)))
       return length+1;
     loop
     {
       if (an >= en-1)
       {
-        if ((wl<strat->S[an].wlength)
-            || ((wl==strat->S[an].wlength) && (pLmCmp(strat->S[an].p,p) == 1))) return an;
+        auto sit_an = strat->S.iterator_at(an);
+        if ((wl<sit_an->wlength)
+            || ((wl==sit_an->wlength) && (pLmCmp(sit_an->p,p) == 1))) return an;
         return en;
       }
       i=(an+en) / 2;
-      if ((wl<strat->S[i].wlength)
-          || ((wl==strat->S[i].wlength) && (pLmCmp(strat->S[i].p,p) == 1))) en=i;
+      auto sit_i = strat->S.iterator_at(i);
+      if ((wl<sit_i->wlength)
+          || ((wl==sit_i->wlength) && (pLmCmp(sit_i->p,p) == 1))) en=i;
       else an=i;
     }
   }
   else
   {
-    if ((len>strat->S[length].length)
-        || ((len==strat->S[length].length) && (pLmCmp(strat->S[length].p,p)== -1)))
+    auto sit_length = strat->S.iterator_at(length);
+    if ((len>sit_length->length)
+        || ((len==sit_length->length) && (pLmCmp(sit_length->p,p)== -1)))
       return length+1;
     loop
     {
       if (an >= en-1)
       {
-        if ((len<strat->S[an].length)
-            || ((len==strat->S[an].length) && (pLmCmp(strat->S[an].p,p) == 1))) return an;
+        auto sit_an = strat->S.iterator_at(an);
+        if ((len<sit_an->length)
+            || ((len==sit_an->length) && (pLmCmp(sit_an->p,p) == 1))) return an;
         return en;
       }
       i=(an+en) / 2;
-      if ((len<strat->S[i].length)
-          || ((len==strat->S[i].length) && (pLmCmp(strat->S[i].p,p) == 1))) en=i;
+      auto sit_i = strat->S.iterator_at(i);
+      if ((len<sit_i->length)
+          || ((len==sit_i->length) && (pLmCmp(sit_i->p,p) == 1))) en=i;
       else an=i;
     }
   }
@@ -1314,9 +1321,10 @@ static inline void
 clearS (poly p, unsigned long p_sev, int l, int *at, int *k, kStrategy strat)
 {
   assume (p_sev == pGetShortExpVector (p));
-  if(!pLmShortDivisibleBy (p, p_sev, strat->S[*at].p, ~strat->S[*at].sev))
+  auto sit_at = strat->S.iterator_at(*at);
+  if(!pLmShortDivisibleBy (p, p_sev, sit_at->p, ~sit_at->sev))
     return;
-  if(l >= strat->S[*at].length)
+  if(l >= sit_at->length)
     return;
   if(TEST_OPT_PROT)
     PrintS ("!");
@@ -1615,7 +1623,7 @@ sorted_pair_node **add_to_basis_ideal_quotient (poly h, slimgb_alg * c,
             }
             else
             {
-              if(c->strat->S[iS].length > 1)
+              if(c->strat->S.iterator_at(iS)->length > 1)
               {
                 //PrintS("O");
                 if(TRUE)
@@ -1855,49 +1863,53 @@ static poly redNF2 (poly h, slimgb_alg * c, int &len, number & m, int n)
     //int dummy=strat->S.size()-1;
     j = kFindDivisibleByInS_easy (strat, P.p, P.sev);
     //j=kFindDivisibleByInS(strat,&dummy,&P);
-    if((j >= 0) && ((!n) ||
-                    ((strat->S[j].length <= n) &&
-                     ((!strat->use_lenSw) || (strat->S[j].wlength <= n)))))
+    if(j >= 0)
     {
-      nNormalize (pGetCoeff (P.p));
-#ifdef KDEBUG
-      if(TEST_OPT_DEBUG)
+      auto sit_j = strat->S.iterator_at(j);
+      if((!n) ||
+                    ((sit_j->length <= n) &&
+                     ((!strat->use_lenSw) || (sit_j->wlength <= n))))
       {
-        PrintS ("red:");
-        wrp (h);
-        PrintS (" with ");
-        wrp (strat->S[j].p);
-      }
+        nNormalize (pGetCoeff (P.p));
+#ifdef KDEBUG
+        if(TEST_OPT_DEBUG)
+        {
+          PrintS ("red:");
+          wrp (h);
+          PrintS (" with ");
+          wrp (sit_j->p);
+        }
 #endif
 
-      number coef = kBucketPolyRed (P.bucket, strat->S[j].p,
-                                    strat->S[j].length /*pLength(strat->S[j].p) */ ,
-                                    strat->kNoether);
-      number m2 = nMult (m, coef);
-      nDelete (&m);
-      m = m2;
-      nDelete (&coef);
-      h = kBucketGetLm (P.bucket);
+        number coef = kBucketPolyRed (P.bucket, sit_j->p,
+                                      sit_j->length /*pLength(sit_j->p) */ ,
+                                      strat->kNoether);
+        number m2 = nMult (m, coef);
+        nDelete (&m);
+        m = m2;
+        nDelete (&coef);
+        h = kBucketGetLm (P.bucket);
 
-      if(h == NULL)
-      {
-        len = 0;
-        kBucketDestroy (&P.bucket);
-        return NULL;
-      }
-      P.p = h;
-      P.t_p = NULL;
-      P.SetShortExpVector ();
+        if(h == NULL)
+        {
+          len = 0;
+          kBucketDestroy (&P.bucket);
+          return NULL;
+        }
+        P.p = h;
+        P.t_p = NULL;
+        P.SetShortExpVector ();
 #ifdef KDEBUG
-      if(TEST_OPT_DEBUG)
-      {
-        PrintS ("\nto:");
-        wrp (h);
-        PrintLn ();
-      }
+        if(TEST_OPT_DEBUG)
+        {
+          PrintS ("\nto:");
+          wrp (h);
+          PrintLn ();
+        }
 #endif
+        continue;
+      }
     }
-    else
     {
       kBucketClear (P.bucket, &(P.p), &len);
       kBucketDestroy (&P.bucket);
@@ -1920,8 +1932,9 @@ static poly redTailShort (poly h, kStrategy strat)
   int len = pLength (h);
   for(i = 0; i < strat->S.size(); i++)
   {
-    if((strat->S[i].length > 2)
-       || ((strat->use_lenSw) && (strat->S[i].wlength > 2)))
+    auto sit = strat->S.iterator_at(i);
+    if((sit->length > 2)
+       || ((strat->use_lenSw) && (sit->wlength > 2)))
       break;
   }
   return (redNFTail (h, i - 1, strat, len));
@@ -2484,21 +2497,22 @@ noro_red_mon (poly t, BOOLEAN force_unique, NoroCache * cache, slimgb_alg * c)
     number coef_bak = p_GetCoeff (t, c->r);
 
     p_SetCoeff (t, npInit (1), c->r);
-    assume (npIsOne (p_GetCoeff (c->strat->S[i].p, c->r)));
-    number coefstrat = p_GetCoeff (c->strat->S[i].p, c->r);
+    auto sit = c->strat->S.iterator_at(i);
+    assume (npIsOne (p_GetCoeff (sit->p, c->r)));
+    number coefstrat = p_GetCoeff (sit->p, c->r);
 
     //poly t_copy_mon=p_Copy(t,c->r);
     poly exp_diff = cache->temp_term;
-    p_ExpVectorDiff (exp_diff, t, c->strat->S[i].p, c->r);
+    p_ExpVectorDiff (exp_diff, t, sit->p, c->r);
     p_SetCoeff (exp_diff, npNeg (nInvers (coefstrat)), c->r);
     // nInvers may be npInvers or nvInvers
     p_Setm (exp_diff, c->r);
-    assume (c->strat->S[i].p != NULL);
+    assume (sit->p != NULL);
     //poly t_to_del=t;
     poly res;
-    res = pp_Mult_mm (pNext (c->strat->S[i].p), exp_diff, c->r);
+    res = pp_Mult_mm (pNext (sit->p), exp_diff, c->r);
 
-    res_holder.len = c->strat->S[i].length - 1;
+    res_holder.len = sit->length - 1;
     res = noro_red_non_unique (res, res_holder.len, cache, c);
 
     DataNoroCacheNode *ref = cache->insert (t, res, res_holder.len);
@@ -3081,20 +3095,22 @@ static poly redNFTail (poly h, const int sl, kStrategy strat, int len)
           PrintS ("red tail:");
           wrp (h);
           PrintS (" with ");
-          wrp (strat->S[j].p);
+          auto sit_j_dbg = strat->S.iterator_at(j);
+          wrp (sit_j_dbg->p);
         }
 #endif
         number coef;
-        pTest (strat->S[j].p);
+        auto sit_j = strat->S.iterator_at(j);
+        pTest (sit_j->p);
 #ifdef HAVE_PLURAL
         if(nc)
         {
-          nc_kBucketPolyRed_Z (P.bucket, strat->S[j].p, &coef, FALSE);
+          nc_kBucketPolyRed_Z (P.bucket, sit_j->p, &coef, FALSE);
         }
         else
 #endif
-          coef = kBucketPolyRed (P.bucket, strat->S[j].p,
-                                 strat->S[j].length /*pLength(strat->S[j].p) */ ,
+          coef = kBucketPolyRed (P.bucket, sit_j->p,
+                                 sit_j->length /*pLength(sit_j->p) */ ,
                                  strat->kNoether);
         res=__p_Mult_nn (res, coef, currRing);
         nDelete (&coef);
@@ -3531,14 +3547,14 @@ slimgb_alg::~slimgb_alg ()
            c->normal_forms, c->easy_product_crit, c->extended_product_crit);
   }
 
-  for(i = 0; i <= c->strat->S.size()-1; i++)
+  for(auto sit = c->strat->S.begin(); sit != c->strat->S.end(); ++sit)
   {
-    if(!c->strat->S[i].p)
+    if(!sit->p)
       continue;
     BOOLEAN found = FALSE;
     for(j = 0; j < c->n; j++)
     {
-      if(c->S->m[j] == c->strat->S[i].p)
+      if(c->S->m[j] == sit->p)
       {
         found = TRUE;
         break;
@@ -3546,12 +3562,12 @@ slimgb_alg::~slimgb_alg ()
     }
     if(!found)
     {
-      pDelete (&c->strat->S[i].p);
+      pDelete (&sit->p);
       // With SElement, S[i].p and Shdl->m[i] are separate copies of
       // the same pointer.  pDelete NULLs S[i].p, but Shdl->m[i] still
       // holds the (now-freed) address.  NULL it so id_Delete(&Shdl)
       // below won't double-free the polynomial.
-      c->strat->S[i].p = NULL;
+      sit->p = NULL;
     }
   }
 //   for(i=0;i<c->n;i++)
@@ -3605,10 +3621,10 @@ slimgb_alg::~slimgb_alg ()
   // and strat->S[i].p.  NULL both so that S.free_all() and
   // id_Delete(&Shdl) below don't destroy the polynomials that the
   // caller still needs via I.
-  for(i = 0; i <= c->strat->S.size()-1; i++)
+  for(auto sit = c->strat->S.begin(); sit != c->strat->S.end(); ++sit)
   {
-    c->strat->S[i].p = NULL;
-    c->strat->S[i].p = NULL;
+    sit->p = NULL;
+    sit->p = NULL;
   }
   c->strat->S.free_all();
   // Shdl removed; S.free_all() handles cleanup
@@ -3800,7 +3816,8 @@ static void shorten_tails (slimgb_alg * c, poly monom)
       //assume new_pos<old_pos
       for(int z = 0; z <= c->strat->S.size()-1; z++)
       {
-        if(c->strat->S[z].p == c->S->m[i])
+        auto sit_z = c->strat->S.iterator_at(z);
+        if(sit_z->p == c->S->m[i])
         {
           old_pos = z;
           break;
@@ -3809,7 +3826,8 @@ static void shorten_tails (slimgb_alg * c, poly monom)
       if(old_pos == -1)
         for(int z = new_pos - 1; z >= 0; z--)
         {
-          if(c->strat->S[z].p == c->S->m[i])
+          auto sit_z = c->strat->S.iterator_at(z);
+          if(sit_z->p == c->S->m[i])
           {
             old_pos = z;
             break;
@@ -3817,10 +3835,11 @@ static void shorten_tails (slimgb_alg * c, poly monom)
         }
       assume (old_pos >= 0);
       assume (new_pos <= old_pos);
-      assume ((int)pLength (c->strat->S[old_pos].p) == c->lengths[i]);
-      c->strat->S[old_pos].length = c->lengths[i];
+      auto sit_old = c->strat->S.iterator_at(old_pos);
+      assume ((int)pLength (sit_old->p) == c->lengths[i]);
+      sit_old->length = c->lengths[i];
       if(c->strat->use_lenSw)
-        c->strat->S[old_pos].wlength = q;
+        sit_old->wlength = q;
       if(new_pos < old_pos)
         move_forward_in_S (old_pos, new_pos, c->strat);
       length_one_crit (c, i, c->lengths[i]);
@@ -3877,16 +3896,17 @@ void slimgb_alg::cleanDegs (int lower, int upper)
         int j;
         for(j = 0; j < strat->S.size(); j++)
         {
-          if(h == strat->S[j].p)
+          auto sit_j = strat->S.iterator_at(j);
+          if(h == sit_j->p)
           {
             int new_pos = simple_posInS (strat, h, len, wlen);
             if(strat->use_lenS)
             {
-              strat->S[j].length = len;
+              sit_j->length = len;
             }
             if(strat->use_lenSw)
             {
-              strat->S[j].wlength = wlen;
+              sit_j->wlength = wlen;
             }
             if(new_pos < j)
             {
@@ -4190,9 +4210,10 @@ static poly kBucketGcd (kBucket * b, ring r)
 
 static inline wlen_type quality_of_pos_in_strat_S (int pos, slimgb_alg * c)
 {
+  auto sit = c->strat->S.iterator_at(pos);
   if(c->strat->use_lenSw)
-    return c->strat->S[pos].wlength;
-  return c->strat->S[pos].length;
+    return sit->wlength;
+  return sit->length;
 }
 
 #ifdef HAVE_PLURAL
@@ -4200,9 +4221,10 @@ static inline wlen_type
 quality_of_pos_in_strat_S_mult_high (int pos, poly high, slimgb_alg * c)
   //meant only for nc
 {
+  auto sit = c->strat->S.iterator_at(pos);
   poly m = pOne ();
-  pExpVectorDiff (m, high, c->strat->S[pos].p);
-  poly product = nc_mm_Mult_pp (m, c->strat->S[pos].p, c->r);
+  pExpVectorDiff (m, high, sit->p);
+  poly product = nc_mm_Mult_pp (m, sit->p, c->r);
   wlen_type erg = pQuality (product, c);
   pDelete (&m);
   pDelete (&product);
@@ -4218,7 +4240,7 @@ multi_reduction_lls_trick (red_object * los, int /*losl*/, slimgb_alg * c,
   BOOLEAN swap_roles;           //from reduce_by, to_reduce_u if fromS
   if(erg.fromS)
   {
-    if(pLmEqual (c->strat->S[erg.reduce_by].p, los[erg.to_reduce_u].p))
+    if(pLmEqual (c->strat->S.iterator_at(erg.reduce_by)->p, los[erg.to_reduce_u].p))
     {
       wlen_type quality_a = quality_of_pos_in_strat_S (erg.reduce_by, c);
       int best = erg.to_reduce_u + 1;
@@ -4392,9 +4414,10 @@ multi_reduction_lls_trick (red_object * los, int /*losl*/, slimgb_alg * c,
     //kBucketClear(los[bp].bucket,&clear_into,&new_length);
     new_length = los[bp].clear_to_poly ();
     clear_into = los[bp].p;
-    poly p = c->strat->S[erg.reduce_by].p;
+    auto sit_rb = c->strat->S.iterator_at(erg.reduce_by);
+    poly p = sit_rb->p;
     int j = erg.reduce_by;
-    int old_length = c->strat->S[j].length; // in view of S
+    int old_length = sit_rb->length; // in view of S
     los[bp].p = p;
     kBucketInit (los[bp].bucket, p, old_length);
     wlen_type qal = pQuality (clear_into, c, new_length);
@@ -4441,12 +4464,13 @@ multi_reduction_lls_trick (red_object * los, int /*losl*/, slimgb_alg * c,
         tdeg = c->pTotaldegree (clear_into);
       }
     }
-    c->strat->S[j].p = clear_into;
-    c->strat->S[j].length = new_length;
+    auto sit_j = c->strat->S.iterator_at(j);
+    sit_j->p = clear_into;
+    sit_j->length = new_length;
 
     assume ((int)pLength (clear_into) == new_length);
     if(c->strat->use_lenSw)
-      c->strat->S[j].wlength = qal;
+      sit_j->wlength = qal;
     if(TEST_OPT_INTSTRATEGY)
     {
       p_Cleardenom (clear_into, c->r);  //should be unnecessary
@@ -4463,7 +4487,7 @@ multi_reduction_lls_trick (red_object * los, int /*losl*/, slimgb_alg * c,
     if(new_pos < j)
     {
       if(c->strat->honey)
-        c->strat->S[j].ecart = tdeg_full - tdeg;
+        c->strat->S.iterator_at(j)->ecart = tdeg_full - tdeg;
       move_forward_in_S (j, new_pos, c->strat);
       erg.reduce_by = new_pos;
     }
@@ -4995,8 +5019,9 @@ void multi_reduce_step (find_erg & erg, red_object * r, slimgb_alg * c)
   BOOLEAN work_on_copy = FALSE;
   if(erg.fromS)
   {
-    red = c->strat->S[rn].p;
-    red_len = c->strat->S[rn].length;
+    auto sit_rn = c->strat->S.iterator_at(rn);
+    red = sit_rn->p;
+    red_len = sit_rn->length;
     assume (red_len == (int)pLength (red));
   }
   else
@@ -5066,7 +5091,7 @@ void multi_reduce_step (find_erg & erg, red_object * r, slimgb_alg * c)
     int ecart;
     if(erg.fromS)
     {
-      ecart = c->strat->S[erg.reduce_by].ecart;
+      ecart = c->strat->S.iterator_at(erg.reduce_by)->ecart;
     }
     else
     {

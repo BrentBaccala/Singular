@@ -35,32 +35,16 @@
 
 
 
+// S_2_T and s_2_t are now sBasisSet methods (strat->S.S_2_T / s_2_t).
+// Delegate from skStrategy for backward compatibility.
 KINLINE TObject* skStrategy::S_2_T(int i)
 {
-  assume(i>= 0 && i<S.size());
-  assume(S[i].s_2_r >= 0 && S[i].s_2_r < T.size());
-  TObject* TT = R[S[i].s_2_r];
-  assume(TT != NULL && TT->p == S[i].p);
-  return TT;
+  return S.S_2_T(S.iterator_at(i), this);
 }
 
 KINLINE TObject* skStrategy::s_2_t(int i)
 {
-  if (i >= 0 && i < S.size())
-  {
-    int sri= S[i].s_2_r;
-    if ((sri >= 0) && (sri < T.size()))
-    {
-      TObject* t = R[sri];
-      if ((t != NULL) && (t->p == S[i].p))
-        return t;
-    }
-    // last but not least, try kFindInT
-    sri = kFindInT(S[i].p, T, T.size() - 1);
-    if (sri >= 0)
-      return &(T[sri]);
-  }
-  return NULL;
+  return S.s_2_t(S.iterator_at(i), this);
 }
 
 KINLINE poly skStrategy::kNoetherTail()
@@ -1331,25 +1315,19 @@ KINLINE poly redtailBba_Z (poly p,int pos,kStrategy strat)
   return redtailBba_Z(&L, pos, strat);
 }
 
+// Old int-based clearS — delegates to sBasisSet::clear_if_divisible.
+// Kept for callers not yet migrated to iterator API.
 KINLINE void clearS (poly p, unsigned long p_sev, int* at, int* k,
                     kStrategy strat)
 {
-  assume(p_sev == pGetShortExpVector(p));
-  if (strat->noClearS) return;
-  if(rField_is_Ring(currRing))
+  auto sit = strat->S.iterator_at(*at);
+  int old_size = strat->S.size();
+  strat->S.clear_if_divisible(p, p_sev, sit, strat);
+  if (strat->S.size() < old_size)
   {
-    if (!pLmShortDivisibleBy(p,p_sev, strat->S[*at].p, ~ strat->S[*at].sev))
-      return;
-    if(!n_DivBy(pGetCoeff(strat->S[*at].p), pGetCoeff(p), currRing->cf))
-      return;
+    (*at)--;
+    (*k)--;
   }
-  else
-  {
-    if (!pLmShortDivisibleBy(p,p_sev, strat->S[*at].p, ~ strat->S[*at].sev)) return;
-  }
-  deleteInS((*at),strat);
-  (*at)--;
-  (*k)--;
 }
 
 // dummy function for function pointer strat->rewCrit being usable in all

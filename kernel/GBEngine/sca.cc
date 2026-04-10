@@ -30,7 +30,7 @@ void addLObject(LObject& h, kStrategy& strat)
   // add h into S and L
   int pos=posInS(strat, strat->S.size()-1, h.p, h.ecart);
 
-  if ( (pos < strat->S.size()) && (p_ComparePolys(h.p, strat->S[pos].p, currRing)) )
+  if ( (pos < strat->S.size()) && (p_ComparePolys(h.p, strat->S.iterator_at(pos)->p, currRing)) )
   {
     if (TEST_OPT_PROT)
       PrintS("d\n");
@@ -345,8 +345,11 @@ ideal k_sca_gr_bba(const ideal F, const ideal Q, const intvec *, const bigintmat
     while (newsize > 0 && erg->m[newsize-1] == NULL) newsize--;
     strat->S.ensure_capacity(newsize);
     strat->S.setsize(newsize);
-    for (int ii = 0; ii < newsize; ii++)
-      strat->S[ii].p = erg->m[ii];
+    {
+      int ii = 0;
+      for (auto sit = strat->S.begin(); sit != strat->S.end(); ++sit, ++ii)
+        sit->p = erg->m[ii];
+    }
   }
 
 
@@ -824,8 +827,11 @@ ideal k_sca_bba (const ideal F, const ideal Q, const intvec */*w*/, const bigint
     while (newsize > 0 && erg->m[newsize-1] == NULL) newsize--;
     strat->S.ensure_capacity(newsize);
     strat->S.setsize(newsize);
-    for (int ii = 0; ii < newsize; ii++)
-      strat->S[ii].p = erg->m[ii];
+    {
+      int ii = 0;
+      for (auto sit = strat->S.begin(); sit != strat->S.end(); ++sit, ++ii)
+        sit->p = erg->m[ii];
+    }
   }
 
 #if MYTEST

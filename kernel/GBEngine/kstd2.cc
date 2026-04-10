@@ -398,24 +398,23 @@ static int kFindDivisibleByInS_Z(const kStrategy strat, LObject* L)
 
     pAssume(~not_sev == p_GetShortExpVector(p, r));
 
-    loop
+    for (auto sit=strat->S.iterator_at(j); sit!=strat->S.end(); ++sit)
     {
-      if (j > strat->S.size()-1) return o;
 #if defined(PDEBUG) || defined(PDIV_DEBUG)
-      if (p_LmShortDivisibleBy(strat->S[j].p, strat->S[j].sev,p, not_sev, r))
+      if (p_LmShortDivisibleBy(sit->p, sit->sev,p, not_sev, r))
 #else
-      if (!(strat->S[j].sev & not_sev) && p_LmDivisibleBy(strat->S[j].p, p, r))
+      if (!(sit->sev & not_sev) && p_LmDivisibleBy(sit->p, p, r))
 #endif
       {
-        mult= n_QuotRem(pGetCoeff(p), pGetCoeff(strat->S[j].p), &rest, r->cf);
+        mult= n_QuotRem(pGetCoeff(p), pGetCoeff(sit->p), &rest, r->cf);
         if (!n_IsZero(mult, r->cf) && n_Greater(n_EucNorm(orest, r->cf), n_EucNorm(rest, r->cf), r->cf))
         {
-          o = j;
+          o = sit.index();
           orest = rest;
         }
       }
-      j++;
     }
+    return o;
   }
   else
   {
@@ -688,40 +687,38 @@ int kFindDivisibleByInS(const kStrategy strat, int* max_ind, LObject* L)
 #endif
   if(is_Ring)
   {
-    loop
+    for (auto sit=strat->S.iterator_at(j); sit!=strat->S.end() && sit.index()<=ende; ++sit)
     {
-      if (j > ende) return -1;
 #if defined(PDEBUG) || defined(PDIV_DEBUG)
-      if (p_LmShortDivisibleBy(strat->S[j].p, strat->S[j].sev,
+      if (p_LmShortDivisibleBy(sit->p, sit->sev,
                              p, not_sev, currRing))
 #else
-      if ( !(strat->S[j].sev & not_sev) &&
-         p_LmDivisibleBy(strat->S[j].p, p, currRing))
+      if ( !(sit->sev & not_sev) &&
+         p_LmDivisibleBy(sit->p, p, currRing))
 #endif
       {
-        if(n_DivBy(pGetCoeff(p), pGetCoeff(strat->S[j].p), currRing->cf))
-          return j;
+        if(n_DivBy(pGetCoeff(p), pGetCoeff(sit->p), currRing->cf))
+          return sit.index();
       }
-      j++;
     }
+    return -1;
   }
   else
   {
-    loop
+    for (auto sit=strat->S.iterator_at(j); sit!=strat->S.end() && sit.index()<=ende; ++sit)
     {
-      if (j > ende) return -1;
 #if defined(PDEBUG) || defined(PDIV_DEBUG)
-      if (p_LmShortDivisibleBy(strat->S[j].p, strat->S[j].sev,
+      if (p_LmShortDivisibleBy(sit->p, sit->sev,
                              p, not_sev, currRing))
 #else
-      if ( !(strat->S[j].sev & not_sev) &&
-         p_LmDivisibleBy(strat->S[j].p, p, currRing))
+      if ( !(sit->sev & not_sev) &&
+         p_LmDivisibleBy(sit->p, p, currRing))
 #endif
       {
-        return j;
+        return sit.index();
       }
-      j++;
     }
+    return -1;
   }
 }
 
@@ -749,21 +746,20 @@ int kFindDivisibleByInS_noCF(const kStrategy strat, int* max_ind, LObject* L)
 #else
   int ende=strat->S.size()-1;
 #endif
-  loop
+  for (auto sit=strat->S.iterator_at(j); sit!=strat->S.end() && sit.index()<=ende; ++sit)
   {
-    if (j > ende) return -1;
 #if defined(PDEBUG) || defined(PDIV_DEBUG)
-    if (p_LmShortDivisibleBy(strat->S[j].p, strat->S[j].sev,
+    if (p_LmShortDivisibleBy(sit->p, sit->sev,
                            p, not_sev, currRing))
 #else
-    if ( !(strat->S[j].sev & not_sev) &&
-         p_LmDivisibleBy(strat->S[j].p, p, currRing))
+    if ( !(sit->sev & not_sev) &&
+         p_LmDivisibleBy(sit->p, p, currRing))
 #endif
     {
-      return j;
+      return sit.index();
     }
-    j++;
   }
+  return -1;
 }
 
 int kFindNextDivisibleByInS(const kStrategy strat, int start,int max_ind, LObject* L)
@@ -778,21 +774,20 @@ int kFindNextDivisibleByInS(const kStrategy strat, int start,int max_ind, LObjec
 #else
   int ende=strat->S.size()-1;
 #endif
-  loop
+  for (auto sit=strat->S.iterator_at(j); sit!=strat->S.end() && sit.index()<=ende; ++sit)
   {
-    if (j > ende) return -1;
 #if defined(PDEBUG) || defined(PDIV_DEBUG)
-    if (p_LmShortDivisibleBy(strat->S[j].p, strat->S[j].sev,
+    if (p_LmShortDivisibleBy(sit->p, sit->sev,
                              p, not_sev, currRing))
 #else
-    if ( !(strat->S[j].sev & not_sev) &&
-         p_LmDivisibleBy(strat->S[j].p, p, currRing))
+    if ( !(sit->sev & not_sev) &&
+         p_LmDivisibleBy(sit->p, p, currRing))
 #endif
     {
-      return j;
+      return sit.index();
     }
-    j++;
   }
+  return -1;
 }
 
 static long ind_fact_2(long arg)
@@ -1132,9 +1127,10 @@ static int redRing_Z_S (LObject* h,kStrategy strat)
            * => we try to cut down the lead coefficient at least */
           /* first copy T[j] in order to multiply it with a coefficient later on */
           number mult, rest;
-          TObject tj(pCopy(strat->S[j].p));
+          auto sit_j = strat->S.iterator_at(j);
+          TObject tj(pCopy(sit_j->p));
           /* compute division with remainder of lc(h) and lc(S[j]) */
-          mult = n_QuotRem(pGetCoeff(h->p), pGetCoeff(strat->S[j].p),
+          mult = n_QuotRem(pGetCoeff(h->p), pGetCoeff(sit_j->p),
                   &rest, currRing->cf);
           /* set corresponding new lead coefficient already. we do not
            * remove the lead term in ksReducePolyLC, but only apply
@@ -1152,7 +1148,7 @@ static int redRing_Z_S (LObject* h,kStrategy strat)
          * change the polys to h <- spoly(h,tj) and h2 <- gpoly(h,tj). */
         LObject h2  = *h;
         h2.Copy();
-        TObject tj(strat->S[j].p);
+        TObject tj(strat->S.iterator_at(j)->p);
 
         ksReducePolyZ(h, &tj, NULL, NULL, strat);
         ksReducePolyGCD(&h2, &tj, NULL, NULL, strat);
@@ -1167,7 +1163,7 @@ static int redRing_Z_S (LObject* h,kStrategy strat)
     }
     else
     {
-      TObject tj(strat->S[j].p);
+      TObject tj(strat->S.iterator_at(j)->p);
       ksReducePoly(h, &tj, NULL, NULL, NULL, strat);
     }
     /* printf("\nAfter small red: ");pWrite(h->p); */
@@ -1323,7 +1319,7 @@ static int redRing_S (LObject* h,kStrategy strat)
     }
     //printf("\nFound one: ");pWrite(strat->T[j].p);
     //enterT(*h, strat);
-    TObject tj(strat->S[j].p);
+    TObject tj(strat->S.iterator_at(j)->p);
     ksReducePoly(h, &tj, NULL, NULL, NULL, strat); // with debug output
     //printf("\nAfter small red: ");pWrite(h->p);
     if (h->GetLmTailRing() == NULL)
@@ -1657,7 +1653,7 @@ int redSig (LObject* h,kStrategy strat)
     PrintS("--------------------------------\n");
     printf("INDEX OF REDUCER T: %d\n",ii);
 #endif
-    sigSafe = ksReducePolySig(h, &(strat->T[ii]), strat->S[ii].s_2_r, NULL, NULL, strat);
+    sigSafe = ksReducePolySig(h, &(strat->T[ii]), strat->S.iterator_at(ii)->s_2_r, NULL, NULL, strat);
 #if SBA_PRINT_REDUCTION_STEPS
     if (sigSafe != 3)
       sba_reduction_steps++;
@@ -1880,7 +1876,7 @@ int redSigRing (LObject* h,kStrategy strat)
     Print("--------------------------------\n");
     printf("INDEX OF REDUCER T: %d\n",ii);
 #endif
-    sigSafe = ksReducePolySigRing(h, &(strat->T[ii]), strat->S[ii].s_2_r, NULL, NULL, strat);
+    sigSafe = ksReducePolySigRing(h, &(strat->T[ii]), strat->S.iterator_at(ii)->s_2_r, NULL, NULL, strat);
     if(h->p == NULL && h->sig == NULL)
     {
       //Trivial case catch
@@ -2547,21 +2543,23 @@ poly redNF (poly h,int &max_ind,int nonorm,kStrategy strat)
     j_ring=j=kFindDivisibleByInS_noCF(strat,&max_ind,&P);
     while ((j>=0)
     && (nonorm)
-    && (!n_DivBy(pGetCoeff(P.p),pGetCoeff(strat->S[j].p),currRing->cf)))
+    && (!n_DivBy(pGetCoeff(P.p),pGetCoeff(strat->S.iterator_at(j)->p),currRing->cf)))
       j=kFindNextDivisibleByInS(strat,j+1,max_ind,&P);
     if (j>=0)
     {
-      int sl=pSize(strat->S[j].p);
+      auto sit_j = strat->S.iterator_at(j);
+      int sl=pSize(sit_j->p);
       int jj=j;
       loop
       {
         int sll;
         jj=kFindNextDivisibleByInS(strat,jj+1,max_ind,&P);
         if (jj<0) break;
+        auto sit_jj = strat->S.iterator_at(jj);
         if ((!nonorm)
-        || (n_DivBy(pGetCoeff(P.p),pGetCoeff(strat->S[jj].p),currRing->cf)))
+        || (n_DivBy(pGetCoeff(P.p),pGetCoeff(sit_jj->p),currRing->cf)))
         {
-          sll=pSize(strat->S[jj].p);
+          sll=pSize(sit_jj->p);
           if (sll<sl)
           {
             #ifdef KDEBUG
@@ -2569,13 +2567,14 @@ poly redNF (poly h,int &max_ind,int nonorm,kStrategy strat)
             #endif
             //else if (TEST_OPT_PROT) { PrintS("b"); mflush(); }
             j=jj;
+            sit_j = sit_jj;
             sl=sll;
           }
         }
       }
-      if ((nonorm==0) && (!nIsOne(pGetCoeff(strat->S[j].p))))
+      if ((nonorm==0) && (!nIsOne(pGetCoeff(sit_j->p))))
       {
-        pNorm(strat->S[j].p);
+        pNorm(sit_j->p);
         //if (TEST_OPT_PROT) { PrintS("n"); mflush(); }
       }
       nNormalize(pGetCoeff(P.p));
@@ -2585,20 +2584,20 @@ poly redNF (poly h,int &max_ind,int nonorm,kStrategy strat)
         PrintS("red:");
         wrp(P.p);
         PrintS(" with ");
-        wrp(strat->S[j].p);
+        wrp(sit_j->p);
       }
 #endif
 #ifdef HAVE_PLURAL
       if (rIsPluralRing(currRing))
       {
         number coef;
-        nc_kBucketPolyRed_NF(P.bucket,strat->S[j].p,&coef,nonorm);
+        nc_kBucketPolyRed_NF(P.bucket,sit_j->p,&coef,nonorm);
         nDelete(&coef);
       }
       else
 #endif
       {
-        kBucketPolyRedNF(P.bucket,strat->S[j].p,pLength(strat->S[j].p),
+        kBucketPolyRedNF(P.bucket,sit_j->p,pLength(sit_j->p),
                             strat->kNoether);
       }
       cnt--;
@@ -2628,13 +2627,14 @@ poly redNF (poly h,int &max_ind,int nonorm,kStrategy strat)
     else if (is_ring && (j_ring>=0) && (currRing->cf->cfQuotRem!=ndQuotRem))
     {
       number r;
-      number n=n_QuotRem(pGetCoeff(P.p),pGetCoeff(strat->S[j_ring].p),&r,currRing->cf);
+      auto sit_jr = strat->S.iterator_at(j_ring);
+      number n=n_QuotRem(pGetCoeff(P.p),pGetCoeff(sit_jr->p),&r,currRing->cf);
       if(!n_IsZero(n,currRing->cf))
       {
         poly lm=kBucketGetLm(P.bucket);
         poly m=p_Head(lm,currRing);
-        p_ExpVectorSub(m,strat->S[j_ring].p,currRing);
-        if (p_GetComp(strat->S[j_ring].p, currRing) != p_GetComp(lm, currRing))
+        p_ExpVectorSub(m,sit_jr->p,currRing);
+        if (p_GetComp(sit_jr->p, currRing) != p_GetComp(lm, currRing))
         {
           p_SetComp(m,p_GetComp(lm, currRing),currRing);
         }
@@ -2646,11 +2646,11 @@ poly redNF (poly h,int &max_ind,int nonorm,kStrategy strat)
           PrintS("redi (coeff):");
           wrp(P.p);
           PrintS(" with ");
-          wrp(strat->S[j].p);
+          wrp(strat->S.iterator_at(j)->p);
         }
 #endif
         int l=-1;
-        kBucket_Minus_m_Mult_p(P.bucket,m,strat->S[j_ring].p,&l);
+        kBucket_Minus_m_Mult_p(P.bucket,m,sit_jr->p,&l);
         P.p=kBucketGetLm(P.bucket);
         p_Delete(&m,currRing);
 #ifdef KDEBUG
@@ -2711,14 +2711,16 @@ poly redNFBound (poly h,int &max_ind,int nonorm,kStrategy strat,int bound)
     {
       if (!is_ring)
       {
-        int sl=pSize(strat->S[j].p);
+        auto sit_j = strat->S.iterator_at(j);
+        int sl=pSize(sit_j->p);
         int jj=j;
         loop
         {
           int sll;
           jj=kFindNextDivisibleByInS(strat,jj+1,max_ind,&P);
           if (jj<0) break;
-          sll=pSize(strat->S[jj].p);
+          auto sit_jj = strat->S.iterator_at(jj);
+          sll=pSize(sit_jj->p);
           if (sll<sl)
           {
             #ifdef KDEBUG
@@ -2726,12 +2728,13 @@ poly redNFBound (poly h,int &max_ind,int nonorm,kStrategy strat,int bound)
             #endif
             //else if (TEST_OPT_PROT) { PrintS("b"); mflush(); }
             j=jj;
+            sit_j = sit_jj;
             sl=sll;
           }
         }
-        if ((nonorm==0) && (!nIsOne(pGetCoeff(strat->S[j].p))))
+        if ((nonorm==0) && (!nIsOne(pGetCoeff(sit_j->p))))
         {
-          pNorm(strat->S[j].p);
+          pNorm(sit_j->p);
           //if (TEST_OPT_PROT) { PrintS("n"); mflush(); }
         }
       }
@@ -2742,20 +2745,21 @@ poly redNFBound (poly h,int &max_ind,int nonorm,kStrategy strat,int bound)
         PrintS("red:");
         wrp(h);
         PrintS(" with ");
-        wrp(strat->S[j].p);
+        wrp(strat->S.iterator_at(j)->p);
       }
 #endif
 #ifdef HAVE_PLURAL
       if (rIsPluralRing(currRing))
       {
         number coef;
-        nc_kBucketPolyRed_NF(P.bucket,strat->S[j].p,&coef,nonorm);
+        nc_kBucketPolyRed_NF(P.bucket,strat->S.iterator_at(j)->p,&coef,nonorm);
         nDelete(&coef);
       }
       else
 #endif
       {
-        kBucketPolyRedNF(P.bucket,strat->S[j].p,pLength(strat->S[j].p),strat->kNoether);
+        auto sit_j2 = strat->S.iterator_at(j);
+        kBucketPolyRedNF(P.bucket,sit_j2->p,pLength(sit_j2->p),strat->kNoether);
         P.p = kBucketClear(P.bucket);
         P.p = pJet(P.p,bound);
         if(!P.IsNull())
@@ -3094,7 +3098,8 @@ bba_post_loop:
         loop
         {
           if (j >= k) break;
-          clearS(strat->S[j].p, strat->S[j].sev, &k, &j, strat);
+          auto sit_j = strat->S.iterator_at(j);
+          clearS(sit_j->p, sit_j->sev, &k, &j, strat);
           j++;
         }
         k++;
@@ -3118,7 +3123,8 @@ bba_post_loop:
         loop
         {
           if (j>=k) break;
-          clearS(strat->S[j].p,strat->S[j].sev,&k,&j,strat);
+          auto sit_j = strat->S.iterator_at(j);
+          clearS(sit_j->p,sit_j->sev,&k,&j,strat);
           j++;
         }
         k++;
@@ -3139,8 +3145,7 @@ bba_post_loop:
       {
         strat->completeReduce_retry=FALSE;
         cleanT(strat);strat->tailRing=currRing;
-        int i;
-        for(i=strat->S.size()-1;i>=0;i--) strat->S[i].s_2_r=-1;
+        for(auto sit=strat->S.begin(); sit!=strat->S.end(); ++sit) sit->s_2_r=-1;
         completeReduce(strat);
       }
       if (strat->completeReduce_retry)
@@ -3156,20 +3161,20 @@ bba_post_loop:
   {
     if(rField_is_Z(currRing))
     {
-      for(int i = 0;i < strat->S.size();i++)
+      for(auto sit = strat->S.begin(); sit != strat->S.end(); ++sit)
       {
-        if(!nGreaterZero(pGetCoeff(strat->S[i].p)))
+        if(!nGreaterZero(pGetCoeff(sit->p)))
         {
-          strat->S[i].p = pNeg(strat->S[i].p);
+          sit->p = pNeg(sit->p);
         }
       }
       finalReduceByMon(strat);
       // finalReduceByMon may NULL entries (poly reduced to zero); skip those
-      for(int i = 0;i < strat->S.size();i++)
+      for(auto sit = strat->S.begin(); sit != strat->S.end(); ++sit)
       {
-        if(strat->S[i].p != NULL && !nGreaterZero(pGetCoeff(strat->S[i].p)))
+        if(sit->p != NULL && !nGreaterZero(pGetCoeff(sit->p)))
         {
-          strat->S[i].p = pNeg(strat->S[i].p);
+          sit->p = pNeg(sit->p);
         }
       }
     }
@@ -3188,16 +3193,16 @@ bba_post_loop:
   if ((TEST_OPT_PROT) || (TEST_OPT_DEBUG)) messageStat(hilbcount,strat);
   SI_RESTORE_OPT1(save);
 #ifdef KDEBUG
-  for(int _ii=0; _ii < strat->S.size(); _ii++)
-    if (strat->S[_ii].p != NULL && strat->S[_ii].p->coef == NULL)
-    { fprintf(stderr, "bba BEFORE updateResult: S[%d].p=%p NULL coef! Q=%p\n", _ii, (void*)strat->S[_ii].p, (void*)Q); abort(); }
+  for(auto _sit = strat->S.begin(); _sit != strat->S.end(); ++_sit)
+    if (_sit->p != NULL && _sit->p->coef == NULL)
+    { fprintf(stderr, "bba BEFORE updateResult: S[%d].p=%p NULL coef! Q=%p\n", _sit.index(), (void*)_sit->p, (void*)Q); abort(); }
 #endif
   /* postprocessing for GB over Q-rings ------------------*/
   if ((Q!=NULL)&&(!errorreported)) updateResult(Q,strat);
 #ifdef KDEBUG
-  for(int _ii=0; _ii < strat->S.size(); _ii++)
-    if (strat->S[_ii].p != NULL && strat->S[_ii].p->coef == NULL)
-    { fprintf(stderr, "bba AFTER updateResult: S[%d].p=%p NULL coef! Q=%p\n", _ii, (void*)strat->S[_ii].p, (void*)Q); abort(); }
+  for(auto _sit = strat->S.begin(); _sit != strat->S.end(); ++_sit)
+    if (_sit->p != NULL && _sit->p->coef == NULL)
+    { fprintf(stderr, "bba AFTER updateResult: S[%d].p=%p NULL coef! Q=%p\n", _sit.index(), (void*)_sit->p, (void*)Q); abort(); }
 #endif
 
   return strat->getShdl();
@@ -3751,9 +3756,9 @@ ideal sba (ideal F0, ideal Q,intvec *w,bigintmat *hilb,kStrategy strat)
       if(strat->sbaOrder != 1)
       {
         BOOLEAN overwrite = FALSE;
-        for (int tk=0; tk<strat->S.size(); tk++)
+        for (auto sit_tk=strat->S.begin(); sit_tk!=strat->S.end(); ++sit_tk)
         {
-          if (pGetComp(strat->S[tk].sig) == pGetComp(strat->P.sig))
+          if (pGetComp(sit_tk->sig) == pGetComp(strat->P.sig))
           {
             //printf("TK %d / %d\n",tk,strat->S.size()-1);
             overwrite = FALSE;
@@ -3772,7 +3777,7 @@ ideal sba (ideal F0, ideal Q,intvec *w,bigintmat *hilb,kStrategy strat)
           strat->P.sevSig = pGetShortExpVector (strat->P.sig);
           int i;
           LObject Q;
-          for(int ps=0;ps<strat->S.size();ps++)
+          for(auto sit_ps=strat->S.begin(); sit_ps!=strat->S.end(); ++sit_ps)
           {
 
             strat->newt = TRUE;
@@ -3789,7 +3794,7 @@ ideal sba (ideal F0, ideal Q,intvec *w,bigintmat *hilb,kStrategy strat)
             // add LM(F->m[i]) to the signature to get a Schreyer order
             // without changing the underlying polynomial ring at all
             if (strat->sbaOrder == 0)
-              p_ExpVectorAdd (Q.sig,strat->S[ps].p,currRing);
+              p_ExpVectorAdd (Q.sig,sit_ps->p,currRing);
             // since p_Add_q() destroys all input
             // data we need to recreate help
             // each time
@@ -3798,7 +3803,7 @@ ideal sba (ideal F0, ideal Q,intvec *w,bigintmat *hilb,kStrategy strat)
             // module monomial strat->P.sig gives the leading monomial of
             // the corresponding principal syzygy
             // => we do not need to compute the "real" syzygy completely
-            poly help = p_Copy(strat->S[ps].sig,currRing);
+            poly help = p_Copy(sit_ps->sig,currRing);
             p_ExpVectorAdd (help,strat->P.p,currRing);
             Q.sig = p_Add_q(Q.sig,help,currRing);
             //printf("%d. SYZ  ",i+1);
@@ -3824,16 +3829,19 @@ ideal sba (ideal F0, ideal Q,intvec *w,bigintmat *hilb,kStrategy strat)
         // if new element is the first one in this index
         if (strat->currIdx < idx)
         {
-          for (int i=0; i<strat->S.size()-1; ++i)
+          {
+          int last_idx = strat->S.size()-1; // exclude the element just added
+          for (auto sit_i=strat->S.begin(); sit_i!=strat->S.end() && sit_i.index() < last_idx; ++sit_i)
           {
             Q.sig = p_Copy(strat->P.sig,currRing);
-            p_ExpVectorAdd(Q.sig,strat->S[i].p,currRing);
-            poly help = p_Copy(strat->S[i].sig,currRing);
+            p_ExpVectorAdd(Q.sig,sit_i->p,currRing);
+            poly help = p_Copy(sit_i->sig,currRing);
             p_ExpVectorAdd(help,strat->P.p,currRing);
             Q.sig = p_Add_q(Q.sig,help,currRing);
             //pWrite(Q.sig);
             pos = posInSyz(strat, Q.sig);
             enterSyz(Q, strat, pos);
+          }
           }
           strat->currIdx = idx;
         }
@@ -3844,13 +3852,16 @@ ideal sba (ideal F0, ideal Q,intvec *w,bigintmat *hilb,kStrategy strat)
           for (unsigned i=cmp+1; i<=max_cmp; ++i)
           {
             pos = -1;
-            for (int j=0; j<strat->S.size()-1; ++j)
             {
-              if (__p_GetComp(strat->S[j].sig,currRing) == i)
+            int last_idx = strat->S.size()-1;
+            for (auto sit_j=strat->S.begin(); sit_j!=strat->S.end() && sit_j.index() < last_idx; ++sit_j)
+            {
+              if (__p_GetComp(sit_j->sig,currRing) == i)
               {
-                pos = j;
+                pos = sit_j.index();
                 break;
               }
+            }
             }
             if (pos != -1)
             {
@@ -3860,7 +3871,7 @@ ideal sba (ideal F0, ideal Q,intvec *w,bigintmat *hilb,kStrategy strat)
               p_ExpVectorAdd(Q.sig,F->m[i-1],currRing);
               p_SetComp(Q.sig, i, currRing);
               poly help = p_Copy(strat->P.sig,currRing);
-              p_ExpVectorAdd(help,strat->S[pos].p,currRing);
+              p_ExpVectorAdd(help,strat->S.iterator_at(pos)->p,currRing);
               Q.sig = p_Add_q(Q.sig,help,currRing);
               if (strat->sbaOrder == 0)
               {
@@ -3884,8 +3895,9 @@ ideal sba (ideal F0, ideal Q,intvec *w,bigintmat *hilb,kStrategy strat)
 #if DEBUGF50
     printf("---------------------------\n");
     Print(" %d. ELEMENT ADDED TO GCURR:\n",strat->S.size());
-    PrintS("LEAD POLY:  "); pWrite(pHead(strat->S[strat->S.size()-1].p));
-    PrintS("SIGNATURE:  "); pWrite(strat->S[strat->S.size()-1].sig);
+    { auto sit_last = strat->S.iterator_at(strat->S.size()-1);
+    PrintS("LEAD POLY:  "); pWrite(pHead(sit_last->p));
+    PrintS("SIGNATURE:  "); pWrite(sit_last->sig); }
 #endif
       /*
       if (newrules)
@@ -3984,7 +3996,8 @@ ideal sba (ideal F0, ideal Q,intvec *w,bigintmat *hilb,kStrategy strat)
         loop
         {
           if (j>=k) break;
-          clearS(strat->S[j].p,strat->S[j].sev,&k,&j,strat);
+          auto sit_j = strat->S.iterator_at(j);
+          clearS(sit_j->p,sit_j->sev,&k,&j,strat);
           j++;
         }
         k++;
@@ -4005,8 +4018,7 @@ ideal sba (ideal F0, ideal Q,intvec *w,bigintmat *hilb,kStrategy strat)
       {
         strat->completeReduce_retry=FALSE;
         cleanT(strat);strat->tailRing=currRing;
-        int i;
-        for(i=strat->S.size()-1;i>=0;i--) strat->S[i].s_2_r=-1;
+        for(auto sit=strat->S.begin(); sit!=strat->S.end(); ++sit) sit->s_2_r=-1;
         completeReduce(strat);
       }
       if (strat->completeReduce_retry)
@@ -4066,9 +4078,10 @@ ideal sba (ideal F0, ideal Q,intvec *w,bigintmat *hilb,kStrategy strat)
   {
     for(k=strat->S.size()-1;k>=0;k--)
     {
-      printf("\nsig[%i] = ",i);pWrite(strat->S[k].sig);
-      if(strat->S[k].sig == NULL)
-        strat->S[k].sig = pCopy(strat->S[k-1].sig);
+      auto sit_k = strat->S.iterator_at(k);
+      printf("\nsig[%i] = ",i);pWrite(sit_k->sig);
+      if(sit_k->sig == NULL)
+        sit_k->sig = pCopy(strat->S.iterator_at(k-1)->sig);
     }
   }
   #endif
@@ -4679,8 +4692,9 @@ void f5c (kStrategy strat, int& olddeg, int& minimcnt, int& hilbeledeg,
 //#if 1
 #ifdef DEBUGF5
         PrintS("ELEMENT ADDED TO GCURR DURING INTERRED: ");
-        pWrite(pHead(strat->S[strat->S.size()-1].p));
-        pWrite(strat->S[strat->S.size()-1].sig);
+        { auto sit_last = strat->S.iterator_at(strat->S.size()-1);
+        pWrite(pHead(sit_last->p));
+        pWrite(sit_last->sig); }
 #endif
         if (hilb!=NULL) khCheck(Q,w,hilb,hilbeledeg,hilbcount,strat);
       }
@@ -4711,8 +4725,9 @@ void f5c (kStrategy strat, int& olddeg, int& minimcnt, int& hilbeledeg,
     strat->T[cc].sig        = pOne();
     p_SetComp(strat->T[cc].sig,cc+1,currRing);
     strat->T[cc].sevSig     = pGetShortExpVector(strat->T[cc].sig);
-    strat->S[cc].sig          = strat->T[cc].sig;
-    strat->S[cc].sevSig       = strat->T[cc].sevSig;
+    { auto sit_cc = strat->S.iterator_at(cc);
+    sit_cc->sig          = strat->T[cc].sig;
+    sit_cc->sevSig       = strat->T[cc].sevSig; }
     strat->T[cc].is_sigsafe = TRUE;
     cc++;
   }
@@ -4726,12 +4741,13 @@ void f5c (kStrategy strat, int& olddeg, int& minimcnt, int& hilbeledeg,
     p_SetComp(Lp.sig,cc+1,currRing);
     cc++;
   }
+  // Note: this loop body never executes (cc starts at size())
   for (cc=strat->S.size(); cc<strat->S.size(); ++cc)
-    strat->S[cc].p  = NULL;
+    strat->S.iterator_at(cc)->p  = NULL;
   #if 0
   printf("\nAfter f5c sorting\n");
-  for(int i=0;i < strat->S.size();i++)
-  pWrite(pHead(strat->S[i].p));
+  for(auto sit=strat->S.begin();sit!=strat->S.end();++sit)
+  pWrite(pHead(sit->p));
   getchar();
   #endif
 //#if 1
@@ -4740,8 +4756,9 @@ void f5c (kStrategy strat, int& olddeg, int& minimcnt, int& hilbeledeg,
   cc = 0;
   while (cc<strat->T.size())
   {
-    pWrite(pHead(strat->S[cc].p));
-    pWrite(strat->S[cc].sig);
+    { auto sit_cc = strat->S.iterator_at(cc);
+    pWrite(pHead(sit_cc->p));
+    pWrite(sit_cc->sig); }
     printf("- - - - - -\n");
     cc++;
   }
@@ -5038,17 +5055,18 @@ ideal bbaShift(ideal F, ideal Q,intvec *w,bigintmat *hilb,kStrategy strat)
     {
       for (int k = 0; k < strat->S.size(); ++k)
       {
-        if ((strat->hasFromQ) && (strat->S[k].fromQ)) continue; // do not reduce Q_k
+        auto sit_k = strat->S.iterator_at(k);
+        if ((strat->hasFromQ) && (sit_k->fromQ)) continue; // do not reduce Q_k
         for (int j = 0; j < strat->T.size(); ++j)
         {
           if (strat->T[j].p!=NULL)
           {
             // this is like clearS in bba, but we reduce with elements from T, because it contains the shifts too
             assume(strat->sevT[j] == pGetShortExpVector(strat->T[j].p));
-            assume(strat->S[k].sev == pGetShortExpVector(strat->S[k].p));
-            if (pLmShortDivisibleBy(strat->T[j].p, strat->sevT[j], strat->S[k].p, ~strat->S[k].sev))
+            assume(sit_k->sev == pGetShortExpVector(sit_k->p));
+            if (pLmShortDivisibleBy(strat->T[j].p, strat->sevT[j], sit_k->p, ~sit_k->sev))
             {
-              if (pLmCmp(strat->T[j].p, strat->S[k].p) != 0)
+              if (pLmCmp(strat->T[j].p, sit_k->p) != 0)
               { // check whether LM is different
                 deleteInS(k, strat);
                 --k;
@@ -5074,8 +5092,7 @@ ideal bbaShift(ideal F, ideal Q,intvec *w,bigintmat *hilb,kStrategy strat)
       {
         strat->completeReduce_retry=FALSE;
         cleanT(strat);strat->tailRing=currRing;
-        int i;
-        for(i=strat->S.size()-1;i>=0;i--) strat->S[i].s_2_r=-1;
+        for(auto sit=strat->S.begin(); sit!=strat->S.end(); ++sit) sit->s_2_r=-1;
         WarnS("reduction with S is not yet supported by Letterplace"); // if this ever happens, we'll know
         completeReduce(strat);
       }
@@ -5093,20 +5110,20 @@ ideal bbaShift(ideal F, ideal Q,intvec *w,bigintmat *hilb,kStrategy strat)
   {
     if(rField_is_Z(currRing))
     {
-      for(int i = 0;i < strat->S.size();i++)
+      for(auto sit = strat->S.begin(); sit != strat->S.end(); ++sit)
       {
-        if(!nGreaterZero(pGetCoeff(strat->S[i].p)))
+        if(!nGreaterZero(pGetCoeff(sit->p)))
         {
-          strat->S[i].p = pNeg(strat->S[i].p);
+          sit->p = pNeg(sit->p);
         }
       }
       finalReduceByMon(strat);
       // finalReduceByMon may NULL entries (poly reduced to zero); skip those
-      for(int i = 0;i < strat->S.size();i++)
+      for(auto sit = strat->S.begin(); sit != strat->S.end(); ++sit)
       {
-        if(strat->S[i].p != NULL && !nGreaterZero(pGetCoeff(strat->S[i].p)))
+        if(sit->p != NULL && !nGreaterZero(pGetCoeff(sit->p)))
         {
-          strat->S[i].p = pNeg(strat->S[i].p);
+          sit->p = pNeg(sit->p);
         }
       }
     }
@@ -5125,16 +5142,16 @@ ideal bbaShift(ideal F, ideal Q,intvec *w,bigintmat *hilb,kStrategy strat)
   if ((TEST_OPT_PROT) || (TEST_OPT_DEBUG)) messageStat(hilbcount,strat);
   SI_RESTORE_OPT1(save);
 #ifdef KDEBUG
-  for(int _ii=0; _ii < strat->S.size(); _ii++)
-    if (strat->S[_ii].p != NULL && strat->S[_ii].p->coef == NULL)
-    { fprintf(stderr, "bba BEFORE updateResult: S[%d].p=%p NULL coef! Q=%p\n", _ii, (void*)strat->S[_ii].p, (void*)Q); abort(); }
+  for(auto _sit = strat->S.begin(); _sit != strat->S.end(); ++_sit)
+    if (_sit->p != NULL && _sit->p->coef == NULL)
+    { fprintf(stderr, "bba BEFORE updateResult: S[%d].p=%p NULL coef! Q=%p\n", _sit.index(), (void*)_sit->p, (void*)Q); abort(); }
 #endif
   /* postprocessing for GB over Q-rings ------------------*/
   if ((Q!=NULL)&&(!errorreported)) updateResult(Q,strat);
 #ifdef KDEBUG
-  for(int _ii=0; _ii < strat->S.size(); _ii++)
-    if (strat->S[_ii].p != NULL && strat->S[_ii].p->coef == NULL)
-    { fprintf(stderr, "bba AFTER updateResult: S[%d].p=%p NULL coef! Q=%p\n", _ii, (void*)strat->S[_ii].p, (void*)Q); abort(); }
+  for(auto _sit = strat->S.begin(); _sit != strat->S.end(); ++_sit)
+    if (_sit->p != NULL && _sit->p->coef == NULL)
+    { fprintf(stderr, "bba AFTER updateResult: S[%d].p=%p NULL coef! Q=%p\n", _sit.index(), (void*)_sit->p, (void*)Q); abort(); }
 #endif
 
   return strat->getShdl();
