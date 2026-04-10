@@ -82,7 +82,7 @@ void addLObject(LObject& h, kStrategy& strat)
     pos=0;
 
     if (strat->S.size()-1!=-1) pos = posInS(strat, strat->S.size()-1, h.p, h.ecart);
-    strat->enterS(h, strat, strat->T.size()-1);
+    strat->enterS(h, strat, -1);
 //    enterT(h, strat); // ?!
 
     kDeleteLcm(&h);

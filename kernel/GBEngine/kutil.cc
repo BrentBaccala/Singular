@@ -1952,7 +1952,7 @@ static BOOLEAN enterOneStrongPolySig (const SElement &si_elem,poly p,poly sig,in
         strat->enterS(strat->P, strat, strat->T.size());
         // 0 - add just the original poly causing the sigdrop, 1 - add also this
         #if 1
-        strat->enterS(h, strat, strat->T.size()-1);
+        strat->enterS(h, strat, strat->T.size());
         #endif
         return FALSE;
       }
@@ -3136,7 +3136,7 @@ static void enterOnePairSigRing (const SElement &si, poly p, poly pSig, int, int
         strat->enterS(strat->P, strat, strat->T.size());
         // 0 - add just the original poly causing the sigdrop, 1 - add also this
         #if 1
-        strat->enterS(Lp, strat, strat->T.size()-1);
+        strat->enterS(Lp, strat, strat->T.size());
         #endif
         return;
       }
