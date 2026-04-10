@@ -1733,7 +1733,7 @@ static BOOLEAN enterOneStrongPoly (const SElement &si,poly p,int /*ecart*/, int 
     {
       enterT(h, strat,-1);
       //int pos = posInS(strat,strat->S.size()-1,h.p,h.ecart);
-      //strat->enterS(h, strat, strat->T.size()-1);
+      //strat->enterS(h, strat, strat->T.size()-1, -1);
     }
   }
   return TRUE;
@@ -1922,9 +1922,9 @@ static BOOLEAN enterOneStrongPolySig (const SElement &si_elem,poly p,poly sig,in
       }
       else
       {
-        strat->enterS(strat->P, strat, strat->T.size());
+        strat->enterS(strat->P, strat, strat->T.size(), strat->S.size());
         #if 1
-        strat->enterS(h, strat, strat->T.size()-1);
+        strat->enterS(h, strat, strat->T.size()-1, 0);
         #endif
         return FALSE;
       }
@@ -1949,10 +1949,10 @@ static BOOLEAN enterOneStrongPolySig (const SElement &si_elem,poly p,poly sig,in
       }
       else
       {
-        strat->enterS(strat->P, strat, strat->T.size());
+        strat->enterS(strat->P, strat, strat->T.size(), strat->S.size());
         // 0 - add just the original poly causing the sigdrop, 1 - add also this
         #if 1
-        strat->enterS(h, strat, strat->T.size());
+        strat->enterS(h, strat, strat->T.size(), 0);
         #endif
         return FALSE;
       }
@@ -1962,8 +1962,8 @@ static BOOLEAN enterOneStrongPolySig (const SElement &si_elem,poly p,poly sig,in
   {
     strat->sigdrop = TRUE;
     //Enter this element to S
-    strat->enterS(strat->P, strat, strat->T.size());
-    strat->enterS(h, strat, strat->T.size());
+    strat->enterS(strat->P, strat, strat->T.size(), strat->S.size());
+    strat->enterS(h, strat, strat->T.size(), strat->S.size());
   }
   #if 1
   h.p1 = p;h.p2 = si_elem.p;
@@ -2891,9 +2891,9 @@ static void enterOnePairSigRing (const SElement &si, poly p, poly pSig, int, int
       }
       else
       {
-        strat->enterS(strat->P, strat, strat->T.size());
+        strat->enterS(strat->P, strat, strat->T.size(), strat->S.size());
         #if 1
-        strat->enterS(Lp, strat, strat->T.size()-1);
+        strat->enterS(Lp, strat, strat->T.size()-1, 0);
         #endif
         return;
       }
@@ -3133,10 +3133,10 @@ static void enterOnePairSigRing (const SElement &si, poly p, poly pSig, int, int
       }
       else
       {
-        strat->enterS(strat->P, strat, strat->T.size());
+        strat->enterS(strat->P, strat, strat->T.size(), strat->S.size());
         // 0 - add just the original poly causing the sigdrop, 1 - add also this
         #if 1
-        strat->enterS(Lp, strat, strat->T.size());
+        strat->enterS(Lp, strat, strat->T.size(), 0);
         #endif
         return;
       }
@@ -4442,9 +4442,9 @@ void enterExtendedSpolySig(poly h,poly hSig,kStrategy strat)
         }
         else
         {
-          strat->enterS(strat->P, strat, strat->T.size());
+          strat->enterS(strat->P, strat, strat->T.size(), strat->S.size());
           #if 1
-          strat->enterS(Lp, strat, strat->T.size()-1);
+          strat->enterS(Lp, strat, strat->T.size()-1, 0);
           #endif
         }
         nDelete(&zero);
@@ -7368,7 +7368,7 @@ void initS (ideal F, ideal Q, kStrategy strat)
             pos = posInS(strat,strat->S.size()-1,h.p,h.ecart);
           }
           h.sev = pGetShortExpVector(h.p);
-          strat->enterS(h, strat, -1);
+          strat->enterS(h, strat, -1, -1);
           strat->S.iterator_at(pos)->fromQ=1;
         }
       }
@@ -7402,7 +7402,7 @@ void initS (ideal F, ideal Q, kStrategy strat)
         else
           pos = posInS(strat,strat->S.size()-1,h.p,h.ecart);
         h.sev = pGetShortExpVector(h.p);
-        strat->enterS(h, strat, -1);
+        strat->enterS(h, strat, -1, -1);
       }
     }
   }
@@ -7461,7 +7461,7 @@ void initSL (ideal F, ideal Q,kStrategy strat)
             pos = posInS(strat,strat->S.size()-1,h.p,h.ecart);
           }
           h.sev = pGetShortExpVector(h.p);
-          strat->enterS(h, strat, -1);
+          strat->enterS(h, strat, -1, -1);
           strat->S.iterator_at(pos)->fromQ=1;
         }
         if(errorreported) return;
@@ -7564,7 +7564,7 @@ void initSLSba (ideal F, ideal Q,kStrategy strat)
             pos = posInS(strat,strat->S.size()-1,h.p,h.ecart);
           }
           h.sev = pGetShortExpVector(h.p);
-          strat->enterS(h, strat, -1);
+          strat->enterS(h, strat, -1, -1);
           strat->S.iterator_at(pos)->fromQ=1;
         }
       }
@@ -7861,7 +7861,7 @@ void initSSpecial (ideal F, ideal Q, ideal P,kStrategy strat)
             pos = posInS(strat,strat->S.size()-1,h.p,h.ecart);
           }
           h.sev = pGetShortExpVector(h.p);
-          strat->enterS(h, strat, strat->T.size());
+          strat->enterS(h, strat, strat->T.size(), -1);
           enterT(h, strat);
           strat->S.iterator_at(pos)->fromQ=1;
         }
@@ -7891,7 +7891,7 @@ void initSSpecial (ideal F, ideal Q, ideal P,kStrategy strat)
         else
           pos = posInS(strat,strat->S.size()-1,h.p,h.ecart);
         h.sev = pGetShortExpVector(h.p);
-        strat->enterS(h, strat, strat->T.size());
+        strat->enterS(h, strat, strat->T.size(), -1);
         enterT(h,strat);
       }
     }
@@ -7940,7 +7940,7 @@ void initSSpecial (ideal F, ideal Q, ideal P,kStrategy strat)
           h.SetpFDeg();
           pos = posInS(strat,strat->S.size()-1,h.p,h.ecart);
           enterpairsSpecial(h.p,strat->S.size()-1,h.ecart,pos,strat,strat->T.size());
-          strat->enterS(h, strat, strat->T.size());
+          strat->enterS(h, strat, strat->T.size(), -1);
           enterT(h,strat);
         }
       }
@@ -7948,7 +7948,7 @@ void initSSpecial (ideal F, ideal Q, ideal P,kStrategy strat)
       {
         h.sev = pGetShortExpVector(h.p);
         strat->initEcart(&h);
-        strat->enterS(h, strat, strat->T.size());
+        strat->enterS(h, strat, strat->T.size(), -1);
         enterT(h,strat);
       }
     }
@@ -8004,7 +8004,7 @@ void initSSpecialSba (ideal F, ideal Q, ideal P,kStrategy strat)
             pos = posInS(strat,strat->S.size()-1,h.p,h.ecart);
           }
           h.sev = pGetShortExpVector(h.p);
-          strat->enterS(h, strat, strat->T.size());
+          strat->enterS(h, strat, strat->T.size(), -1);
           enterT(h, strat);
           strat->S.iterator_at(pos)->fromQ=1;
         }
@@ -8034,7 +8034,7 @@ void initSSpecialSba (ideal F, ideal Q, ideal P,kStrategy strat)
         else
           pos = posInS(strat,strat->S.size()-1,h.p,h.ecart);
         h.sev = pGetShortExpVector(h.p);
-        strat->enterS(h, strat, strat->T.size());
+        strat->enterS(h, strat, strat->T.size(), -1);
         enterT(h,strat);
       }
     }
@@ -8083,7 +8083,7 @@ void initSSpecialSba (ideal F, ideal Q, ideal P,kStrategy strat)
           h.SetpFDeg();
           pos = posInS(strat,strat->S.size()-1,h.p,h.ecart);
           enterpairsSpecial(h.p,strat->S.size()-1,h.ecart,pos,strat,strat->T.size());
-          strat->enterS(h, strat, strat->T.size());
+          strat->enterS(h, strat, strat->T.size(), -1);
           enterT(h,strat);
         }
       }
@@ -8091,7 +8091,7 @@ void initSSpecialSba (ideal F, ideal Q, ideal P,kStrategy strat)
       {
         h.sev = pGetShortExpVector(h.p);
         strat->initEcart(&h);
-        strat->enterS(h, strat, strat->T.size());
+        strat->enterS(h, strat, strat->T.size(), -1);
         enterT(h,strat);
       }
     }
@@ -8520,18 +8520,28 @@ ideal skStrategy::getShdl()
 * -puts p to the standardbasis s at position at
 * -saves the result in S
 */
-void enterSBba (LObject &p, kStrategy strat, int atR)
+void enterSBba (LObject &p, kStrategy strat, int atR, int atS)
 {
-  strat->S.enter_bba(p, strat, atR);
+  strat->S.enter_bba(p, strat, atR, atS);
 }
 
 /*2
 * sBasisSet::enter_bba — find sorted position and insert a new basis element.
 * Replaces enterSBba for iterator-based usage.
 */
-void sBasisSet::enter_bba(LObject &p, kStrategy strat, int atR)
+void sBasisSet::enter_bba(LObject &p, kStrategy strat, int atR, int atS)
 {
   strat->news = TRUE;
+  ensure_capacity(size() + 1);
+
+  int pos;
+  if (atS >= 0)
+    pos = atS;
+  else
+  {
+    iterator pos_it = find_pos(strat, p.p, p.ecart);
+    pos = pos_it.pos_;
+  }
 
   SElement sobj;
   sobj.p = p.p;
@@ -8541,19 +8551,18 @@ void sBasisSet::enter_bba(LObject &p, kStrategy strat, int atR)
     assume(p.sev == pGetShortExpVector(p.p));
   sobj.sev = p.sev;
   sobj.ecart = p.ecart;
-  // p.i_r is set by enterT (if called before enterS), or -1 during initS.
   sobj.s_2_r = (atR >= 0) ? atR : p.i_r;
   sobj.length = 0;
   sobj.wlength = 0;
   sobj.fromQ = 0;
 
-  insert(sobj, strat);
+  insert_at(pos, sobj);
 }
 
 #ifdef HAVE_SHIFTBBA
-void enterSBbaShift (LObject &p, kStrategy strat, int atR)
+void enterSBbaShift (LObject &p, kStrategy strat, int atR, int atS)
 {
-  strat->S.enter_bba(p, strat, atR);
+  strat->S.enter_bba(p, strat, atR, atS);
 
   int maxPossibleShift = p_mLPmaxPossibleShift(p.p, strat->tailRing);
   for (int i = maxPossibleShift; i > 0; i--)
@@ -8571,9 +8580,9 @@ void enterSBbaShift (LObject &p, kStrategy strat, int atR)
 * -puts p to the standardbasis s at position at
 * -saves the result in S
 */
-void enterSSba (LObject &p, kStrategy strat, int atR)
+void enterSSba (LObject &p, kStrategy strat, int atR, int atS)
 {
-  strat->S.enter_sba(p, strat, atR);
+  strat->S.enter_sba(p, strat, atR, atS);
 #ifdef DEBUGF5
   int k;
   Print("--- LIST S: %d ---\n",strat->S.size()-1);
@@ -8589,9 +8598,19 @@ void enterSSba (LObject &p, kStrategy strat, int atR)
 * sBasisSet::enter_sba — find sorted position and insert for signature-based algorithms.
 * Replaces enterSSba for iterator-based usage.
 */
-void sBasisSet::enter_sba(LObject &p, kStrategy strat, int atR)
+void sBasisSet::enter_sba(LObject &p, kStrategy strat, int atR, int atS)
 {
   strat->news = TRUE;
+  ensure_capacity(size() + 1);
+
+  int pos;
+  if (atS >= 0)
+    pos = atS;
+  else
+  {
+    iterator pos_it = find_pos(strat, p.p, p.ecart);
+    pos = pos_it.pos_;
+  }
 
   SElement sobj;
   sobj.p = p.p;
@@ -8606,17 +8625,17 @@ void sBasisSet::enter_sba(LObject &p, kStrategy strat, int atR)
   sobj.wlength = 0;
   sobj.fromQ = 0;
 
-  sobj.sig = p.sig;
+  // Original enterSSba inserts FIRST then sets sig/sevSig.
+  insert_at(pos, sobj);
+  elem(pos).sig = p.sig;
   if (p.sig != NULL)
   {
     if (p.sevSig == 0)
       p.sevSig = pGetShortExpVector(p.sig);
     else
       assume(p.sevSig == pGetShortExpVector(p.sig));
-    sobj.sevSig = p.sevSig;
+    elem(pos).sevSig = p.sevSig;
   }
-
-  insert(sobj, strat);
 
 #ifdef DEBUGF5
   int k;
@@ -8707,7 +8726,7 @@ void replaceInLAndSAndT(LObject &p, int tj, kStrategy strat)
     superenterpairs(p.p, strat->S.size()-1, p.ecart, pos, strat, strat->T.size()-1);
   }
   /* enter p to S set */
-  strat->enterS(p, strat, strat->T.size()-1);
+  strat->enterS(p, strat, strat->T.size()-1, -1);
 
 #ifdef HAVE_SHIFTBBA
   /* do this after enterS so that the index in R (which is strat->T.size()-1) is correct */

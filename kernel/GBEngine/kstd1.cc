@@ -1616,9 +1616,9 @@ static void firstUpdate(kStrategy strat)
 *    and cancels units if possible
 *  - reorders s,L
 */
-void enterSMora (LObject &p, kStrategy strat, int atR)
+void enterSMora (LObject &p, kStrategy strat, int atR, int atS)
 {
-  enterSBba(p, strat, atR);
+  enterSBba(p, strat, atR, atS);
   #ifdef KDEBUG
   if (TEST_OPT_DEBUG)
   {
@@ -1671,9 +1671,9 @@ void enterSMora (LObject &p, kStrategy strat, int atR)
 *  if TRUE
 *  - computes noether
 */
-void enterSMoraNF (LObject &p, kStrategy strat, int atR)
+void enterSMoraNF (LObject &p, kStrategy strat, int atR, int atS)
 {
-  enterSBba(p, strat, atR);
+  enterSBba(p, strat, atR, atS);
   if ((!strat->kAllAxis) || (strat->kNoether!=NULL)) HEckeTest(p.p,strat);
   if (strat->kAllAxis)
     newHEdge(strat);
@@ -2037,7 +2037,7 @@ ideal mora (ideal F, ideal Q,intvec *w,bigintmat *hilb,kStrategy strat)
       else
         enterpairs(strat->P.p,strat->S.size()-1,strat->P.ecart,0,strat, strat->T.size()-1);
       // put in S
-      strat->enterS(strat->P, strat, strat->T.size()-1);
+      strat->enterS(strat->P, strat, strat->T.size()-1, -1);
       // apply hilbert criterion
       if (hilb!=NULL)
       {
@@ -3648,7 +3648,7 @@ ideal kInterRedBba (ideal F, ideal Q, int &need_retry)
       {
         enterT(strat->P, strat);
         // posInS only depends on the leading term
-        strat->enterS(strat->P, strat, strat->T.size()-1);
+        strat->enterS(strat->P, strat, strat->T.size()-1, -1);
 
         if (pos<strat->S.size()-1)
         {

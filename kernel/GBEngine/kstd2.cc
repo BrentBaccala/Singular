@@ -1808,7 +1808,7 @@ int redSigRing (LObject* h,kStrategy strat)
           }
           else
           {
-            //strat->enterS(*h, strat, strat->T.size()-1);
+            //strat->enterS(*h, strat, strat->T.size()-1, -1);
             return 0;
           }
         }
@@ -3032,7 +3032,7 @@ ideal bba (ideal F, ideal Q,intvec *w,bigintmat *hilb,kStrategy strat)
         else
           enterpairs(strat->P.p,strat->S.size()-1,strat->P.ecart,pos,strat, strat->T.size()-1);
         // posInS only depends on the leading term
-        strat->enterS(strat->P, strat, strat->T.size()-1);
+        strat->enterS(strat->P, strat, strat->T.size()-1, -1);
 #if 0
         int pl=pLength(strat->P.p);
         if (pl==1)
@@ -3066,7 +3066,7 @@ ideal bba (ideal F, ideal Q,intvec *w,bigintmat *hilb,kStrategy strat)
             superenterpairs(strat->P.p,strat->S.size()-1,strat->P.ecart,pos,strat, strat->T.size()-1);
           else
             enterpairs(strat->P.p,strat->S.size()-1,strat->P.ecart,pos,strat, strat->T.size()-1);
-          strat->enterS(strat->P, strat, strat->T.size()-1);
+          strat->enterS(strat->P, strat, strat->T.size()-1, -1);
         }
       }
     }
@@ -3389,7 +3389,7 @@ ideal sba (ideal F0, ideal Q,intvec *w,bigintmat *hilb,kStrategy strat)
       auto Lp = strat->L.top();
       strat->L.pop();
       enterT(Lp,strat);
-      strat->enterS(Lp, strat, strat->T.size()-1);
+      strat->enterS(Lp, strat, strat->T.size()-1, -1);
     }
     strat->sbaEnterS = -1;
   }
@@ -3565,7 +3565,7 @@ ideal sba (ideal F0, ideal Q,intvec *w,bigintmat *hilb,kStrategy strat)
       }
       else
       {
-        strat->enterS(strat->P, strat, strat->T.size()-1);
+        strat->enterS(strat->P, strat, strat->T.size()-1, -1);
         if (TEST_OPT_PROT)
           PrintS("-");
         break;
@@ -3663,7 +3663,7 @@ ideal sba (ideal F0, ideal Q,intvec *w,bigintmat *hilb,kStrategy strat)
       // Best case scenario: remains the leading term
       if(rField_is_Ring(currRing) && strat->sigdrop)
       {
-        strat->enterS(strat->P, strat, strat->T.size()-1);
+        strat->enterS(strat->P, strat, strat->T.size()-1, -1);
         break;
       }
 #endif
@@ -3682,7 +3682,7 @@ ideal sba (ideal F0, ideal Q,intvec *w,bigintmat *hilb,kStrategy strat)
         }
         else
         {
-          strat->enterS(strat->P, strat, strat->T.size()-1);
+          strat->enterS(strat->P, strat, strat->T.size()-1, -1);
           break;
         }
       }
@@ -3752,7 +3752,7 @@ ideal sba (ideal F0, ideal Q,intvec *w,bigintmat *hilb,kStrategy strat)
         break;
       if(rField_is_Ring(currRing))
         strat->P.sevSig = p_GetShortExpVector(strat->P.sig,currRing);
-      strat->enterS(strat->P, strat, strat->T.size()-1);
+      strat->enterS(strat->P, strat, strat->T.size()-1, strat->S.size());
       if(strat->sbaOrder != 1)
       {
         BOOLEAN overwrite = FALSE;
@@ -4068,7 +4068,7 @@ ideal sba (ideal F0, ideal Q,intvec *w,bigintmat *hilb,kStrategy strat)
     for (auto it=strat->L.begin(); it != strat->L.end() && it->p1 == NULL && it->p2 == NULL; it++)
     {
       //printf("\nAdded k = %i\n",k);
-      strat->enterS(*it, strat, strat->T.size()-1);
+      strat->enterS(*it, strat, strat->T.size()-1, -1);
       //printf("\nThis elements was added from L on pos %i\n",strat->S.size()-1);pWrite(strat->S[strat->S.size()-1].p);pWrite(strat->S[strat->S.size()-1].sig);
     }
   }
@@ -4688,7 +4688,7 @@ void f5c (kStrategy strat, int& olddeg, int& minimcnt, int& hilbeledeg,
       {
         enterT(strat->P, strat);
         // posInS only depends on the leading term
-        strat->enterS(strat->P, strat, strat->T.size()-1);
+        strat->enterS(strat->P, strat, strat->T.size()-1, -1);
 //#if 1
 #ifdef DEBUGF5
         PrintS("ELEMENT ADDED TO GCURR DURING INTERRED: ");
@@ -5009,7 +5009,7 @@ ideal bbaShift(ideal F, ideal Q,intvec *w,bigintmat *hilb,kStrategy strat)
         enterT(strat->P, strat);
         enterpairsShift(strat->P.p,strat->S.size()-1,strat->P.ecart,pos,strat, strat->T.size()-1);
         // posInS only depends on the leading term
-        strat->enterS(strat->P, strat, strat->T.size()-1);
+        strat->enterS(strat->P, strat, strat->T.size()-1, -1);
         if (!strat->rightGB)
           enterTShift(strat->P, strat);
       }
@@ -5030,7 +5030,7 @@ ideal bbaShift(ideal F, ideal Q,intvec *w,bigintmat *hilb,kStrategy strat)
           int pos=posInS(strat,strat->S.size()-1,strat->P.p,strat->P.ecart);
           enterT(strat->P, strat);
           enterpairsShift(strat->P.p,strat->S.size()-1,strat->P.ecart,pos,strat, strat->T.size()-1);
-          strat->enterS(strat->P, strat, strat->T.size()-1);
+          strat->enterS(strat->P, strat, strat->T.size()-1, -1);
           if (!strat->rightGB)
             enterTShift(strat->P,strat);
         }

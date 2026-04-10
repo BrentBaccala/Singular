@@ -82,7 +82,7 @@ void addLObject(LObject& h, kStrategy& strat)
     pos=0;
 
     if (strat->S.size()-1!=-1) pos = posInS(strat, strat->S.size()-1, h.p, h.ecart);
-    strat->enterS(h, strat, -1);
+    strat->enterS(h, strat, -1, -1);
 //    enterT(h, strat); // ?!
 
     kDeleteLcm(&h);
@@ -668,7 +668,7 @@ ideal k_sca_bba (const ideal F, const ideal Q, const intvec */*w*/, const bigint
       enterpairs(strat->P.p,strat->S.size()-1,strat->P.ecart,pos,strat, strat->T.size()-1);
 
       // posInS only depends on the leading term
-      strat->enterS(strat->P, strat, strat->T.size()-1);
+      strat->enterS(strat->P, strat, strat->T.size()-1, -1);
 
 //       if (hilb!=NULL) khCheck(Q,w,hilb,hilbeledeg,hilbcount,strat);
 
@@ -1071,7 +1071,7 @@ ideal k_sca_mora(const ideal F, const ideal Q, const intvec */*w*/, const bigint
       // build new pairs
       enterpairs(strat->P.p,strat->S.size()-1,strat->P.ecart,0,strat, strat->T.size()-1);
       // put in S
-      strat->enterS(strat->P, strat, strat->T.size()-1);
+      strat->enterS(strat->P, strat, strat->T.size()-1, -1);
 
 
       // clear strat->P
