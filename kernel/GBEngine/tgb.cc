@@ -959,7 +959,7 @@ add_to_reductors (slimgb_alg * c, poly h, int len, int ecart,
   }
   wlen_type pq = pQuality (h, c, len);
   i = simple_posInS (c->strat, h, len, pq);
-  c->strat->enterS (P, i, c->strat, -1);
+  c->strat->enterS (P, c->strat, c->strat->T.size()-1);
 
   auto sit = c->strat->S.iterator_at(i);
   sit->length = len;

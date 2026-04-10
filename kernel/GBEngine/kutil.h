@@ -671,18 +671,19 @@ struct SElement {
  * @brief The S-set (standard basis) for Groebner basis computation.
  *
  * Inherits privately from BlockArray<SElement> — all element access is
- * through iterators, not integer indices. Supports two modes:
+ * through iterators, not integer indices.
  *
- *   Normal mode: insert() at a sorted position (shifts elements),
- *                erase() removes and shifts. Like the old S array.
- *
- *   Lazy mode:   insert() appends at end (no sorting, no shifting),
- *                erase() sets the deleted flag (no shifting).
- *                compact() removes deleted entries afterward.
- *
- * The mode is selected with set_lazy(). During the parallel phase,
- * lazy mode ensures elements never move, so concurrent readers are safe.
+ * Ordering modes control insert() and erase() behavior:
+ *   SORDER_STANDARD:  sorted by leading monomial + ecart (posInS).
+ *                     insert() finds position via binary search, shifts.
+ *                     erase() shifts elements down.
+ *   SORDER_MONFIRST:  monomials first, then by degree (posInSMonFirst).
+ *                     Used by sba() over rings.
+ *   SORDER_APPEND:    append at end, no sorting (parallel phase).
+ *                     erase() sets deleted flag (no shifting).
  */
+enum SOrderMode { SORDER_STANDARD, SORDER_MONFIRST, SORDER_APPEND };
+
 class sBasisSet : private BlockArray<SElement> {
 public:
   // --- Iterator (skips deleted entries) ---
@@ -770,10 +771,11 @@ public:
   };
 
   // --- Construction / mode ---
-  sBasisSet() : lazy_(false), live_count_(0), pairtest_any_(false) {}
+  sBasisSet() : order_(SORDER_STANDARD), live_count_(0), pairtest_any_(false) {}
 
-  bool is_lazy() const { return lazy_; }
-  void set_lazy(bool on) { lazy_ = on; }
+  SOrderMode order() const { return order_; }
+  void set_order(SOrderMode m) { order_ = m; }
+  bool is_append_mode() const { return order_ == SORDER_APPEND; }
 
   // --- Iterators ---
   iterator begin() {
@@ -795,21 +797,13 @@ public:
   bool empty() const { return live_count_ == 0; }
 
   // --- Insert ---
-  // Normal mode: insert at pos, shifting elements up.
-  // Lazy mode: append at end (pos ignored).
-  iterator insert(int pos, const SElement& val) {
-    if (lazy_) {
-      BlockArray<SElement>::push_back(val);
-      live_count_++;
-      return iterator(this, count - 1);
-    } else {
-      BlockArray<SElement>::insert(pos, val);
-      live_count_++;
-      return iterator(this, pos);
-    }
-  }
+  // Inserts val at the position determined by the current ordering mode.
+  // SORDER_STANDARD/SORDER_MONFIRST: sorted insert (needs strat for comparison).
+  // SORDER_APPEND: append at end.
+  // Implemented in kutil.cc.
+  iterator insert(const SElement& val, kStrategy strat);
 
-  // Append at end (both modes).
+  // Append at end regardless of mode (used during initialization).
   iterator push_back(const SElement& val) {
     BlockArray<SElement>::push_back(val);
     live_count_++;
@@ -817,10 +811,10 @@ public:
   }
 
   // --- Erase ---
-  // Normal mode: shift elements down.
-  // Lazy mode: set deleted flag.
+  // SORDER_APPEND: set deleted flag (no shifting).
+  // Other modes: shift elements down.
   void erase(iterator it) {
-    if (lazy_) {
+    if (order_ == SORDER_APPEND) {
       elem(it.pos_).deleted = true;
     } else {
       BlockArray<SElement>::erase(it.pos_);
@@ -862,7 +856,7 @@ public:
     }
     count = dst;
     live_count_ = dst;
-    lazy_ = false;
+    order_ = SORDER_STANDARD;
   }
 
   // --- Stable pointer access (valid as long as element exists) ---
@@ -874,16 +868,13 @@ public:
   // Implementations in kutil.cc since they need skStrategy, which is
   // defined after this class.
 
-  // Binary search for sorted insertion position. Returns iterator at
-  // the position where p should be inserted to maintain sort order.
-  iterator find_pos(kStrategy strat, const poly p, int ecart_p);
-
-  // Insert a new basis element (replaces enterSBba).
-  // Finds the sorted position, creates an SElement from p, inserts it.
-  void enter_bba(LObject &p, kStrategy strat);
+  // Insert a new basis element from an LObject (replaces enterSBba).
+  // Builds an SElement, inserts at the position determined by ordering mode.
+  void enter_bba(LObject &p, kStrategy strat, int atR = -1);
 
   // Insert for signature-based algorithms (replaces enterSSba).
-  void enter_sba(LObject &p, kStrategy strat);
+  // Also copies sig and sevSig fields.
+  void enter_sba(LObject &p, kStrategy strat, int atR = -1);
 
   // Delete element at iterator and update related structures.
   // In non-lazy mode, shifts elements down (like old deleteInS).
@@ -919,9 +910,22 @@ public:
   const_iterator const_iterator_at(int i) const { return const_iterator(this, i); }
 
 private:
-  bool lazy_;
+  SOrderMode order_;
   int live_count_;
   bool pairtest_any_;  // sentinel: true if any SElement.pairtest was set
+
+  // Internal: insert at a specific position (for reorder, etc.)
+  iterator insert_at(int pos, const SElement& val) {
+    BlockArray<SElement>::insert(pos, val);
+    live_count_++;
+    return iterator(this, pos);
+  }
+
+  // Internal: binary search for sorted insertion position (posInS).
+  iterator find_pos(kStrategy strat, const poly p, int ecart_p);
+
+  // Internal: binary search for monfirst insertion position (posInSMonFirst).
+  iterator find_pos_monfirst(kStrategy strat, const poly p);
 
   // Internal raw element access (used by iterators and member functions)
   SElement& elem(int i) { return (*static_cast<BlockArray<SElement>*>(this))[i]; }
@@ -943,7 +947,7 @@ public:
   int (*posInT)(const BlockArray<TObject> &T,const int tl,LObject &h) = NULL;
   int (*compareL) (const LObject &lhs, const LObject &rhs, const kStrategy strat) = NULL;
   int (*compareLOld) (const LObject &lhs, const LObject &rhs, const kStrategy strat) = NULL;
-  void (*enterS)(LObject &h, int pos,kStrategy strat, int atR/* =-1*/ ) = NULL;
+  void (*enterS)(LObject &h, kStrategy strat, int atR /*= -1*/) = NULL;
   void (*initEcartPair)(LObject * h, poly f, poly g, int ecartF, int ecartG) = NULL;
   void (*enterOnePair) (const SElement &si,poly p,int ecart, int isFromQ,kStrategy strat, int atR /*= -1*/) = NULL;
   void (*chainCrit) (poly p,int ecart,kStrategy strat) = NULL;
@@ -1089,9 +1093,9 @@ void deleteHC(poly *p, int *e, int *l, kStrategy strat);
 void deleteHC(LObject* L, kStrategy strat, BOOLEAN fromNext = FALSE);
 void deleteInS (int i,kStrategy strat);
 void cleanT (kStrategy strat);
-void enterSBba (LObject &p,int atS,kStrategy strat, int atR = -1);
-void enterSBbaShift (LObject &p,int atS,kStrategy strat, int atR = -1);
-void enterSSba (LObject &p,int atS,kStrategy strat, int atR = -1);
+void enterSBba (LObject &p, kStrategy strat, int atR = -1);
+void enterSBbaShift (LObject &p, kStrategy strat, int atR = -1);
+void enterSSba (LObject &p, kStrategy strat, int atR = -1);
 void initEcartPairBba (LObject* Lp,poly f,poly g,int ecartF,int ecartG);
 void initEcartPairMora (LObject* Lp,poly f,poly g,int ecartF,int ecartG);
 int posInS (const kStrategy strat, const int length, const poly p,
@@ -1300,8 +1304,8 @@ BOOLEAN kTest_S(kStrategy strat);
  ***************************************************************/
 int redFirst (LObject* h,kStrategy strat);
 int redEcart (LObject* h,kStrategy strat);
-void enterSMora (LObject &p,int atS,kStrategy strat, int atR=-1);
-void enterSMoraNF (LObject &p,int atS,kStrategy strat, int atR=-1);
+void enterSMora (LObject &p, kStrategy strat, int atR = -1);
+void enterSMoraNF (LObject &p, kStrategy strat, int atR = -1);
 
 
 /***************************************************************

@@ -538,7 +538,7 @@ static void process_survivor(SweepContext *ctx, ActivePoly *ap)
     else
       enterpairs(ap->P.p, strat->S.size()-1, ap->P.ecart, pos, strat, strat->T.size()-1);
 
-    strat->enterS(ap->P, pos, strat, strat->T.size()-1);
+    strat->enterS(ap->P, strat, strat->T.size()-1);
   }
 
   kDeleteLcm(&ap->P);
