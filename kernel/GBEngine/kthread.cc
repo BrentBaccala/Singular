@@ -931,11 +931,22 @@ parallel_cleanup:
   if (TEST_OPT_PROT)
   {
     Print("\n// parallel bba: polys=%ld, reductions=%ld, zeros=%ld, "
-          "survivors=%ld, threads=%d (workers=%d)\n",
+          "survivors=%ld, max_queue_depth=%ld, threads=%d (workers=%d)\n",
           ctx->stat_rounds.load(),
           ctx->stat_reductions.load(),
           ctx->stat_zeros.load(),
           ctx->stat_survivors.load(),
+          ctx->stat_max_queue_depth.load(),
           nthreads, ctx->num_workers);
+  }
+
+  // Emit diagnostic queue depth to stderr if requested.
+  if (getenv("SINGULAR_DRAIN_DEPTH_LOG") != NULL)
+  {
+    fprintf(stderr,
+            "[parallel-bba] survivors=%ld max_queue_depth=%ld rounds=%ld\n",
+            ctx->stat_survivors.load(),
+            ctx->stat_max_queue_depth.load(),
+            ctx->stat_rounds.load());
   }
 }
