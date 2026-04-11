@@ -18,6 +18,93 @@
 #include <pthread.h>
 #include <atomic>
 #include <deque>
+#include <vector>
+
+/* ------------------------------------------------------------------ */
+/*  Instrumentation (task 482)                                         */
+/*  Compile-time flag KTHREAD_INSTRUMENT enables measurement code.     */
+/*  At runtime, SINGULAR_KTHREAD_STATS=1 must be set to actually       */
+/*  emit output. When the flag is off, all instrumentation is stubbed  */
+/*  out at zero overhead.                                              */
+/* ------------------------------------------------------------------ */
+#ifdef KTHREAD_INSTRUMENT
+#include <time.h>
+static inline long kt_now_ns()
+{
+  struct timespec ts;
+  clock_gettime(CLOCK_MONOTONIC, &ts);
+  return (long)ts.tv_sec * 1000000000L + (long)ts.tv_nsec;
+}
+
+/**
+ * Per-thread instrumentation accumulators. One per thread, zero
+ * locking needed since each thread writes only its own slot.
+ */
+struct ThreadStats
+{
+  long wait_B0_ns;          // cumulative ns waiting at B0 barrier
+  long wait_B1_ns;          // cumulative ns waiting at B1 barrier
+  long wait_B0_count;       // number of B0 waits
+  long wait_B1_count;       // number of B1 waits
+  long wait_B0_max_ns;      // single longest B0 wait
+  long wait_B1_max_ns;      // single longest B1 wait
+
+  long sweep_ns;            // cumulative ns inside sweep_phase
+  long sweep_count;         // number of sweep_phase calls
+  long reduce_ns;           // cumulative ns inside reduce_slot_from_sweep
+  long reduce_count;        // number of reduce_slot_from_sweep calls
+
+  long drain_ns;            // cumulative ns inside drain_survivor_queue_locked
+  long drain_count;         // number of drain calls (not survivors)
+  long drain_survivors;     // total survivors processed on this thread
+
+  long L_lock_wait_ns;      // cumulative ns waiting for L_lock
+  long L_lock_count;        // number of L_lock acquisitions
+
+  long surv_q_wait_ns;      // cumulative ns waiting for survivor_queue_mutex
+  long surv_q_count;        // survivor queue mutex acquisitions
+
+  long enterpairs_trylock_count;   // number of trylock attempts
+  long enterpairs_trylock_fail;    // number of failed trylocks
+
+  // process_survivor internal breakdown
+  long ps_redtail_ns;       // ns inside redtailBba
+  long ps_enterT_ns;        // ns inside enterT
+  long ps_enterpairs_ns;    // ns inside enterpairs/superenterpairs
+  long ps_enterS_ns;        // ns inside strat->enterS
+  long ps_other_ns;         // remainder of process_survivor
+
+  long round_start_ns;      // timestamp at start of current round
+};
+
+/**
+ * Per-round event record.
+ */
+struct RoundRecord
+{
+  long round_id;
+  long timestamp_ns;
+  int queue_depth_start;    // depth when round began
+  int queue_depth_end;      // depth after survivors added at round end
+  int active_slots;         // active slots at round start
+  int reductions;           // reductions applied this round
+  long min_reduce_ns;       // min single-reduce duration this round
+  long max_reduce_ns;       // max single-reduce duration this round
+  long sum_reduce_ns;       // sum of all reduce durations
+  long sweep_ns_main;       // main thread sweep duration this round
+  long round_total_ns;      // wall-clock duration of this round
+};
+
+/**
+ * Per-reduce event (transient, only collected per-round and summarized).
+ */
+struct ReduceEvent
+{
+  int thread_id;
+  long start_ns;
+  long duration_ns;
+};
+#endif  // KTHREAD_INSTRUMENT
 
 /**
  * Per-thread, per-slot sweep result — avoids contention on shared fields.
@@ -120,6 +207,17 @@ struct SweepContext
 
   // Max survivor queue depth observed (for diagnostics).
   std::atomic<long> stat_max_queue_depth;
+
+#ifdef KTHREAD_INSTRUMENT
+  // ---- Instrumentation (task 482) ---------------------------------
+  bool stats_enabled;           // runtime toggle (SINGULAR_KTHREAD_STATS)
+  ThreadStats *tstats;          // [num_workers+1]
+  std::vector<RoundRecord> *rounds;
+  std::vector<ReduceEvent> *reduces_this_round;
+  pthread_mutex_t stats_lock;   // protects rounds / reduces_this_round
+  long start_ns;                // t0 of bba_parallel_loop
+  const char *workload_tag;     // optional label
+#endif
 };
 
 /* Public API */

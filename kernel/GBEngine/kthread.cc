@@ -42,6 +42,104 @@
 #include <cstring>
 
 /* ------------------------------------------------------------------ */
+/*  Instrumentation helpers (task 482)                                 */
+/* ------------------------------------------------------------------ */
+#ifdef KTHREAD_INSTRUMENT
+#  define KT_STATS(ctx)       ((ctx)->stats_enabled)
+#  define KT_TS(ctx, tid)     ((ctx)->tstats[tid])
+#  define KT_TIME_START(var)  long var = kt_now_ns()
+#  define KT_TIME_DELTA(var)  (kt_now_ns() - (var))
+
+static inline void kt_barrier_wait_B0(SweepContext *ctx, int thread_id)
+{
+  if (KT_STATS(ctx))
+  {
+    long t0 = kt_now_ns();
+    pthread_barrier_wait(&ctx->barrier_B0);
+    long dt = kt_now_ns() - t0;
+    ThreadStats &ts = KT_TS(ctx, thread_id);
+    ts.wait_B0_ns += dt;
+    ts.wait_B0_count++;
+    if (dt > ts.wait_B0_max_ns) ts.wait_B0_max_ns = dt;
+  }
+  else
+  {
+    pthread_barrier_wait(&ctx->barrier_B0);
+  }
+}
+
+static inline void kt_barrier_wait_B1(SweepContext *ctx, int thread_id)
+{
+  if (KT_STATS(ctx))
+  {
+    long t0 = kt_now_ns();
+    pthread_barrier_wait(&ctx->barrier_B1);
+    long dt = kt_now_ns() - t0;
+    ThreadStats &ts = KT_TS(ctx, thread_id);
+    ts.wait_B1_ns += dt;
+    ts.wait_B1_count++;
+    if (dt > ts.wait_B1_max_ns) ts.wait_B1_max_ns = dt;
+  }
+  else
+  {
+    pthread_barrier_wait(&ctx->barrier_B1);
+  }
+}
+
+static inline void kt_L_lock(SweepContext *ctx, int thread_id)
+{
+  if (KT_STATS(ctx))
+  {
+    long t0 = kt_now_ns();
+    pthread_mutex_lock(&ctx->L_lock);
+    long dt = kt_now_ns() - t0;
+    ThreadStats &ts = KT_TS(ctx, thread_id);
+    ts.L_lock_wait_ns += dt;
+    ts.L_lock_count++;
+  }
+  else
+  {
+    pthread_mutex_lock(&ctx->L_lock);
+  }
+}
+
+static inline void kt_surv_q_lock(SweepContext *ctx, int thread_id)
+{
+  if (KT_STATS(ctx))
+  {
+    long t0 = kt_now_ns();
+    pthread_mutex_lock(&ctx->survivor_queue_mutex);
+    long dt = kt_now_ns() - t0;
+    ThreadStats &ts = KT_TS(ctx, thread_id);
+    ts.surv_q_wait_ns += dt;
+    ts.surv_q_count++;
+  }
+  else
+  {
+    pthread_mutex_lock(&ctx->survivor_queue_mutex);
+  }
+}
+
+static inline void kt_record_reduce(SweepContext *ctx, int thread_id, long start_ns, long duration_ns)
+{
+  if (!KT_STATS(ctx)) return;
+  pthread_mutex_lock(&ctx->stats_lock);
+  ReduceEvent ev = { thread_id, start_ns, duration_ns };
+  ctx->reduces_this_round->push_back(ev);
+  pthread_mutex_unlock(&ctx->stats_lock);
+}
+#else
+#  define KT_STATS(ctx)       (false)
+#  define KT_TIME_START(var)  ((void)0)
+#  define KT_TIME_DELTA(var)  (0L)
+static inline void kt_barrier_wait_B0(SweepContext *ctx, int /*tid*/) { pthread_barrier_wait(&ctx->barrier_B0); }
+static inline void kt_barrier_wait_B1(SweepContext *ctx, int /*tid*/) { pthread_barrier_wait(&ctx->barrier_B1); }
+static inline void kt_L_lock(SweepContext *ctx, int /*tid*/) { pthread_mutex_lock(&ctx->L_lock); }
+static inline void kt_surv_q_lock(SweepContext *ctx, int /*tid*/) { pthread_mutex_lock(&ctx->survivor_queue_mutex); }
+static inline void kt_record_reduce(SweepContext*, int, long, long) {}
+#endif
+
+/* ------------------------------------------------------------------ */
 /*  posInT override: always append at end during parallel mode         */
 /* ------------------------------------------------------------------ */
 
@@ -136,6 +234,18 @@ SweepContext *sweep_context_init(kStrategy strat, int nthreads)
   ctx->enterpairs_active.store(false, std::memory_order_relaxed);
   ctx->stat_max_queue_depth.store(0, std::memory_order_relaxed);
 
+#ifdef KTHREAD_INSTRUMENT
+  ctx->stats_enabled = (getenv("SINGULAR_KTHREAD_STATS") != NULL);
+  int total_tt = ctx->num_workers + 1;
+  ctx->tstats = (ThreadStats *)calloc(total_tt, sizeof(ThreadStats));
+  ctx->rounds = new std::vector<RoundRecord>();
+  ctx->reduces_this_round = new std::vector<ReduceEvent>();
+  pthread_mutex_init(&ctx->stats_lock, NULL);
+  ctx->start_ns = 0;
+  ctx->workload_tag = getenv("SINGULAR_KTHREAD_TAG");
+  if (ctx->workload_tag == NULL) ctx->workload_tag = "unknown";
+#endif
+
   return ctx;
 }
 
@@ -154,6 +264,12 @@ void sweep_context_destroy(SweepContext *ctx)
   free(ctx->sweep_results);
   free(ctx->threads);
   free(ctx->thread_ids);
+#ifdef KTHREAD_INSTRUMENT
+  free(ctx->tstats);
+  delete ctx->rounds;
+  delete ctx->reduces_this_round;
+  pthread_mutex_destroy(&ctx->stats_lock);
+#endif
   free(ctx);
 }
 
@@ -361,10 +477,11 @@ static void reset_sweep_results(SweepContext *ctx)
 /*  Called by worker threads in parallel (one slot per thread).        */
 /* ------------------------------------------------------------------ */
 
-static void reduce_slot_from_sweep(SweepContext *ctx, int slot)
+static void reduce_slot_from_sweep(SweepContext *ctx, int slot, int thread_id)
 {
   kStrategy strat = ctx->strat;
   ActivePoly *ap = &ctx->active[slot];
+  (void)thread_id;  // used only by instrumentation wrapper
 
   int best = (ap->best_good >= 0) ? ap->best_good : ap->best_reducer;
 
@@ -451,7 +568,7 @@ static void reduce_slot_from_sweep(SweepContext *ctx, int slot)
 /*  Parallel reduce phase: threads grab slots via atomic counter.      */
 /* ------------------------------------------------------------------ */
 
-static void reduce_phase_parallel(SweepContext *ctx)
+static void reduce_phase_parallel(SweepContext *ctx, int thread_id)
 {
   while (true)
   {
@@ -462,7 +579,20 @@ static void reduce_phase_parallel(SweepContext *ctx)
     if (!ap->occupied) continue;
     if (ap->is_survivor) continue;
 
-    reduce_slot_from_sweep(ctx, s);
+#ifdef KTHREAD_INSTRUMENT
+    long rstart = kt_now_ns();
+    reduce_slot_from_sweep(ctx, s, thread_id);
+    long rdur = kt_now_ns() - rstart;
+    if (KT_STATS(ctx))
+    {
+      ThreadStats &ts = KT_TS(ctx, thread_id);
+      ts.reduce_ns += rdur;
+      ts.reduce_count++;
+      kt_record_reduce(ctx, thread_id, rstart - ctx->start_ns, rdur);
+    }
+#else
+    reduce_slot_from_sweep(ctx, s, thread_id);
+#endif
   }
 }
 
@@ -484,7 +614,7 @@ static int fill_active_slots(SweepContext *ctx)
     }
 
     // Try to fill this empty slot from L
-    pthread_mutex_lock(&ctx->L_lock);
+    kt_L_lock(ctx, 0);
     BOOLEAN got = pop_and_prepare(ctx, &ctx->active[s]);
     pthread_mutex_unlock(&ctx->L_lock);
 
@@ -510,10 +640,19 @@ static int fill_active_slots(SweepContext *ctx)
 /*  independently.                                                     */
 /* ------------------------------------------------------------------ */
 
-static void process_survivor_lobject(SweepContext *ctx, LObject *P)
+static void process_survivor_lobject(SweepContext *ctx, LObject *P, int thread_id)
 {
   kStrategy strat = ctx->strat;
   BOOLEAN withT = ctx->withT;
+  (void)thread_id;
+
+#ifdef KTHREAD_INSTRUMENT
+  long ps_t0 = KT_STATS(ctx) ? kt_now_ns() : 0;
+  long redtail_accum = 0;
+  long enterT_accum = 0;
+  long enterpairs_accum = 0;
+  long enterS_accum = 0;
+#endif
 
   P->GetP(strat->lmBin);
   if (strat->homog) strat->initEcart(P);
@@ -532,8 +671,14 @@ static void process_survivor_lobject(SweepContext *ctx, LObject *P)
     P->pCleardenom();
     if ((TEST_OPT_REDSB) || (TEST_OPT_REDTAIL))
     {
+#ifdef KTHREAD_INSTRUMENT
+      long rt0 = KT_STATS(ctx) ? kt_now_ns() : 0;
+#endif
       P->p = redtailBba(P, pos - 1, strat, withT,
                         !TEST_OPT_CONTENTSB);
+#ifdef KTHREAD_INSTRUMENT
+      if (KT_STATS(ctx)) redtail_accum += kt_now_ns() - rt0;
+#endif
       P->pCleardenom();
       if (strat->redTailChange) P->t_p = NULL;
     }
@@ -543,7 +688,13 @@ static void process_survivor_lobject(SweepContext *ctx, LObject *P)
     P->pNorm();
     if ((TEST_OPT_REDSB) || (TEST_OPT_REDTAIL))
     {
+#ifdef KTHREAD_INSTRUMENT
+      long rt0 = KT_STATS(ctx) ? kt_now_ns() : 0;
+#endif
       P->p = redtailBba(P, pos - 1, strat, withT);
+#ifdef KTHREAD_INSTRUMENT
+      if (KT_STATS(ctx)) redtail_accum += kt_now_ns() - rt0;
+#endif
       if (strat->redTailChange) P->t_p = NULL;
     }
   }
@@ -551,20 +702,49 @@ static void process_survivor_lobject(SweepContext *ctx, LObject *P)
   if ((!TEST_OPT_IDLIFT) || (pGetComp(P->p) <= strat->syzComp))
   {
     P->SetShortExpVector();
+#ifdef KTHREAD_INSTRUMENT
+    long et0 = KT_STATS(ctx) ? kt_now_ns() : 0;
+#endif
     enterT(*P, strat);
+#ifdef KTHREAD_INSTRUMENT
+    if (KT_STATS(ctx)) enterT_accum += kt_now_ns() - et0;
+    long ep0 = KT_STATS(ctx) ? kt_now_ns() : 0;
+#endif
 
     if (rField_is_Ring(currRing))
       superenterpairs(P->p, strat->S.size()-1, P->ecart, pos, strat, strat->T.size()-1);
     else
       enterpairs(P->p, strat->S.size()-1, P->ecart, pos, strat, strat->T.size()-1);
 
+#ifdef KTHREAD_INSTRUMENT
+    if (KT_STATS(ctx)) enterpairs_accum += kt_now_ns() - ep0;
+    long es0 = KT_STATS(ctx) ? kt_now_ns() : 0;
+#endif
     strat->enterS(*P, strat, strat->T.size()-1, -1);
+#ifdef KTHREAD_INSTRUMENT
+    if (KT_STATS(ctx)) enterS_accum += kt_now_ns() - es0;
+#endif
   }
 
   kDeleteLcm(P);
   ctx->stat_survivors.fetch_add(1, std::memory_order_relaxed);
 
   P->Init();
+
+#ifdef KTHREAD_INSTRUMENT
+  if (KT_STATS(ctx))
+  {
+    long ps_total = kt_now_ns() - ps_t0;
+    ThreadStats &ts = KT_TS(ctx, thread_id);
+    ts.ps_redtail_ns += redtail_accum;
+    ts.ps_enterT_ns += enterT_accum;
+    ts.ps_enterpairs_ns += enterpairs_accum;
+    ts.ps_enterS_ns += enterS_accum;
+    long accounted = redtail_accum + enterT_accum + enterpairs_accum + enterS_accum;
+    ts.ps_other_ns += (ps_total - accounted);
+    ts.drain_survivors++;
+  }
+#endif
 }
 
 /* ------------------------------------------------------------------ */
@@ -576,7 +756,7 @@ static void process_survivor_lobject(SweepContext *ctx, LObject *P)
 
 static void queue_survivor(SweepContext *ctx, ActivePoly *ap)
 {
-  pthread_mutex_lock(&ctx->survivor_queue_mutex);
+  kt_surv_q_lock(ctx, 0);
   ctx->survivor_queue->push_back(ap->P);
   long depth = (long)ctx->survivor_queue->size();
   long prev = ctx->stat_max_queue_depth.load(std::memory_order_relaxed);
@@ -604,13 +784,16 @@ static void queue_survivor(SweepContext *ctx, ActivePoly *ap)
 /*  not itself thread-safe, so we cannot release L_lock between pops). */
 /* ------------------------------------------------------------------ */
 
-static void drain_survivor_queue_locked(SweepContext *ctx)
+static void drain_survivor_queue_locked(SweepContext *ctx, int thread_id)
 {
-  pthread_mutex_lock(&ctx->L_lock);
+#ifdef KTHREAD_INSTRUMENT
+  long drain_t0 = KT_STATS(ctx) ? kt_now_ns() : 0;
+#endif
+  kt_L_lock(ctx, thread_id);
   while (true)
   {
     LObject P;
-    pthread_mutex_lock(&ctx->survivor_queue_mutex);
+    kt_surv_q_lock(ctx, thread_id);
     if (ctx->survivor_queue->empty())
     {
       pthread_mutex_unlock(&ctx->survivor_queue_mutex);
@@ -620,9 +803,18 @@ static void drain_survivor_queue_locked(SweepContext *ctx)
     ctx->survivor_queue->pop_front();
     pthread_mutex_unlock(&ctx->survivor_queue_mutex);
 
-    process_survivor_lobject(ctx, &P);
+    process_survivor_lobject(ctx, &P, thread_id);
   }
   pthread_mutex_unlock(&ctx->L_lock);
+#ifdef KTHREAD_INSTRUMENT
+  if (KT_STATS(ctx))
+  {
+    long dt = kt_now_ns() - drain_t0;
+    ThreadStats &ts = KT_TS(ctx, thread_id);
+    ts.drain_ns += dt;
+    ts.drain_count++;
+  }
+#endif
 }
 
 /* (batch_reduce removed — replaced by cooperative sweep_phase) */
@@ -670,7 +862,7 @@ static void *worker_thread(void *arg)
   while (true)
   {
     // Wait for main to signal start of batch (or done)
-    pthread_barrier_wait(&ctx->barrier_B0);
+    kt_barrier_wait_B0(ctx, thread_id);
     if (ctx->done.load(std::memory_order_acquire)) break;
 
     // Phase 1: cooperative sweep
@@ -688,32 +880,55 @@ static void *worker_thread(void *arg)
     // drain exceeds sweep time, the other workers wait at B1 — the
     // round takes max(sweep_time, drain_time), no deadlock.
     bool did_drain = false;
+#ifdef KTHREAD_INSTRUMENT
+    if (KT_STATS(ctx))
+      KT_TS(ctx, thread_id).enterpairs_trylock_count++;
+#endif
     if (pthread_mutex_trylock(&ctx->enterpairs_mutex) == 0)
     {
       ctx->enterpairs_active.store(true, std::memory_order_release);
-      drain_survivor_queue_locked(ctx);
+      drain_survivor_queue_locked(ctx, thread_id);
       ctx->enterpairs_active.store(false, std::memory_order_release);
       pthread_mutex_unlock(&ctx->enterpairs_mutex);
 
       // Wake main thread if it is waiting on CV for L to refill /
       // for enterpairs to finish.
-      pthread_mutex_lock(&ctx->L_lock);
+      kt_L_lock(ctx, thread_id);
       pthread_cond_broadcast(&ctx->pairs_available);
       pthread_mutex_unlock(&ctx->L_lock);
       did_drain = true;
     }
+#ifdef KTHREAD_INSTRUMENT
+    else if (KT_STATS(ctx))
+    {
+      KT_TS(ctx, thread_id).enterpairs_trylock_fail++;
+    }
+#endif
 
     if (!did_drain)
+    {
+#ifdef KTHREAD_INSTRUMENT
+      long sw_t0 = KT_STATS(ctx) ? kt_now_ns() : 0;
       sweep_phase(ctx, thread_id);
-    pthread_barrier_wait(&ctx->barrier_B1);
+      if (KT_STATS(ctx))
+      {
+        ThreadStats &ts = KT_TS(ctx, thread_id);
+        ts.sweep_ns += kt_now_ns() - sw_t0;
+        ts.sweep_count++;
+      }
+#else
+      sweep_phase(ctx, thread_id);
+#endif
+    }
+    kt_barrier_wait_B1(ctx, thread_id);
 
     // Phase 2: parallel reduction (main merges first, then signals)
     // Workers wait at B0 for main to finish merge, then reduce
-    pthread_barrier_wait(&ctx->barrier_B0);
+    kt_barrier_wait_B0(ctx, thread_id);
     if (ctx->done.load(std::memory_order_acquire)) break;
 
-    reduce_phase_parallel(ctx);
-    pthread_barrier_wait(&ctx->barrier_B1);
+    reduce_phase_parallel(ctx, thread_id);
+    kt_barrier_wait_B1(ctx, thread_id);
 
     // Main processes survivors between B1 and next B0
   }
@@ -748,6 +963,17 @@ void bba_parallel_loop(SweepContext *ctx)
   ctx->saved_si_opt_2 = si_opt_2 & ~Sy_bit(OPT_PROT);
 
   ctx->done.store(false, std::memory_order_release);
+
+#ifdef KTHREAD_INSTRUMENT
+  if (KT_STATS(ctx))
+  {
+    ctx->start_ns = kt_now_ns();
+    int tt = ctx->num_workers + 1;
+    for (int i = 0; i < tt; i++)
+      memset(&ctx->tstats[i], 0, sizeof(ThreadStats));
+    ctx->rounds->clear();
+  }
+#endif
 
   for (int t = 0; t < ctx->num_workers; t++)
   {
@@ -818,14 +1044,14 @@ void bba_parallel_loop(SweepContext *ctx)
       // enterpairs_mutex to serialize with any worker drainer.
       bool drained_something = false;
       {
-        pthread_mutex_lock(&ctx->survivor_queue_mutex);
+        kt_surv_q_lock(ctx, 0);
         bool queue_empty = ctx->survivor_queue->empty();
         pthread_mutex_unlock(&ctx->survivor_queue_mutex);
         if (!queue_empty)
         {
           pthread_mutex_lock(&ctx->enterpairs_mutex);
           ctx->enterpairs_active.store(true, std::memory_order_release);
-          drain_survivor_queue_locked(ctx);
+          drain_survivor_queue_locked(ctx, 0);
           ctx->enterpairs_active.store(false, std::memory_order_release);
           pthread_mutex_unlock(&ctx->enterpairs_mutex);
           drained_something = true;
@@ -856,15 +1082,42 @@ void bba_parallel_loop(SweepContext *ctx)
     reset_sweep_results(ctx);
     ctx->sweep_cursor.store(0, std::memory_order_relaxed);
 
+#ifdef KTHREAD_INSTRUMENT
+    long round_t0 = 0;
+    int depth_start = 0;
+    if (KT_STATS(ctx))
+    {
+      round_t0 = kt_now_ns();
+      pthread_mutex_lock(&ctx->survivor_queue_mutex);
+      depth_start = (int)ctx->survivor_queue->size();
+      pthread_mutex_unlock(&ctx->survivor_queue_mutex);
+      pthread_mutex_lock(&ctx->stats_lock);
+      ctx->reduces_this_round->clear();
+      pthread_mutex_unlock(&ctx->stats_lock);
+    }
+#endif
+
     // B0: signal start of sweep (workers are waiting here)
     if (ctx->num_workers > 0)
-      pthread_barrier_wait(&ctx->barrier_B0);
+      kt_barrier_wait_B0(ctx, 0);
 
     // Phase 1: cooperative sweep — all threads scan T for active polys
+#ifdef KTHREAD_INSTRUMENT
+    long sw_t0 = KT_STATS(ctx) ? kt_now_ns() : 0;
     sweep_phase(ctx, 0);
+    long main_sweep_ns = 0;
+    if (KT_STATS(ctx))
+    {
+      main_sweep_ns = kt_now_ns() - sw_t0;
+      KT_TS(ctx, 0).sweep_ns += main_sweep_ns;
+      KT_TS(ctx, 0).sweep_count++;
+    }
+#else
+    sweep_phase(ctx, 0);
+#endif
 
     // B1: sweep done
-    pthread_barrier_wait(&ctx->barrier_B1);
+    kt_barrier_wait_B1(ctx, 0);
 
     // Merge per-thread sweep results into per-slot best reducer
     merge_sweep_results(ctx);
@@ -874,15 +1127,15 @@ void bba_parallel_loop(SweepContext *ctx)
 
     // B0: signal start of reduction phase (workers waiting)
     if (ctx->num_workers > 0)
-      pthread_barrier_wait(&ctx->barrier_B0);
+      kt_barrier_wait_B0(ctx, 0);
 
     // Phase 2: parallel reduction — each thread grabs a slot and applies
     // ONE ksReducePoly step. Slots that are still non-zero and non-survivor
     // stay active and will be swept again on the next round.
-    reduce_phase_parallel(ctx);
+    reduce_phase_parallel(ctx, 0);
 
     // B1: reduction done
-    pthread_barrier_wait(&ctx->barrier_B1);
+    kt_barrier_wait_B1(ctx, 0);
 
     if (strat->overflow || errorreported)
     {
@@ -900,6 +1153,36 @@ void bba_parallel_loop(SweepContext *ctx)
       if (ctx->active[i].occupied && ctx->active[i].is_survivor)
         queue_survivor(ctx, &ctx->active[i]);
     }
+
+#ifdef KTHREAD_INSTRUMENT
+    if (KT_STATS(ctx))
+    {
+      RoundRecord rr;
+      rr.round_id = (long)ctx->rounds->size();
+      rr.timestamp_ns = round_t0 - ctx->start_ns;
+      rr.queue_depth_start = depth_start;
+      pthread_mutex_lock(&ctx->survivor_queue_mutex);
+      rr.queue_depth_end = (int)ctx->survivor_queue->size();
+      pthread_mutex_unlock(&ctx->survivor_queue_mutex);
+      rr.active_slots = occupied;
+      rr.sweep_ns_main = main_sweep_ns;
+      rr.round_total_ns = kt_now_ns() - round_t0;
+      pthread_mutex_lock(&ctx->stats_lock);
+      rr.reductions = (int)ctx->reduces_this_round->size();
+      long mn = -1, mx = 0, sm = 0;
+      for (auto &ev : *ctx->reduces_this_round)
+      {
+        if (mn < 0 || ev.duration_ns < mn) mn = ev.duration_ns;
+        if (ev.duration_ns > mx) mx = ev.duration_ns;
+        sm += ev.duration_ns;
+      }
+      rr.min_reduce_ns = (mn < 0) ? 0 : mn;
+      rr.max_reduce_ns = mx;
+      rr.sum_reduce_ns = sm;
+      pthread_mutex_unlock(&ctx->stats_lock);
+      ctx->rounds->push_back(rr);
+    }
+#endif
 
     // Re-compute pLength for any new T entries. A worker may have
     // drained the queue during the sweep phase, adding new T entries
@@ -949,4 +1232,81 @@ parallel_cleanup:
             ctx->stat_max_queue_depth.load(),
             ctx->stat_rounds.load());
   }
+
+#ifdef KTHREAD_INSTRUMENT
+  if (KT_STATS(ctx))
+  {
+    fflush(stdout);
+    long total_ns = kt_now_ns() - ctx->start_ns;
+    int tt = ctx->num_workers + 1;
+    fprintf(stderr, "\n============================================================\n");
+    fprintf(stderr, "[kthread-stats] tag=%s threads=%d workers=%d wall_ns=%ld (%.3fs)\n",
+            ctx->workload_tag, ctx->num_threads, ctx->num_workers,
+            total_ns, total_ns / 1e9);
+    fprintf(stderr, "[kthread-stats] reductions=%ld survivors=%ld rounds=%ld max_qd=%ld\n",
+            ctx->stat_reductions.load(), ctx->stat_survivors.load(),
+            ctx->stat_rounds.load(), ctx->stat_max_queue_depth.load());
+    fprintf(stderr, "[kthread-stats] %-4s %12s %12s %12s %12s %12s %12s %12s %12s %12s %12s\n",
+            "tid", "sweep_ns", "reduce_ns", "drain_ns", "B0_wait_ns", "B1_wait_ns",
+            "L_wait_ns", "sweeps", "reduces", "drains", "survivors");
+    for (int i = 0; i < tt; i++)
+    {
+      ThreadStats &ts = ctx->tstats[i];
+      fprintf(stderr, "[kthread-stats] %-4d %12ld %12ld %12ld %12ld %12ld %12ld %12ld %12ld %12ld %12ld\n",
+              i, ts.sweep_ns, ts.reduce_ns, ts.drain_ns,
+              ts.wait_B0_ns, ts.wait_B1_ns, ts.L_lock_wait_ns,
+              ts.sweep_count, ts.reduce_count, ts.drain_count,
+              ts.drain_survivors);
+    }
+    // process_survivor breakdown (main + drain workers)
+    long tot_rt = 0, tot_et = 0, tot_ep = 0, tot_es = 0, tot_oth = 0, tot_drain = 0;
+    for (int i = 0; i < tt; i++)
+    {
+      ThreadStats &ts = ctx->tstats[i];
+      tot_rt += ts.ps_redtail_ns;
+      tot_et += ts.ps_enterT_ns;
+      tot_ep += ts.ps_enterpairs_ns;
+      tot_es += ts.ps_enterS_ns;
+      tot_oth += ts.ps_other_ns;
+      tot_drain += ts.drain_ns;
+    }
+    fprintf(stderr, "[kthread-stats] process_survivor: redtail=%ld enterT=%ld enterpairs=%ld enterS=%ld other=%ld (sum_drain=%ld)\n",
+            tot_rt, tot_et, tot_ep, tot_es, tot_oth, tot_drain);
+    fprintf(stderr, "[kthread-stats] trylock: ");
+    for (int i = 0; i < tt; i++)
+      fprintf(stderr, "t%d=%ld/%ld ", i,
+              ctx->tstats[i].enterpairs_trylock_fail,
+              ctx->tstats[i].enterpairs_trylock_count);
+    fprintf(stderr, "\n");
+
+    // CSV output for per-round records
+    const char *csv_path = getenv("SINGULAR_KTHREAD_CSV");
+    if (csv_path != NULL)
+    {
+      FILE *f = fopen(csv_path, "w");
+      if (f != NULL)
+      {
+        fprintf(f, "round_id,ts_ns,qd_start,qd_end,active_slots,reductions,"
+                   "min_reduce_ns,max_reduce_ns,sum_reduce_ns,sweep_ns_main,round_total_ns\n");
+        for (auto &rr : *ctx->rounds)
+        {
+          fprintf(f, "%ld,%ld,%d,%d,%d,%d,%ld,%ld,%ld,%ld,%ld\n",
+                  rr.round_id, rr.timestamp_ns, rr.queue_depth_start,
+                  rr.queue_depth_end, rr.active_slots, rr.reductions,
+                  rr.min_reduce_ns, rr.max_reduce_ns, rr.sum_reduce_ns,
+                  rr.sweep_ns_main, rr.round_total_ns);
+        }
+        fclose(f);
+        fprintf(stderr, "[kthread-stats] wrote %zu round records to %s\n",
+                ctx->rounds->size(), csv_path);
+      }
+      else
+      {
+        fprintf(stderr, "[kthread-stats] could not open CSV file %s\n", csv_path);
+      }
+    }
+    fprintf(stderr, "============================================================\n\n");
+    fflush(stderr);
+  }
+#endif
 }
