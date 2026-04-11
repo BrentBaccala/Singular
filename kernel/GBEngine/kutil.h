@@ -15,6 +15,7 @@
 #include <vector>
 #include <unordered_map>
 #include <utility>
+#include <pthread.h>
 
 #include "omalloc/omalloc.h"
 #ifdef HAVE_OMALLOC
@@ -771,7 +772,25 @@ public:
   };
 
   // --- Construction / mode ---
-  sBasisSet() : order_(SORDER_STANDARD), live_count_(0), pairtest_any_(false) {}
+  sBasisSet() : order_(SORDER_STANDARD), live_count_(0), pairtest_any_(false) {
+    pthread_mutex_init(&mutex_, NULL);
+  }
+  ~sBasisSet() {
+    pthread_mutex_destroy(&mutex_);
+  }
+  // Non-copyable / non-movable to keep mutex identity stable.
+  sBasisSet(const sBasisSet&) = delete;
+  sBasisSet& operator=(const sBasisSet&) = delete;
+
+  // --- Parallel locking ---
+  // Used by the parallel survivor-drain path to serialize iteration
+  // and mutation of S across drain workers. The serial code paths
+  // (THREADS=1, bba(), sba(), slimgb(), etc.) never acquire this
+  // lock; they are single-threaded so there is no contention.
+  // See ~/project/docs/parallel-bba-thread-safety-report.md for rationale.
+  void lock() { pthread_mutex_lock(&mutex_); }
+  void unlock() { pthread_mutex_unlock(&mutex_); }
+  pthread_mutex_t* raw_mutex() { return &mutex_; }
 
   SOrderMode order() const { return order_; }
   void set_order(SOrderMode m) { order_ = m; }
@@ -931,6 +950,7 @@ private:
   SOrderMode order_;
   int live_count_;
   bool pairtest_any_;  // sentinel: true if any SElement.pairtest was set
+  pthread_mutex_t mutex_;  // parallel drain path serialization
 
   // Internal: insert at a specific position (for reorder, etc.)
   iterator insert_at(int pos, const SElement& val) {
