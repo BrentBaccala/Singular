@@ -318,7 +318,7 @@ static void completeReduceFac (kStrategy strat, ideal_list FL)
       /* enter P.p into s and L */
       int pos;
       if (n->S.empty()) pos=0;
-      else pos=posInS(n,n->S.size()-1,n->P.p,n->P.ecart);
+      else pos=n->S.find_pos(n,n->P.p,n->P.ecart,n->S.size()-1);
       if (TEST_OPT_INTSTRATEGY)
       {
         n->P.p = redtailBba(n->P.p,pos-1,n);
@@ -574,7 +574,7 @@ ideal bbafac (ideal /*F*/, ideal Q,intvec* /*w*/,kStrategy strat, ideal_list FL)
         /* enter P.p into s and L */
         int pos;
         if (n->S.empty()) pos=0;
-        else pos=posInS(n,n->S.size()-1,n->P.p,n->P.ecart);
+        else pos=n->S.find_pos(n,n->P.p,n->P.ecart,n->S.size()-1);
 
         // we have already reduced all elements from fac....
         if (TEST_OPT_INTSTRATEGY)

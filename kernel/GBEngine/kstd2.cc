@@ -672,16 +672,7 @@ int kFindDivisibleByInS(const kStrategy strat, int* max_ind, LObject* L)
 
   BOOLEAN is_Ring=rField_is_Ring(currRing);
 #if 1
-  int ende;
-  if (is_Ring
-  || (strat->ak>0)
-  || currRing->pLexOrder)
-    ende=strat->S.size()-1;
-  else
-  {
-    ende=posInS(strat,*max_ind,p,0)+1;
-    if (ende>(*max_ind)) ende=(*max_ind);
-  }
+  int ende = strat->S.find_divisor_search_bound(p, *max_ind, strat);
 #else
   int ende=strat->S.size()-1;
 #endif
@@ -733,16 +724,7 @@ int kFindDivisibleByInS_noCF(const kStrategy strat, int* max_ind, LObject* L)
 
   BOOLEAN is_Ring=rField_is_Ring(currRing);
 #if 1
-  int ende;
-  if (is_Ring
-  || (strat->ak>0)
-  || currRing->pLexOrder)
-    ende=strat->S.size()-1;
-  else
-  {
-    ende=posInS(strat,*max_ind,p,0)+1;
-    if (ende>(*max_ind)) ende=(*max_ind);
-  }
+  int ende = strat->S.find_divisor_search_bound(p, *max_ind, strat);
 #else
   int ende=strat->S.size()-1;
 #endif
@@ -2964,7 +2946,7 @@ ideal bba (ideal F, ideal Q,intvec *w,bigintmat *hilb,kStrategy strat)
       /* statistic */
       if (TEST_OPT_PROT) PrintS("s");
 
-      int pos=posInS(strat,strat->S.size()-1,strat->P.p,strat->P.ecart);
+      int pos=strat->S.find_pos(strat,strat->P.p,strat->P.ecart,strat->S.size()-1);
 
       // reduce the tail and normalize poly
       // in the ring case we cannot expect LC(f) = 1,
@@ -3060,7 +3042,7 @@ ideal bba (ideal F, ideal Q,intvec *w,bigintmat *hilb,kStrategy strat)
           // we are called AFTER enterS, i.e. if we change P
           // we have to add it also to S/T
           // and add pairs
-          int pos=posInS(strat,strat->S.size()-1,strat->P.p,strat->P.ecart);
+          int pos=strat->S.find_pos(strat,strat->P.p,strat->P.ecart,strat->S.size()-1);
           enterT(strat->P, strat);
           if (rField_is_Ring(currRing))
             superenterpairs(strat->P.p,strat->S.size()-1,strat->P.ecart,pos,strat, strat->T.size()-1);
@@ -3621,7 +3603,7 @@ ideal sba (ideal F0, ideal Q,intvec *w,bigintmat *hilb,kStrategy strat)
       /* statistic */
       if (TEST_OPT_PROT) PrintS("s");
 
-      //int pos=posInS(strat,strat->S.size()-1,strat->P.p,strat->P.ecart);
+      //int pos=strat->S.find_pos(strat,strat->P.p,strat->P.ecart,strat->S.size()-1);
       // in F5E we know that the last reduced element is already the
       // the one with highest signature
       int pos = strat->S.size();
@@ -4631,11 +4613,11 @@ void f5c (kStrategy strat, int& olddeg, int& minimcnt, int& hilbeledeg,
       int pos;
       #if 1
       if(!rField_is_Ring(currRing))
-        pos = posInS(strat,strat->S.size()-1,strat->P.p,strat->P.ecart);
+        pos = strat->S.find_pos(strat,strat->P.p,strat->P.ecart,strat->S.size()-1);
       else
-        pos = posInSMonFirst(strat,strat->S.size()-1,strat->P.p);
+        pos = strat->S.find_pos_monfirst(strat,strat->P.p,strat->S.size()-1);
       #else
-      pos = posInS(strat,strat->S.size()-1,strat->P.p,strat->P.ecart);
+      pos = strat->S.find_pos(strat,strat->P.p,strat->P.ecart,strat->S.size()-1);
       #endif
       // reduce the tail and normalize poly
       // in the ring case we cannot expect LC(f) = 1,
@@ -4936,7 +4918,7 @@ ideal bbaShift(ideal F, ideal Q,intvec *w,bigintmat *hilb,kStrategy strat)
       /* statistic */
       if (TEST_OPT_PROT) PrintS("s");
 
-      int pos=posInS(strat,strat->S.size()-1,strat->P.p,strat->P.ecart);
+      int pos=strat->S.find_pos(strat,strat->P.p,strat->P.ecart,strat->S.size()-1);
 
       // reduce the tail and normalize poly
       // in the ring case we cannot expect LC(f) = 1,
@@ -5027,7 +5009,7 @@ ideal bbaShift(ideal F, ideal Q,intvec *w,bigintmat *hilb,kStrategy strat)
           // we are called AFTER enterS, i.e. if we change P
           // we have to add it also to S/T
           // and add pairs
-          int pos=posInS(strat,strat->S.size()-1,strat->P.p,strat->P.ecart);
+          int pos=strat->S.find_pos(strat,strat->P.p,strat->P.ecart,strat->S.size()-1);
           enterT(strat->P, strat);
           enterpairsShift(strat->P.p,strat->S.size()-1,strat->P.ecart,pos,strat, strat->T.size()-1);
           strat->enterS(strat->P, strat, strat->T.size()-1, -1);

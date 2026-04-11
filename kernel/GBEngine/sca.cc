@@ -28,7 +28,7 @@ void addLObject(LObject& h, kStrategy& strat)
   h.sev=0; // pGetShortExpVector(h.p);
 
   // add h into S and L
-  int pos=posInS(strat, strat->S.size()-1, h.p, h.ecart);
+  int pos=strat->S.find_pos(strat, h.p, h.ecart, strat->S.size()-1);
 
   if ( (pos < strat->S.size()) && (p_ComparePolys(h.p, strat->S.iterator_at(pos)->p, currRing)) )
   {
@@ -81,7 +81,7 @@ void addLObject(LObject& h, kStrategy& strat)
 
     pos=0;
 
-    if (strat->S.size()-1!=-1) pos = posInS(strat, strat->S.size()-1, h.p, h.ecart);
+    if (strat->S.size()-1!=-1) pos = strat->S.find_pos(strat, h.p, h.ecart, strat->S.size()-1);
     strat->enterS(h, strat, -1, -1);
 //    enterT(h, strat); // ?!
 
@@ -612,7 +612,7 @@ ideal k_sca_bba (const ideal F, const ideal Q, const intvec */*w*/, const bigint
       // get the polynomial (canonicalize bucket, make sure P.p is set)
       strat->P.GetP(strat->lmBin);
 
-      int pos = posInS(strat,strat->S.size()-1,strat->P.p,strat->P.ecart);
+      int pos = strat->S.find_pos(strat,strat->P.p,strat->P.ecart,strat->S.size()-1);
 
       // reduce the tail and normalize poly
       if (TEST_OPT_INTSTRATEGY)
@@ -728,7 +728,7 @@ ideal k_sca_bba (const ideal F, const ideal Q, const intvec */*w*/, const bigint
         if (red_result != 1) continue;
 
 
-        int pos = posInS(strat,strat->S.size()-1,h.p,h.ecart);
+        int pos = strat->S.find_pos(strat,h.p,h.ecart,strat->S.size()-1);
 
         // reduce the tail and normalize poly
         if (TEST_OPT_INTSTRATEGY)

@@ -1188,7 +1188,7 @@ ideal k_gnc_gr_bba(const ideal F, const ideal Q, const intvec *, const bigintmat
       }
 #endif
         strat->P.sev=0;
-        int pos=posInS(strat,strat->S.size()-1,strat->P.p, strat->P.ecart);
+        int pos=strat->S.find_pos(strat,strat->P.p,strat->P.ecart,strat->S.size()-1);
         {
           if (TEST_OPT_INTSTRATEGY)
           {
@@ -1224,7 +1224,7 @@ ideal k_gnc_gr_bba(const ideal F, const ideal Q, const intvec *, const bigintmat
           enterpairs(strat->P.p,strat->S.size()-1,strat->P.ecart,pos,strat);
 
           if (strat->S.empty()) pos=0;
-          else pos=posInS(strat,strat->S.size()-1,strat->P.p,strat->P.ecart);
+          else pos=strat->S.find_pos(strat,strat->P.p,strat->P.ecart,strat->S.size()-1);
 
           strat->enterS(strat->P, strat, -1, -1);
         }

@@ -909,6 +909,24 @@ public:
   iterator iterator_at(int i) { return iterator(this, i); }
   const_iterator const_iterator_at(int i) const { return const_iterator(this, i); }
 
+  // Binary search for sorted insertion position (replaces free posInS).
+  // length is the upper bound on the search range (indices [0..length]);
+  // pass size()-1 to search the whole set, or a smaller value to restrict.
+  // Returns the int position the element would occupy if inserted (one
+  // past the last element if larger than everything).
+  int find_pos(kStrategy strat, const poly p, int ecart_p, int length);
+
+  // Binary search for monfirst insertion position (replaces free posInSMonFirst).
+  int find_pos_monfirst(kStrategy strat, const poly p, int length);
+
+  // Encapsulates the kFindDivisibleByInS search-range narrowing.
+  // For monomial-ordered (non-Ring, non-component, non-lex) S, returns an
+  // upper bound on the index of any element of S whose leading monomial
+  // can divide p, restricted to indices [0..max_ind]. Returns max_ind for
+  // rings or other cases where narrowing is not safe; the caller must
+  // still check divisibility against each element up to the bound.
+  int find_divisor_search_bound(poly p, int max_ind, kStrategy strat);
+
 private:
   SOrderMode order_;
   int live_count_;
@@ -920,12 +938,6 @@ private:
     live_count_++;
     return iterator(this, pos);
   }
-
-  // Internal: binary search for sorted insertion position (posInS).
-  iterator find_pos(kStrategy strat, const poly p, int ecart_p);
-
-  // Internal: binary search for monfirst insertion position (posInSMonFirst).
-  iterator find_pos_monfirst(kStrategy strat, const poly p);
 
   // Internal raw element access (used by iterators and member functions)
   SElement& elem(int i) { return (*static_cast<BlockArray<SElement>*>(this))[i]; }
@@ -1098,9 +1110,11 @@ void enterSBbaShift (LObject &p, kStrategy strat, int atR = -1, int atS = -1);
 void enterSSba (LObject &p, kStrategy strat, int atR = -1, int atS = -1);
 void initEcartPairBba (LObject* Lp,poly f,poly g,int ecartF,int ecartG);
 void initEcartPairMora (LObject* Lp,poly f,poly g,int ecartF,int ecartG);
+// Backward-compat free wrapper for kthread.cc (which is intentionally
+// not modified by this refactor). New code should call
+// strat->S.find_pos(strat, p, ecart_p, length) directly.
 int posInS (const kStrategy strat, const int length, const poly p,
             const int ecart_p);
-int posInSMonFirst (const kStrategy strat, const int length, const poly p);
 int posInIdealMonFirst (const ideal F, const poly p,int start = 0,int end = -1);
 int posInT0 (const BlockArray<TObject> &set,const int length,LObject &p);
 int posInT1 (const BlockArray<TObject> &set,const int length,LObject &p);
@@ -1125,7 +1139,6 @@ int posInT_pLength(const BlockArray<TObject> &set,const int length,LObject &p);
 #endif
 
 
-void reorderS (int* suc,kStrategy strat);
 int posInSyz (const kStrategy strat, const poly sig);
 KINLINE poly redtailBba (poly p,int end_pos,kStrategy strat,BOOLEAN normalize=FALSE);
 KINLINE poly redtailBbaBound (poly p,int end_pos,kStrategy strat,int bound,BOOLEAN normalize=FALSE);

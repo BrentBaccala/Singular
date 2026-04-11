@@ -3625,7 +3625,7 @@ ideal kInterRedBba (ideal F, ideal Q, int &need_retry)
       // get the polynomial (canonicalize bucket, make sure P.p is set)
       strat->P.GetP(strat->lmBin);
 
-      int pos=posInS(strat,strat->S.size()-1,strat->P.p,strat->P.ecart);
+      int pos=strat->S.find_pos(strat,strat->P.p,strat->P.ecart,strat->S.size()-1);
 
       // reduce the tail and normalize poly
       // in the ring case we cannot expect LC(f) = 1,
