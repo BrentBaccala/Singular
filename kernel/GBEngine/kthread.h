@@ -186,24 +186,38 @@ struct SweepContext
 
   // ---- Asynchronous survivor enterpairs drain ---------------------
   // FIFO of survivor LObjects waiting for enterT/enterpairs/enterS
-  // processing. Pushed by main thread at end of round; drained by a
-  // single worker thread holding enterpairs_mutex.
+  // processing. Pushed by main thread at end of round; drained by
+  // any worker thread that observes the queue non-empty.
+  //
+  // Concurrency model (task 483, replacing task 275):
+  //   - Queue push/pop is under survivor_queue_mutex (brief).
+  //   - Each drain worker pops one survivor, then runs
+  //     process_survivor_lobject while holding BOTH strat->S's mutex
+  //     (via strat->S.lock()) and ctx->L_lock. This gives per-survivor
+  //     mutual exclusion on S and L, not per-drain — task 275's
+  //     "L_lock held across entire drain" is gone.
+  //   - Multiple drain workers may be simultaneously popping from
+  //     the queue and running process_survivor. The S+L lock pair
+  //     serializes their inner work, but queue management and
+  //     setup run in parallel, and the locks are released between
+  //     survivors so fill_active_slots (which needs L_lock) can
+  //     interleave.
+  //   - Termination uses an atomic counter of in-flight drain
+  //     workers (enterpairs_active) so the main thread can tell
+  //     when all drainers have finished.
   pthread_mutex_t survivor_queue_mutex;
   std::deque<LObject> *survivor_queue;
 
-  // Serializes any drainer of survivor_queue (at most one thread at
-  // a time runs process_survivor). Acquired by workers via trylock.
-  // Main thread never acquires this (see kthread.cc comment).
-  pthread_mutex_t enterpairs_mutex;
+  // Counter of workers currently inside process_survivor_lobject.
+  // Incremented on drain entry, decremented on drain exit. Replaces
+  // the old task-275 enterpairs_active boolean. Used by the main
+  // thread to tell when the drain is quiescent at termination.
+  std::atomic<int> enterpairs_active;
 
-  // Signaled when enterpairs has added new entries to L, or when
-  // the drain worker finishes draining. Used by the main thread to
-  // wait for work while enterpairs is in progress. Protected by
-  // L_lock.
+  // Signaled when a drain worker finishes a survivor (L may have
+  // new entries). Kept for future CV-based wait loops; currently
+  // only used for main-thread idle-drain termination check.
   pthread_cond_t pairs_available;
-
-  // True while a worker holds enterpairs_mutex and is draining.
-  std::atomic<bool> enterpairs_active;
 
   // Max survivor queue depth observed (for diagnostics).
   std::atomic<long> stat_max_queue_depth;

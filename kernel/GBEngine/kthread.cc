@@ -40,6 +40,7 @@
 #include <cstdlib>
 #include <cstdio>
 #include <cstring>
+#include <sched.h>
 
 /* ------------------------------------------------------------------ */
 /*  Instrumentation helpers (task 482)                                 */
@@ -226,12 +227,11 @@ SweepContext *sweep_context_init(kStrategy strat, int nthreads)
   ctx->stat_survivors.store(0, std::memory_order_relaxed);
   ctx->stat_rounds.store(0, std::memory_order_relaxed);
 
-  // Asynchronous survivor drain: queue + mutex + CV + flag
+  // Asynchronous survivor drain: queue + mutex + CV + counter
   pthread_mutex_init(&ctx->survivor_queue_mutex, NULL);
   ctx->survivor_queue = new std::deque<LObject>();
-  pthread_mutex_init(&ctx->enterpairs_mutex, NULL);
   pthread_cond_init(&ctx->pairs_available, NULL);
-  ctx->enterpairs_active.store(false, std::memory_order_relaxed);
+  ctx->enterpairs_active.store(0, std::memory_order_relaxed);
   ctx->stat_max_queue_depth.store(0, std::memory_order_relaxed);
 
 #ifdef KTHREAD_INSTRUMENT
@@ -257,7 +257,6 @@ void sweep_context_destroy(SweepContext *ctx)
   pthread_barrier_destroy(&ctx->startup_barrier);
   pthread_mutex_destroy(&ctx->L_lock);
   pthread_mutex_destroy(&ctx->survivor_queue_mutex);
-  pthread_mutex_destroy(&ctx->enterpairs_mutex);
   pthread_cond_destroy(&ctx->pairs_available);
   delete ctx->survivor_queue;
   free(ctx->active);
@@ -773,23 +772,39 @@ static void queue_survivor(SweepContext *ctx, ActivePoly *ap)
 }
 
 /* ------------------------------------------------------------------ */
-/*  Drain the survivor FIFO synchronously on the calling thread.      */
-/*  Caller must hold ctx->enterpairs_mutex.                            */
+/*  Drain the survivor FIFO: pop one survivor at a time and process    */
+/*  it under the S+L lock pair.                                        */
 /*                                                                     */
-/*  This function also acquires ctx->L_lock for the duration of the    */
-/*  drain because process_survivor_lobject → enterpairs → kMergeBintoL */
-/*  mutates strat->L, and fill_active_slots on the main thread reads   */
-/*  strat->L under L_lock. Holding L_lock across the drain prevents    */
-/*  concurrent push and pop on strat->L (the push_queue inside L is    */
-/*  not itself thread-safe, so we cannot release L_lock between pops). */
+/*  Multi-drainer safe: any number of threads may call this function   */
+/*  concurrently. Each call pops at most as many survivors as remain   */
+/*  in the queue at the time of the pop, processing each one while     */
+/*  holding both strat->S.lock() and ctx->L_lock. The lock pair is     */
+/*  released between survivors, so fill_active_slots (which only       */
+/*  needs L_lock) can interleave with the drain, and two drain         */
+/*  workers can execute process_survivor_lobject in pipelined          */
+/*  fashion (one draining while another is blocked waiting on the      */
+/*  locks for the next survivor).                                      */
+/*                                                                     */
+/*  Lock order: S.lock(), then L_lock. Always release L_lock first,    */
+/*  then S.lock(). This avoids deadlock with any future code that      */
+/*  takes S.lock() while holding L_lock. Currently no such code        */
+/*  exists: fill_active_slots takes only L_lock.                       */
+/*                                                                     */
+/*  Each drain worker increments ctx->enterpairs_active on entry and   */
+/*  decrements on exit. The counter is polled at termination time to   */
+/*  tell when all drain workers are quiescent.                         */
 /* ------------------------------------------------------------------ */
 
-static void drain_survivor_queue_locked(SweepContext *ctx, int thread_id)
+static void drain_survivor_queue(SweepContext *ctx, int thread_id)
 {
 #ifdef KTHREAD_INSTRUMENT
   long drain_t0 = KT_STATS(ctx) ? kt_now_ns() : 0;
+  long drained_this_call = 0;
 #endif
-  kt_L_lock(ctx, thread_id);
+  kStrategy strat = ctx->strat;
+
+  ctx->enterpairs_active.fetch_add(1, std::memory_order_acq_rel);
+
   while (true)
   {
     LObject P;
@@ -803,11 +818,34 @@ static void drain_survivor_queue_locked(SweepContext *ctx, int thread_id)
     ctx->survivor_queue->pop_front();
     pthread_mutex_unlock(&ctx->survivor_queue_mutex);
 
+    // Acquire S.lock() and L_lock in that order. S.lock() serializes
+    // iteration and mutation of S across drain workers; L_lock
+    // serializes mutation of L against itself and fill_active_slots.
+    // The pair is held only for this one survivor, not across the
+    // whole drain — so between survivors another drain worker can
+    // take over and the main thread can fill from L.
+    strat->S.lock();
+    kt_L_lock(ctx, thread_id);
+
     process_survivor_lobject(ctx, &P, thread_id);
-  }
-  pthread_mutex_unlock(&ctx->L_lock);
+
+    pthread_mutex_unlock(&ctx->L_lock);
+    strat->S.unlock();
+
 #ifdef KTHREAD_INSTRUMENT
-  if (KT_STATS(ctx))
+    drained_this_call++;
+#endif
+
+    // Wake anyone blocked waiting for L to refill.
+    kt_L_lock(ctx, thread_id);
+    pthread_cond_broadcast(&ctx->pairs_available);
+    pthread_mutex_unlock(&ctx->L_lock);
+  }
+
+  ctx->enterpairs_active.fetch_sub(1, std::memory_order_acq_rel);
+
+#ifdef KTHREAD_INSTRUMENT
+  if (KT_STATS(ctx) && drained_this_call > 0)
   {
     long dt = kt_now_ns() - drain_t0;
     ThreadStats &ts = KT_TS(ctx, thread_id);
@@ -865,61 +903,36 @@ static void *worker_thread(void *arg)
     kt_barrier_wait_B0(ctx, thread_id);
     if (ctx->done.load(std::memory_order_acquire)) break;
 
+    // Task 483 drain model:
+    // Before sweep, opportunistically drain the survivor FIFO if
+    // non-empty. Unlike task 275, any number of workers may drain
+    // concurrently — no enterpairs_mutex trylock. Each drain pops
+    // one survivor, runs process_survivor_lobject under the
+    // S+L lock pair, and loops until the queue is empty.
+    //
+    // The sweep B1 barrier at the end of this block ensures all
+    // drains finish before main proceeds to merge/reduce.
+    //
+    // Note: a worker that drains one or more survivors still
+    // participates in sweep afterwards if the queue becomes empty
+    // before sweep_cursor exhausts. The atomic sweep_cursor
+    // gracefully handles a variable number of sweepers.
+    if (!ctx->survivor_queue->empty())
+      drain_survivor_queue(ctx, thread_id);
+
     // Phase 1: cooperative sweep
-    //
-    // Before sweeping, try to become this round's drainer for the
-    // survivor FIFO. At most one worker succeeds (trylock on
-    // enterpairs_mutex). The drainer skips sweep_phase this round
-    // and runs process_survivor_lobject on each queued survivor.
-    // The cooperative sweep_cursor naturally absorbs the missing
-    // participant: other sweepers and the main thread will scan T
-    // in the drainer's place.
-    //
-    // The drainer must reach barrier_B1 after draining, so drain
-    // duration is bounded by how many items are in the queue. If
-    // drain exceeds sweep time, the other workers wait at B1 — the
-    // round takes max(sweep_time, drain_time), no deadlock.
-    bool did_drain = false;
 #ifdef KTHREAD_INSTRUMENT
+    long sw_t0 = KT_STATS(ctx) ? kt_now_ns() : 0;
+    sweep_phase(ctx, thread_id);
     if (KT_STATS(ctx))
-      KT_TS(ctx, thread_id).enterpairs_trylock_count++;
-#endif
-    if (pthread_mutex_trylock(&ctx->enterpairs_mutex) == 0)
     {
-      ctx->enterpairs_active.store(true, std::memory_order_release);
-      drain_survivor_queue_locked(ctx, thread_id);
-      ctx->enterpairs_active.store(false, std::memory_order_release);
-      pthread_mutex_unlock(&ctx->enterpairs_mutex);
-
-      // Wake main thread if it is waiting on CV for L to refill /
-      // for enterpairs to finish.
-      kt_L_lock(ctx, thread_id);
-      pthread_cond_broadcast(&ctx->pairs_available);
-      pthread_mutex_unlock(&ctx->L_lock);
-      did_drain = true;
+      ThreadStats &ts = KT_TS(ctx, thread_id);
+      ts.sweep_ns += kt_now_ns() - sw_t0;
+      ts.sweep_count++;
     }
-#ifdef KTHREAD_INSTRUMENT
-    else if (KT_STATS(ctx))
-    {
-      KT_TS(ctx, thread_id).enterpairs_trylock_fail++;
-    }
-#endif
-
-    if (!did_drain)
-    {
-#ifdef KTHREAD_INSTRUMENT
-      long sw_t0 = KT_STATS(ctx) ? kt_now_ns() : 0;
-      sweep_phase(ctx, thread_id);
-      if (KT_STATS(ctx))
-      {
-        ThreadStats &ts = KT_TS(ctx, thread_id);
-        ts.sweep_ns += kt_now_ns() - sw_t0;
-        ts.sweep_count++;
-      }
 #else
-      sweep_phase(ctx, thread_id);
+    sweep_phase(ctx, thread_id);
 #endif
-    }
     kt_barrier_wait_B1(ctx, thread_id);
 
     // Phase 2: parallel reduction (main merges first, then signals)
@@ -929,8 +942,6 @@ static void *worker_thread(void *arg)
 
     reduce_phase_parallel(ctx, thread_id);
     kt_barrier_wait_B1(ctx, thread_id);
-
-    // Main processes survivors between B1 and next B0
   }
 
   return NULL;
@@ -1036,12 +1047,14 @@ void bba_parallel_loop(SweepContext *ctx)
           queue_survivor(ctx, &ctx->active[i]);
       }
 
-      // Idle-drain: main thread only drains the FIFO when it has
-      // nothing else to do. During active rounds, main leaves
-      // draining to workers so it can drive round progression; but
-      // when occupied==0 there IS no round to drive, so the main
-      // thread may as well do the work itself. Blocking-lock the
-      // enterpairs_mutex to serialize with any worker drainer.
+      // Idle-drain: main thread drains any remaining survivors when
+      // it has nothing else to do. With the task-483 multi-drainer
+      // model, worker threads can also drain between rounds, but
+      // at termination there are no more rounds, so the main thread
+      // must do a final sweep to ensure the queue is empty. It may
+      // run concurrently with workers that are still inside a drain
+      // call — the S+L lock pair in drain_survivor_queue serializes
+      // the inner work.
       bool drained_something = false;
       {
         kt_surv_q_lock(ctx, 0);
@@ -1049,13 +1062,22 @@ void bba_parallel_loop(SweepContext *ctx)
         pthread_mutex_unlock(&ctx->survivor_queue_mutex);
         if (!queue_empty)
         {
-          pthread_mutex_lock(&ctx->enterpairs_mutex);
-          ctx->enterpairs_active.store(true, std::memory_order_release);
-          drain_survivor_queue_locked(ctx, 0);
-          ctx->enterpairs_active.store(false, std::memory_order_release);
-          pthread_mutex_unlock(&ctx->enterpairs_mutex);
+          drain_survivor_queue(ctx, 0);
           drained_something = true;
         }
+      }
+
+      // Wait for any in-flight worker drains to finish before we
+      // decide the computation is done. A worker may have been mid-
+      // drain when we polled strat->L and found it empty; if so, the
+      // worker could add new entries to L before we terminate.
+      // Spin briefly on the counter; on the measured workloads
+      // drains complete in microseconds.
+      while (ctx->enterpairs_active.load(std::memory_order_acquire) > 0)
+      {
+        // Yield to let drain workers run. This loop runs only at
+        // termination, not in the hot path.
+        sched_yield();
       }
 
       if (drained_something)
