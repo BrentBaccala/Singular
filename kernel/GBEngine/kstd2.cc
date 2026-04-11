@@ -385,7 +385,6 @@ int kFindDivisibleByInT_Z(const kStrategy strat, const LObject* L, const int sta
 static int kFindDivisibleByInS_Z(const kStrategy strat, LObject* L)
 {
   unsigned long not_sev = ~L->sev;
-  int j = 0;
   int o = -1;
 
   number rest, orest, mult;
@@ -398,7 +397,7 @@ static int kFindDivisibleByInS_Z(const kStrategy strat, LObject* L)
 
     pAssume(~not_sev == p_GetShortExpVector(p, r));
 
-    for (auto sit=strat->S.iterator_at(j); sit!=strat->S.end(); ++sit)
+    for (auto sit=strat->S.begin(); sit!=strat->S.end(); ++sit)
     {
 #if defined(PDEBUG) || defined(PDIV_DEBUG)
       if (p_LmShortDivisibleBy(sit->p, sit->sev,p, not_sev, r))
@@ -666,7 +665,6 @@ int kFindDivisibleByInS(const kStrategy strat, int* max_ind, LObject* L)
 {
   unsigned long not_sev = ~L->sev;
   poly p = L->GetLmCurrRing();
-  int j = 0;
 
   pAssume(~not_sev == p_GetShortExpVector(p, currRing));
 
@@ -678,7 +676,7 @@ int kFindDivisibleByInS(const kStrategy strat, int* max_ind, LObject* L)
 #endif
   if(is_Ring)
   {
-    for (auto sit=strat->S.iterator_at(j); sit!=strat->S.end() && sit.index()<=ende; ++sit)
+    for (auto sit=strat->S.begin(); sit!=strat->S.end() && sit.index()<=ende; ++sit)
     {
 #if defined(PDEBUG) || defined(PDIV_DEBUG)
       if (p_LmShortDivisibleBy(sit->p, sit->sev,
@@ -696,7 +694,7 @@ int kFindDivisibleByInS(const kStrategy strat, int* max_ind, LObject* L)
   }
   else
   {
-    for (auto sit=strat->S.iterator_at(j); sit!=strat->S.end() && sit.index()<=ende; ++sit)
+    for (auto sit=strat->S.begin(); sit!=strat->S.end() && sit.index()<=ende; ++sit)
     {
 #if defined(PDEBUG) || defined(PDIV_DEBUG)
       if (p_LmShortDivisibleBy(sit->p, sit->sev,
@@ -718,7 +716,6 @@ int kFindDivisibleByInS_noCF(const kStrategy strat, int* max_ind, LObject* L)
 {
   unsigned long not_sev = ~L->sev;
   poly p = L->GetLmCurrRing();
-  int j = 0;
 
   pAssume(~not_sev == p_GetShortExpVector(p, currRing));
 
@@ -728,7 +725,7 @@ int kFindDivisibleByInS_noCF(const kStrategy strat, int* max_ind, LObject* L)
 #else
   int ende=strat->S.size()-1;
 #endif
-  for (auto sit=strat->S.iterator_at(j); sit!=strat->S.end() && sit.index()<=ende; ++sit)
+  for (auto sit=strat->S.begin(); sit!=strat->S.end() && sit.index()<=ende; ++sit)
   {
 #if defined(PDEBUG) || defined(PDIV_DEBUG)
     if (p_LmShortDivisibleBy(sit->p, sit->sev,

@@ -7499,6 +7499,8 @@ void initSyzRules (kStrategy strat)
      ***********************************************************/
     for(i=1; i < strat->S.size(); i++)
     {
+      // iterator_at(i-1) / iterator_at(i): two-element comparison, not
+      // easily expressed as a range iteration.
       if (pGetComp(strat->S.iterator_at(i-1)->sig) != pGetComp(strat->S.iterator_at(i)->sig))
       {
         ps += i;
@@ -7930,14 +7932,12 @@ void initSSpecialSba (ideal F, ideal Q, ideal P,kStrategy strat)
 */
 static poly redBba1 (poly h,int maxIndex,kStrategy strat)
 {
-  int j = 0;
   unsigned long not_sev = ~ pGetShortExpVector(h);
 
-  while (j <= maxIndex)
+  for (auto sit = strat->S.begin(); sit != strat->S.end() && sit.index() <= maxIndex; ++sit)
   {
-    if (pLmShortDivisibleBy(strat->S.iterator_at(j)->p,strat->S.iterator_at(j)->sev,h, not_sev))
-       return ksOldSpolyRedNew(strat->S.iterator_at(j)->p,h,strat->kNoetherTail());
-    else j++;
+    if (pLmShortDivisibleBy(sit->p, sit->sev, h, not_sev))
+       return ksOldSpolyRedNew(sit->p, h, strat->kNoetherTail());
   }
   return h;
 }
@@ -8033,19 +8033,19 @@ static poly redQ (poly h, int j, kStrategy strat)
 */
 static poly redBba (poly h,int maxIndex,kStrategy strat)
 {
-  int j = 0;
   unsigned long not_sev = ~ pGetShortExpVector(h);
 
-  while (j <= maxIndex)
+  auto sit = strat->S.begin();
+  while (sit != strat->S.end() && sit.index() <= maxIndex)
   {
-    if (pLmShortDivisibleBy(strat->S.iterator_at(j)->p,strat->S.iterator_at(j)->sev, h, not_sev))
+    if (pLmShortDivisibleBy(sit->p, sit->sev, h, not_sev))
     {
-      h = ksOldSpolyRed(strat->S.iterator_at(j)->p,h,strat->kNoetherTail());
+      h = ksOldSpolyRed(sit->p, h, strat->kNoetherTail());
       if (h==NULL) return NULL;
-      j = 0;
+      sit = strat->S.begin();
       not_sev = ~ pGetShortExpVector(h);
     }
-    else j++;
+    else ++sit;
   }
   return h;
 }
@@ -8057,25 +8057,25 @@ static poly redBba (poly h,int maxIndex,kStrategy strat)
 */
 static poly redMora (poly h,int maxIndex,kStrategy strat)
 {
-  int  j=0;
   int  e,l;
   unsigned long not_sev = ~ pGetShortExpVector(h);
 
   if (maxIndex >= 0)
   {
     e = currRing->pLDeg(h,&l,currRing)-p_FDeg(h,currRing);
+    auto sit = strat->S.begin();
     do
     {
-      if (pLmShortDivisibleBy(strat->S.iterator_at(j)->p,strat->S.iterator_at(j)->sev, h, not_sev)
-      && ((e >= strat->S.iterator_at(j)->ecart) || (strat->kNoether!=NULL)))
+      if (pLmShortDivisibleBy(sit->p, sit->sev, h, not_sev)
+      && ((e >= sit->ecart) || (strat->kNoether!=NULL)))
       {
 #ifdef KDEBUG
         if (TEST_OPT_DEBUG)
         {
-          PrintS("reduce ");wrp(h);Print(" with S[%d] (",j);wrp(strat->S.iterator_at(j)->p);
+          PrintS("reduce ");wrp(h);Print(" with S[%d] (",sit.index());wrp(sit->p);
         }
 #endif
-        h = ksOldSpolyRed(strat->S.iterator_at(j)->p,h,strat->kNoetherTail());
+        h = ksOldSpolyRed(sit->p, h, strat->kNoetherTail());
 #ifdef KDEBUG
         if(TEST_OPT_DEBUG)
         {
@@ -8085,12 +8085,12 @@ static poly redMora (poly h,int maxIndex,kStrategy strat)
         // pDelete(&h);
         if (h == NULL) return NULL;
         e = currRing->pLDeg(h,&l,currRing)-p_FDeg(h,currRing);
-        j = 0;
+        sit = strat->S.begin();
         not_sev = ~ pGetShortExpVector(h);
       }
-      else j++;
+      else ++sit;
     }
-    while (j <= maxIndex);
+    while (sit != strat->S.end() && sit.index() <= maxIndex);
   }
   return h;
 }
