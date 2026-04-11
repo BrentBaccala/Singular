@@ -6113,13 +6113,14 @@ BOOLEAN faugereRewCriterion(poly sig, unsigned long not_sevSig, poly /*lm*/, kSt
 #endif
   for(int k = strat->S.size()-1; k>=start; k--)
   {
+    auto sit_k = strat->S.iterator_at(k);
 //#if 1
 #ifdef DEBUGF5
     PrintS("checking with:  ");
-    pWrite(strat->S.iterator_at(k)->sig);
-    pWrite(pHead(strat->S.iterator_at(k)->p));
+    pWrite(sit_k->sig);
+    pWrite(pHead(sit_k->p));
 #endif
-    if (p_LmShortDivisibleBy(strat->S.iterator_at(k)->sig, strat->S.iterator_at(k)->sevSig, sig, not_sevSig, currRing))
+    if (p_LmShortDivisibleBy(sit_k->sig, sit_k->sevSig, sig, not_sevSig, currRing))
     {
 //#if 1
 #ifdef DEBUGF5
@@ -6132,9 +6133,9 @@ BOOLEAN faugereRewCriterion(poly sig, unsigned long not_sevSig, poly /*lm*/, kSt
   }
 #ifdef DEBUGF5
   PrintS("ALL ELEMENTS OF S\n----------------------------------------\n");
-  for(int kk = 0; kk<strat->S.size(); kk++)
+  for (auto sit_kk = strat->S.begin(); sit_kk != strat->S.end(); ++sit_kk)
   {
-    pWrite(pHead(strat->S.iterator_at(kk)->p));
+    pWrite(pHead(sit_kk->p));
   }
   PrintS("------------------------------\n");
 #endif
@@ -6168,10 +6169,11 @@ BOOLEAN arriRewCriterion(poly /*sig*/, unsigned long /*not_sevSig*/, poly /*lm*/
   poly p2 = pOne();
   for (int ii=strat->S.size()-1; ii>start; ii--)
   {
-    if (p_LmShortDivisibleBy(strat->S.iterator_at(ii)->sig, strat->S.iterator_at(ii)->sevSig, strat->P.sig, ~strat->P.sevSig, currRing))
+    auto sit_ii = strat->S.iterator_at(ii);
+    if (p_LmShortDivisibleBy(sit_ii->sig, sit_ii->sevSig, strat->P.sig, ~strat->P.sevSig, currRing))
     {
-      p_ExpVectorSum(p1,strat->P.sig,strat->S.iterator_at(ii)->p,currRing);
-      p_ExpVectorSum(p2,strat->S.iterator_at(ii)->sig,strat->P.p,currRing);
+      p_ExpVectorSum(p1,strat->P.sig,sit_ii->p,currRing);
+      p_ExpVectorSum(p2,sit_ii->sig,strat->P.p,currRing);
       if (!(pLmCmp(p1,p2) == 1))
       {
         pDelete(&p1);
@@ -6214,10 +6216,11 @@ BOOLEAN arriRewCriterionPre(poly sig, unsigned long not_sevSig, poly lm, kStrate
   poly p2 = pOne();
   for (int ii=strat->S.size()-1; ii>-1; ii--)
   {
-    if (p_LmShortDivisibleBy(strat->S.iterator_at(ii)->sig, strat->S.iterator_at(ii)->sevSig, sig, not_sevSig, currRing))
+    auto sit_ii = strat->S.iterator_at(ii);
+    if (p_LmShortDivisibleBy(sit_ii->sig, sit_ii->sevSig, sig, not_sevSig, currRing))
     {
-      p_ExpVectorSum(p1,sig,strat->S.iterator_at(ii)->p,currRing);
-      p_ExpVectorSum(p2,strat->S.iterator_at(ii)->sig,lm,currRing);
+      p_ExpVectorSum(p1,sig,sit_ii->p,currRing);
+      p_ExpVectorSum(p2,sit_ii->sig,lm,currRing);
       if (!(pLmCmp(p1,p2) == 1))
       {
         pDelete(&p1);
@@ -7548,19 +7551,21 @@ void initSyzRules (kStrategy strat)
         j++;
         LObject Q;
         int pos;
+        auto sit_i = strat->S.iterator_at(i);
         for (k = 0; k<i; k++)
         {
+          auto sit_k = strat->S.iterator_at(k);
           Q.sig          = pOne();
           if(rField_is_Ring(currRing))
-            p_SetCoeff(Q.sig,nCopy(p_GetCoeff(strat->S.iterator_at(k)->p,currRing)),currRing);
-          p_ExpVectorCopy(Q.sig,strat->S.iterator_at(k)->p,currRing);
+            p_SetCoeff(Q.sig,nCopy(p_GetCoeff(sit_k->p,currRing)),currRing);
+          p_ExpVectorCopy(Q.sig,sit_k->p,currRing);
           p_SetCompP (Q.sig, comp, currRing);
           poly q          = p_One(currRing);
           if(rField_is_Ring(currRing))
-            p_SetCoeff(q,nCopy(p_GetCoeff(strat->S.iterator_at(i)->p,currRing)),currRing);
-          p_ExpVectorCopy(q,strat->S.iterator_at(i)->p,currRing);
+            p_SetCoeff(q,nCopy(p_GetCoeff(sit_i->p,currRing)),currRing);
+          p_ExpVectorCopy(q,sit_i->p,currRing);
           q               = p_Neg (q, currRing);
-          p_SetCompP (q, __p_GetComp(strat->S.iterator_at(k)->sig, currRing), currRing);
+          p_SetCompP (q, __p_GetComp(sit_k->sig, currRing), currRing);
           Q.sig = p_Add_q (Q.sig, q, currRing);
           Q.sevSig  = p_GetShortExpVector(Q.sig,currRing);
           pos = posInSyz(strat, Q.sig);
@@ -7592,19 +7597,19 @@ void initSyzRules (kStrategy strat)
     strat->syzIdx[j]  = ctr;
     LObject Q;
     int pos;
-    for (k = 0; k<strat->S.size(); k++)
+    for (auto sit_k = strat->S.begin(); sit_k != strat->S.end(); ++sit_k)
     {
       Q.sig          = pOne();
       if(rField_is_Ring(currRing))
-        p_SetCoeff(Q.sig,nCopy(p_GetCoeff(strat->S.iterator_at(k)->p,currRing)),currRing);
-      p_ExpVectorCopy(Q.sig,strat->S.iterator_at(k)->p,currRing);
+        p_SetCoeff(Q.sig,nCopy(p_GetCoeff(sit_k->p,currRing)),currRing);
+      p_ExpVectorCopy(Q.sig,sit_k->p,currRing);
       p_SetCompP (Q.sig, comp, currRing);
       poly q          = p_One(currRing);
       if(rField_is_Ring(currRing))
         p_SetCoeff(q,nCopy(p_GetCoeff(strat->L.top().p,currRing)),currRing);
       p_ExpVectorCopy(q,strat->L.top().p,currRing);
       q               = p_Neg (q, currRing);
-      p_SetCompP (q, __p_GetComp(strat->S.iterator_at(k)->sig, currRing), currRing);
+      p_SetCompP (q, __p_GetComp(sit_k->sig, currRing), currRing);
       Q.sig = p_Add_q (Q.sig, q, currRing);
       Q.sevSig = p_GetShortExpVector(Q.sig,currRing);
       pos = posInSyz(strat, Q.sig);
@@ -8120,13 +8125,14 @@ void updateS(BOOLEAN toT,kStrategy strat)
         change=FALSE;
         if(rField_is_Ring(currRing))
             any_change = FALSE;
-        if (((!strat->hasFromQ) || (strat->S.iterator_at(i)->fromQ==0)) && (i>0))
+        auto sit = strat->S.iterator_at(i);
+        if (((!strat->hasFromQ) || (sit->fromQ==0)) && (i>0))
         {
-          redSi = pHead(strat->S.iterator_at(i)->p);
-          strat->S.iterator_at(i)->p = redBba(strat->S.iterator_at(i)->p,i-1,strat);
+          redSi = pHead(sit->p);
+          sit->p = redBba(sit->p,i-1,strat);
           //if ((strat->ak!=0)&&(strat->S[i].p!=NULL))
           //  strat->S[i].p=redQ(strat->S[i].p,i+1,strat); /*reduce S[i] mod Q*/
-          if (pCmp(redSi,strat->S.iterator_at(i)->p)!=0)
+          if (pCmp(redSi,sit->p)!=0)
           {
             change=TRUE;
             any_change=TRUE;
@@ -8134,12 +8140,12 @@ void updateS(BOOLEAN toT,kStrategy strat)
             if (TEST_OPT_DEBUG)
             {
               PrintS("reduce:");
-              wrp(redSi);PrintS(" to ");p_wrp(strat->S.iterator_at(i)->p, currRing, strat->tailRing);PrintLn();
+              wrp(redSi);PrintS(" to ");p_wrp(sit->p, currRing, strat->tailRing);PrintLn();
             }
             #endif
             if (TEST_OPT_PROT)
             {
-              if (strat->S.iterator_at(i)->p==NULL)
+              if (sit->p==NULL)
                 PrintS("V");
               else
                 PrintS("v");
@@ -8147,7 +8153,7 @@ void updateS(BOOLEAN toT,kStrategy strat)
             }
           }
           pLmDelete(&redSi);
-          if (strat->S.iterator_at(i)->p==NULL)
+          if (sit->p==NULL)
           {
             deleteInS(i,strat);
             i--;
@@ -8159,7 +8165,7 @@ void updateS(BOOLEAN toT,kStrategy strat)
               if (TEST_OPT_CONTENTSB)
               {
                 number n;
-                p_Cleardenom_n(strat->S.iterator_at(i)->p, currRing, n);// also does remove Content
+                p_Cleardenom_n(sit->p, currRing, n);// also does remove Content
                 if (!nIsOne(n))
                 {
                   denominator_list denom=(denominator_list)omAlloc(sizeof(denominator_list_s));
@@ -8171,14 +8177,14 @@ void updateS(BOOLEAN toT,kStrategy strat)
               }
               else
               {
-                strat->S.iterator_at(i)->p=p_Cleardenom(strat->S.iterator_at(i)->p, currRing);// also does remove Content
+                sit->p=p_Cleardenom(sit->p, currRing);// also does remove Content
               }
             }
             else
             {
-              pNorm(strat->S.iterator_at(i)->p);
+              pNorm(sit->p);
             }
-            strat->S.iterator_at(i)->sev = pGetShortExpVector(strat->S.iterator_at(i)->p);
+            sit->sev = pGetShortExpVector(sit->p);
           }
         }
         i++;
@@ -8229,27 +8235,28 @@ void updateS(BOOLEAN toT,kStrategy strat)
       while (i < strat->S.size())
       {
         change=FALSE;
-        if (((!strat->hasFromQ) || (strat->S.iterator_at(i)->fromQ==0)) && (i>0))
+        auto sit = strat->S.iterator_at(i);
+        if (((!strat->hasFromQ) || (sit->fromQ==0)) && (i>0))
         {
-          redSi=pHead(strat->S.iterator_at(i)->p);
-          strat->S.iterator_at(i)->p = redMora(strat->S.iterator_at(i)->p,i-1,strat);
-          if (strat->S.iterator_at(i)->p==NULL)
+          redSi=pHead(sit->p);
+          sit->p = redMora(sit->p,i-1,strat);
+          if (sit->p==NULL)
           {
             deleteInS(i,strat);
             i--;
           }
-          else if (pCmp(strat->S.iterator_at(i)->p,redSi)!=0)
+          else if (pCmp(sit->p,redSi)!=0)
           {
             any_change=TRUE;
-            h.p = strat->S.iterator_at(i)->p;
+            h.p = sit->p;
             strat->initEcart(&h);
-            strat->S.iterator_at(i)->ecart = h.ecart;
+            sit->ecart = h.ecart;
             if (TEST_OPT_INTSTRATEGY)
             {
               if (TEST_OPT_CONTENTSB)
               {
                 number n;
-                p_Cleardenom_n(strat->S.iterator_at(i)->p, currRing, n);// also does remove Content
+                p_Cleardenom_n(sit->p, currRing, n);// also does remove Content
                 if (!nIsOne(n))
                 {
                   denominator_list denom=(denominator_list)omAlloc(sizeof(denominator_list_s));
@@ -8261,15 +8268,15 @@ void updateS(BOOLEAN toT,kStrategy strat)
               }
               else
               {
-                strat->S.iterator_at(i)->p=p_Cleardenom(strat->S.iterator_at(i)->p, currRing);// also does remove Content
+                sit->p=p_Cleardenom(sit->p, currRing);// also does remove Content
               }
             }
             else
             {
-              pNorm(strat->S.iterator_at(i)->p); // == h.p
+              pNorm(sit->p); // == h.p
             }
             h.sev =  pGetShortExpVector(h.p);
-            strat->S.iterator_at(i)->sev = h.sev;
+            sit->sev = h.sev;
           }
           pLmDelete(&redSi);
           kTest(strat);
@@ -9433,9 +9440,10 @@ void updateResult(ideal Q, kStrategy strat)
   {
     for (l=strat->S.size()-1;l>=0;l--)
     {
-      if ((strat->S.iterator_at(l)->p!=NULL) && (pGetComp(strat->S.iterator_at(l)->p)==0))
+      auto sit = strat->S.iterator_at(l);
+      if ((sit->p!=NULL) && (pGetComp(sit->p)==0))
       {
-        pDelete(&strat->S.iterator_at(l)->p); // and set it to NULL
+        pDelete(&sit->p); // and set it to NULL
                       }
     }
     int q;
@@ -9444,7 +9452,8 @@ void updateResult(ideal Q, kStrategy strat)
     {
       for (l=strat->S.size()-1;l>=0;l--)
       {
-        if ((strat->S.iterator_at(l)->p!=NULL)
+        auto sit = strat->S.iterator_at(l);
+        if ((sit->p!=NULL)
         //&& (strat->syzComp>0)
         //&& (pGetComp(strat->S[l].p)<=strat->syzComp)
         )
@@ -9452,17 +9461,17 @@ void updateResult(ideal Q, kStrategy strat)
           for(q=IDELEMS(Q)-1; q>=0;q--)
           {
             if ((Q->m[q]!=NULL)
-            &&(pLmDivisibleBy(Q->m[q],strat->S.iterator_at(l)->p)))
+            &&(pLmDivisibleBy(Q->m[q],sit->p)))
             {
               if (TEST_OPT_REDSB)
               {
-                p=strat->S.iterator_at(l)->p;
-                strat->S.iterator_at(l)->p=kNF(Q,NULL,p);
+                p=sit->p;
+                sit->p=kNF(Q,NULL,p);
                                 pDelete(&p);
               }
               else
               {
-                pDelete(&strat->S.iterator_at(l)->p); // and set it to NULL
+                pDelete(&sit->p); // and set it to NULL
                               }
               break;
             }
@@ -9474,7 +9483,8 @@ void updateResult(ideal Q, kStrategy strat)
     {
       for (l=strat->S.size()-1;l>=0;l--)
       {
-        if ((strat->S.iterator_at(l)->p!=NULL)
+        auto sit = strat->S.iterator_at(l);
+        if ((sit->p!=NULL)
         //&& (strat->syzComp>0)
         //&& (pGetComp(strat->S[l].p)<=strat->syzComp)
         )
@@ -9482,19 +9492,19 @@ void updateResult(ideal Q, kStrategy strat)
           for(q=IDELEMS(Q)-1; q>=0;q--)
           {
             if ((Q->m[q]!=NULL)
-            &&(pLmDivisibleBy(Q->m[q],strat->S.iterator_at(l)->p)))
+            &&(pLmDivisibleBy(Q->m[q],sit->p)))
             {
-              if(n_DivBy(strat->S.iterator_at(l)->p->coef, Q->m[q]->coef, currRing->cf))
+              if(n_DivBy(sit->p->coef, Q->m[q]->coef, currRing->cf))
               {
                 if (TEST_OPT_REDSB)
                 {
-                  p=strat->S.iterator_at(l)->p;
-                  strat->S.iterator_at(l)->p=kNF(Q,NULL,p);
+                  p=sit->p;
+                  sit->p=kNF(Q,NULL,p);
                                     pDelete(&p);
                 }
                 else
                 {
-                  pDelete(&strat->S.iterator_at(l)->p); // and set it to NULL
+                  pDelete(&sit->p); // and set it to NULL
                                   }
                 break;
               }
@@ -9513,22 +9523,23 @@ void updateResult(ideal Q, kStrategy strat)
     {
       for (l=strat->S.size()-1;l>=0;l--)
       {
-        if (strat->S.iterator_at(l)->p!=NULL)
+        auto sit = strat->S.iterator_at(l);
+        if (sit->p!=NULL)
         {
           for(q=IDELEMS(Q)-1; q>=0;q--)
           {
-            if ((Q->m[q]!=NULL)&&(pLmEqual(Q->m[q],strat->S.iterator_at(l)->p)))
+            if ((Q->m[q]!=NULL)&&(pLmEqual(Q->m[q],sit->p)))
             {
               if (TEST_OPT_REDSB)
               {
-                p=strat->S.iterator_at(l)->p;
-                strat->S.iterator_at(l)->p=kNF(Q,NULL,p);
+                p=sit->p;
+                sit->p=kNF(Q,NULL,p);
                                 pDelete(&p);
                 reduction_found=TRUE;
               }
               else
               {
-                pDelete(&strat->S.iterator_at(l)->p); // and set it to NULL
+                pDelete(&sit->p); // and set it to NULL
                               }
               break;
             }
@@ -9541,24 +9552,25 @@ void updateResult(ideal Q, kStrategy strat)
     {
       for (l=strat->S.size()-1;l>=0;l--)
       {
-        if (strat->S.iterator_at(l)->p!=NULL)
+        auto sit = strat->S.iterator_at(l);
+        if (sit->p!=NULL)
         {
           for(q=IDELEMS(Q)-1; q>=0;q--)
           {
-            if(n_DivBy(strat->S.iterator_at(l)->p->coef, Q->m[q]->coef, currRing->cf))
+            if(n_DivBy(sit->p->coef, Q->m[q]->coef, currRing->cf))
             {
-              if ((Q->m[q]!=NULL)&&(pLmEqual(Q->m[q],strat->S.iterator_at(l)->p)) && pDivisibleBy(Q->m[q],strat->S.iterator_at(l)->p))
+              if ((Q->m[q]!=NULL)&&(pLmEqual(Q->m[q],sit->p)) && pDivisibleBy(Q->m[q],sit->p))
               {
                 if (TEST_OPT_REDSB)
                 {
-                  p=strat->S.iterator_at(l)->p;
-                  strat->S.iterator_at(l)->p=kNF(Q,NULL,p);
+                  p=sit->p;
+                  sit->p=kNF(Q,NULL,p);
                                     pDelete(&p);
                   reduction_found=TRUE;
                 }
                 else
                 {
-                  pDelete(&strat->S.iterator_at(l)->p); // and set it to NULL
+                  pDelete(&sit->p); // and set it to NULL
                                   }
                 break;
               }
@@ -9573,28 +9585,30 @@ void updateResult(ideal Q, kStrategy strat)
       {
         for (l=strat->S.size()-1;l>=0;l--)
         {
-          if (strat->S.iterator_at(l)->p!=NULL)
+          auto sit_l = strat->S.iterator_at(l);
+          if (sit_l->p!=NULL)
           {
             for(q=strat->S.size()-1;q>=0;q--)
             {
+              auto sit_q = strat->S.iterator_at(q);
               if ((l!=q)
-              && (strat->S.iterator_at(q)->p!=NULL)
-              &&(pLmDivisibleBy(strat->S.iterator_at(l)->p,strat->S.iterator_at(q)->p))
-              &&(n_DivBy(strat->S.iterator_at(q)->p->coef, strat->S.iterator_at(l)->p->coef, currRing->cf))
+              && (sit_q->p!=NULL)
+              &&(pLmDivisibleBy(sit_l->p,sit_q->p))
+              &&(n_DivBy(sit_q->p->coef, sit_l->p->coef, currRing->cf))
               )
               {
                 //If they are equal then take the one with the smallest length
-                if(pLmDivisibleBy(strat->S.iterator_at(q)->p,strat->S.iterator_at(l)->p)
-                && n_DivBy(strat->S.iterator_at(q)->p->coef, strat->S.iterator_at(l)->p->coef, currRing->cf)
-                && (pLength(strat->S.iterator_at(q)->p) < pLength(strat->S.iterator_at(l)->p) ||
-                (pLength(strat->S.iterator_at(q)->p) == pLength(strat->S.iterator_at(l)->p) && nGreaterZero(strat->S.iterator_at(q)->p->coef))))
+                if(pLmDivisibleBy(sit_q->p,sit_l->p)
+                && n_DivBy(sit_q->p->coef, sit_l->p->coef, currRing->cf)
+                && (pLength(sit_q->p) < pLength(sit_l->p) ||
+                (pLength(sit_q->p) == pLength(sit_l->p) && nGreaterZero(sit_q->p->coef))))
                 {
-                  pDelete(&strat->S.iterator_at(l)->p);
+                  pDelete(&sit_l->p);
                                     break;
                 }
                 else
                 {
-                  pDelete(&strat->S.iterator_at(q)->p);
+                  pDelete(&sit_q->p);
                                   }
               }
             }
@@ -9605,26 +9619,28 @@ void updateResult(ideal Q, kStrategy strat)
       {
         for (l=strat->S.size()-1;l>=0;l--)
         {
-          if (strat->S.iterator_at(l)->p!=NULL)
+          auto sit_l = strat->S.iterator_at(l);
+          if (sit_l->p!=NULL)
           {
             for(q=strat->S.size()-1;q>=0;q--)
             {
+              auto sit_q = strat->S.iterator_at(q);
               if ((l!=q)
-              && (strat->S.iterator_at(q)->p!=NULL)
-              &&(pLmDivisibleBy(strat->S.iterator_at(l)->p,strat->S.iterator_at(q)->p))
+              && (sit_q->p!=NULL)
+              &&(pLmDivisibleBy(sit_l->p,sit_q->p))
               )
               {
                 //If they are equal then take the one with the smallest length
-                if(pLmDivisibleBy(strat->S.iterator_at(q)->p,strat->S.iterator_at(l)->p)
-                &&(pLength(strat->S.iterator_at(q)->p) < pLength(strat->S.iterator_at(l)->p) ||
-                (pLength(strat->S.iterator_at(q)->p) == pLength(strat->S.iterator_at(l)->p) && nGreaterZero(strat->S.iterator_at(q)->p->coef))))
+                if(pLmDivisibleBy(sit_q->p,sit_l->p)
+                &&(pLength(sit_q->p) < pLength(sit_l->p) ||
+                (pLength(sit_q->p) == pLength(sit_l->p) && nGreaterZero(sit_q->p->coef))))
                 {
-                  pDelete(&strat->S.iterator_at(l)->p);
+                  pDelete(&sit_l->p);
                                     break;
                 }
                 else
                 {
-                  pDelete(&strat->S.iterator_at(q)->p);
+                  pDelete(&sit_q->p);
                                   }
               }
             }
@@ -9675,11 +9691,12 @@ void completeReduce (kStrategy strat, BOOLEAN withT)
   }
   for (i=strat->S.size()-1; i>=low; i--)
   {
+    auto sit = strat->S.iterator_at(i);
     int end_pos=strat->S.size()-1;
-    if ((strat->hasFromQ) && (strat->S.iterator_at(i)->fromQ)) continue; // do not reduce Q_i
+    if ((strat->hasFromQ) && (sit->fromQ)) continue; // do not reduce Q_i
     if (strat->ak==0) end_pos=i-1;
     TObject* T_j = strat->s_2_t(i);
-    if ((T_j != NULL)&&(T_j->p==strat->S.iterator_at(i)->p))
+    if ((T_j != NULL)&&(T_j->p==sit->p))
     {
       L = *T_j;
       #ifdef KDEBUG
@@ -9692,17 +9709,17 @@ void completeReduce (kStrategy strat, BOOLEAN withT)
       #endif
       if (rHasGlobalOrdering(currRing))
       {
-        strat->S.iterator_at(i)->p = redtailBba(&L, end_pos, strat, withT,FALSE /*no normalize*/);
+        sit->p = redtailBba(&L, end_pos, strat, withT,FALSE /*no normalize*/);
       }
       else
       {
-        strat->S.iterator_at(i)->p = redtail(&L, strat->S.size()-1, strat);
+        sit->p = redtail(&L, strat->S.size()-1, strat);
       }
       #ifdef KDEBUG
       if (TEST_OPT_DEBUG)
       {
         Print("to (tailR) S[%d]:",i);
-        p_wrp(strat->S.iterator_at(i)->p,currRing,strat->tailRing);
+        p_wrp(sit->p,currRing,strat->tailRing);
         PrintLn();
       }
       #endif
@@ -9725,24 +9742,24 @@ void completeReduce (kStrategy strat, BOOLEAN withT)
       if (TEST_OPT_DEBUG)
       {
         Print("test S[%d]:",i);
-        p_wrp(strat->S.iterator_at(i)->p,currRing,strat->tailRing);
+        p_wrp(sit->p,currRing,strat->tailRing);
         PrintLn();
       }
       #endif
       if (rHasGlobalOrdering(currRing))
       {
-        strat->S.iterator_at(i)->p = redtailBba(strat->S.iterator_at(i)->p, end_pos, strat, withT);
+        sit->p = redtailBba(sit->p, end_pos, strat, withT);
       }
       else
       {
-        strat->S.iterator_at(i)->p = redtail(strat->S.iterator_at(i)->p, strat->S.size()-1, strat);
+        sit->p = redtail(sit->p, strat->S.size()-1, strat);
       }
       if (TEST_OPT_INTSTRATEGY)
       {
         if (TEST_OPT_CONTENTSB)
         {
           number n;
-          p_Cleardenom_n(strat->S.iterator_at(i)->p, currRing, n);// also does remove Content
+          p_Cleardenom_n(sit->p, currRing, n);// also does remove Content
           if (!nIsOne(n))
           {
             denominator_list denom=(denominator_list)omAlloc(sizeof(denominator_list_s));
@@ -9754,14 +9771,14 @@ void completeReduce (kStrategy strat, BOOLEAN withT)
         }
         else
         {
-          strat->S.iterator_at(i)->p=p_Cleardenom(strat->S.iterator_at(i)->p, currRing);// also does remove Content
+          sit->p=p_Cleardenom(sit->p, currRing);// also does remove Content
         }
       }
       #ifdef KDEBUG
       if (TEST_OPT_DEBUG)
       {
         Print("to (-tailR) S[%d]:",i);
-        p_wrp(strat->S.iterator_at(i)->p,currRing,strat->tailRing);
+        p_wrp(sit->p,currRing,strat->tailRing);
         PrintLn();
       }
       #endif
@@ -10091,22 +10108,22 @@ void postReduceByMon(LObject* h, kStrategy strat)
   poly p,pp;
   p = pH;
   bool deleted = FALSE, ok = FALSE;
-  for(int i = 0; i < strat->S.size(); i++)
+  for (auto sit = strat->S.begin(); sit != strat->S.end(); ++sit)
   {
     p = pH;
-    if(pNext(strat->S.iterator_at(i)->p) == NULL)
+    if(pNext(sit->p) == NULL)
     {
       //pWrite(p);
-      //pWrite(strat->S[i].p);
+      //pWrite(sit->p);
       while(ok == FALSE && p != NULL)
       {
-        if(pLmDivisibleBy(strat->S.iterator_at(i)->p, p)
+        if(pLmDivisibleBy(sit->p, p)
 #ifdef HAVE_SHIFTBBA
-            || (rIsLPRing(currRing) && pLPLmDivisibleBy(strat->S.iterator_at(i)->p, p))
+            || (rIsLPRing(currRing) && pLPLmDivisibleBy(sit->p, p))
 #endif
           )
         {
-          number dummy = n_IntMod(p->coef, strat->S.iterator_at(i)->p->coef, currRing->cf);
+          number dummy = n_IntMod(p->coef, sit->p->coef, currRing->cf);
           p_SetCoeff(p,dummy,currRing);
         }
         if(nIsZero(p->coef))
@@ -10125,13 +10142,13 @@ void postReduceByMon(LObject* h, kStrategy strat)
         pp = pNext(p);
         while(pp != NULL)
         {
-          if(pLmDivisibleBy(strat->S.iterator_at(i)->p, pp)
+          if(pLmDivisibleBy(sit->p, pp)
 #ifdef HAVE_SHIFTBBA
-            || (rIsLPRing(currRing) && pLPLmDivisibleBy(strat->S.iterator_at(i)->p, pp))
+            || (rIsLPRing(currRing) && pLPLmDivisibleBy(sit->p, pp))
 #endif
             )
           {
-            number dummy = n_IntMod(pp->coef, strat->S.iterator_at(i)->p->coef, currRing->cf);
+            number dummy = n_IntMod(pp->coef, sit->p->coef, currRing->cf);
             p_SetCoeff(pp,dummy,currRing);
             if(nIsZero(pp->coef))
             {
@@ -10168,20 +10185,20 @@ void postReduceByMonSig(LObject* h, kStrategy strat)
   poly p,pp;
   p = pH;
   bool deleted = FALSE, ok = FALSE;
-  for(int i = 0; i < strat->S.size(); i++)
+  for (auto sit = strat->S.begin(); sit != strat->S.end(); ++sit)
   {
     p = pH;
-    if(pNext(strat->S.iterator_at(i)->p) == NULL)
+    if(pNext(sit->p) == NULL)
     {
       while(ok == FALSE && p!=NULL)
       {
-        if(pLmDivisibleBy(strat->S.iterator_at(i)->p, p))
+        if(pLmDivisibleBy(sit->p, p))
         {
-          poly sigMult = pDivideM(pHead(p),pHead(strat->S.iterator_at(i)->p));
-          sigMult = ppMult_mm(sigMult,pCopy(strat->S.iterator_at(i)->sig));
+          poly sigMult = pDivideM(pHead(p),pHead(sit->p));
+          sigMult = ppMult_mm(sigMult,pCopy(sit->sig));
           if(sigMult!= NULL && pLtCmp(hSig,sigMult) == 1)
           {
-            number dummy = n_IntMod(p->coef, strat->S.iterator_at(i)->p->coef, currRing->cf);
+            number dummy = n_IntMod(p->coef, sit->p->coef, currRing->cf);
             p_SetCoeff(p,dummy,currRing);
           }
           pDelete(&sigMult);
@@ -10202,13 +10219,13 @@ void postReduceByMonSig(LObject* h, kStrategy strat)
       pp = pNext(p);
       while(pp != NULL)
       {
-        if(pLmDivisibleBy(strat->S.iterator_at(i)->p, pp))
+        if(pLmDivisibleBy(sit->p, pp))
         {
-          poly sigMult = pDivideM(pHead(p),pHead(strat->S.iterator_at(i)->p));
-          sigMult = ppMult_mm(sigMult,pCopy(strat->S.iterator_at(i)->sig));
+          poly sigMult = pDivideM(pHead(p),pHead(sit->p));
+          sigMult = ppMult_mm(sigMult,pCopy(sit->sig));
           if(sigMult!= NULL && pLtCmp(hSig,sigMult) == 1)
           {
-            number dummy = n_IntMod(pp->coef, strat->S.iterator_at(i)->p->coef, currRing->cf);
+            number dummy = n_IntMod(pp->coef, sit->p->coef, currRing->cf);
             p_SetCoeff(pp,dummy,currRing);
             if(nIsZero(pp->coef))
             {
@@ -10256,29 +10273,29 @@ void finalReduceByMon(kStrategy strat)
   if(!nCoeff_is_Z(currRing->cf))
       return;
   poly p,pp;
-  for(int j = 0; j<strat->S.size(); j++)
+  for (auto sit_j = strat->S.begin(); sit_j != strat->S.end(); ++sit_j)
   {
-    if((strat->S.iterator_at(j)->p!=NULL)&&(pNext(strat->S.iterator_at(j)->p) == NULL))
+    if((sit_j->p!=NULL)&&(pNext(sit_j->p) == NULL))
     {
-      for(int i = 0; i<strat->S.size(); i++)
+      for (auto sit_i = strat->S.begin(); sit_i != strat->S.end(); ++sit_i)
       {
-        if((i != j) && (strat->S.iterator_at(i)->p != NULL))
+        if((sit_i != sit_j) && (sit_i->p != NULL))
         {
-          p = strat->S.iterator_at(i)->p;
-          while((p!=NULL) && (pLmDivisibleBy(strat->S.iterator_at(j)->p, p)
+          p = sit_i->p;
+          while((p!=NULL) && (pLmDivisibleBy(sit_j->p, p)
 #if HAVE_SHIFTBBA
-                || (rIsLPRing(currRing) && pLPLmDivisibleBy(strat->S.iterator_at(j)->p, p))
+                || (rIsLPRing(currRing) && pLPLmDivisibleBy(sit_j->p, p))
 #endif
                 ))
           {
-            number dummy = n_IntMod(p->coef, strat->S.iterator_at(j)->p->coef, currRing->cf);
+            number dummy = n_IntMod(p->coef, sit_j->p->coef, currRing->cf);
             if (!nEqual(dummy,p->coef))
             {
               if (nIsZero(dummy))
               {
                 nDelete(&dummy);
-                pLmDelete(&strat->S.iterator_at(i)->p);
-                p=strat->S.iterator_at(i)->p;
+                pLmDelete(&sit_i->p);
+                p=sit_i->p;
               }
               else
               {
@@ -10297,13 +10314,13 @@ void finalReduceByMon(kStrategy strat)
             pp = pNext(p);
             while(pp != NULL)
             {
-              if(pLmDivisibleBy(strat->S.iterator_at(j)->p, pp)
+              if(pLmDivisibleBy(sit_j->p, pp)
 #if HAVE_SHIFTBBA
-                  || (rIsLPRing(currRing) && pLPLmDivisibleBy(strat->S.iterator_at(j)->p, pp))
+                  || (rIsLPRing(currRing) && pLPLmDivisibleBy(sit_j->p, pp))
 #endif
                 )
               {
-                number dummy = n_IntMod(pp->coef, strat->S.iterator_at(j)->p->coef, currRing->cf);
+                number dummy = n_IntMod(pp->coef, sit_j->p->coef, currRing->cf);
                 if (!nEqual(dummy,pp->coef))
                 {
                   p_SetCoeff(pp,dummy,currRing);
