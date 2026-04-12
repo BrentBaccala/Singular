@@ -40,7 +40,6 @@
 #include <cstdlib>
 #include <cstdio>
 #include <cstring>
-#include <sched.h>
 
 /* ------------------------------------------------------------------ */
 /*  Instrumentation helpers (task 482)                                 */
@@ -1043,14 +1042,9 @@ void bba_parallel_loop(SweepContext *ctx)
           queue_survivor(ctx, &ctx->active[i]);
       }
 
-      // Idle-drain: main thread drains any remaining survivors when
-      // it has nothing else to do. With the task-483 multi-drainer
-      // model, worker threads can also drain between rounds, but
-      // at termination there are no more rounds, so the main thread
-      // must do a final sweep to ensure the queue is empty. It may
-      // run concurrently with workers that are still inside a drain
-      // call — the S+L lock pair in drain_survivor_queue serializes
-      // the inner work.
+      // Idle-drain: main thread drains any remaining survivors
+      // when it has nothing else to do. Task 483 runs drain only
+      // on main, so there are no other drainers to wait for.
       bool drained_something = false;
       {
         kt_surv_q_lock(ctx, 0);
@@ -1061,19 +1055,6 @@ void bba_parallel_loop(SweepContext *ctx)
           drain_survivor_queue(ctx, 0);
           drained_something = true;
         }
-      }
-
-      // Wait for any in-flight worker drains to finish before we
-      // decide the computation is done. A worker may have been mid-
-      // drain when we polled strat->L and found it empty; if so, the
-      // worker could add new entries to L before we terminate.
-      // Spin briefly on the counter; on the measured workloads
-      // drains complete in microseconds.
-      while (ctx->enterpairs_active.load(std::memory_order_acquire) > 0)
-      {
-        // Yield to let drain workers run. This loop runs only at
-        // termination, not in the hot path.
-        sched_yield();
       }
 
       if (drained_something)
