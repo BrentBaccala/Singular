@@ -903,24 +903,20 @@ static void *worker_thread(void *arg)
     kt_barrier_wait_B0(ctx, thread_id);
     if (ctx->done.load(std::memory_order_acquire)) break;
 
-    // Task 483 drain model:
-    // Before sweep, opportunistically drain the survivor FIFO if
-    // non-empty. Unlike task 275, any number of workers may drain
-    // concurrently — no enterpairs_mutex trylock. Each drain pops
-    // one survivor, runs process_survivor_lobject under the
-    // S+L lock pair, and loops until the queue is empty.
-    //
-    // The sweep B1 barrier at the end of this block ensures all
-    // drains finish before main proceeds to merge/reduce.
-    //
-    // Note: a worker that drains one or more survivors still
-    // participates in sweep afterwards if the queue becomes empty
-    // before sweep_cursor exhausts. The atomic sweep_cursor
-    // gracefully handles a variable number of sweepers.
-    if (!ctx->survivor_queue->empty())
-      drain_survivor_queue(ctx, thread_id);
-
     // Phase 1: cooperative sweep
+    //
+    // Task 483: workers do NOT drain during sweep. The drain runs
+    // only on the main thread, between reduce-B1 and the next
+    // round's fill_active_slots. This avoids racing drain-side
+    // mutations of strat->T / strat->S / strat->L against main's
+    // pLength refresh and sweep read of strat->T.
+    //
+    // The multi-drainer capability built into drain_survivor_queue
+    // (S+L lock pair) is retained for future use — e.g., if a
+    // follow-up task adds a dedicated drain barrier or continuous
+    // design. On the measured workloads the survivor queue is empty
+    // 99% of the time (parallel-bba-bottleneck-analysis.md), so
+    // single-drainer on main is not a performance loss.
 #ifdef KTHREAD_INSTRUMENT
     long sw_t0 = KT_STATS(ctx) ? kt_now_ns() : 0;
     sweep_phase(ctx, thread_id);
@@ -1167,14 +1163,21 @@ void bba_parallel_loop(SweepContext *ctx)
       break;
     }
 
-    // Queue all survivors into the FIFO. They will be drained
-    // asynchronously by a worker thread at the start of the next
-    // sweep round (or on the main thread at termination).
+    // Queue all survivors into the FIFO, then drain them on the
+    // main thread. Task 483 moved the drain onto main so it runs
+    // single-threaded, avoiding races between worker enterT/enterS
+    // mutations of strat->T / strat->S and main's pLength refresh
+    // and sweep-time read of strat->T. See the worker_thread
+    // comment for rationale.
     for (int i = 0; i < ctx->max_active; i++)
     {
       if (ctx->active[i].occupied && ctx->active[i].is_survivor)
         queue_survivor(ctx, &ctx->active[i]);
     }
+
+    // Drain the queue on main while workers wait at the next B0.
+    if (!ctx->survivor_queue->empty())
+      drain_survivor_queue(ctx, 0);
 
 #ifdef KTHREAD_INSTRUMENT
     if (KT_STATS(ctx))
