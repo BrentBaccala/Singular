@@ -1,21 +1,31 @@
 /**
  * @file kthread.cc
- * @brief Parallel Groebner basis reduction — cooperative T-sweep design.
+ * @brief Parallel Groebner basis reduction — continuous refill design
+ *        (milestone (d) of the continuous-cursor redesign, task 283).
  *
- * All threads cooperatively sweep T[0..tl] for ALL active polynomials.
- * Each T entry is loaded into cache once and checked against N active
- * polynomials, instead of N threads each loading every T entry.
+ * All threads cooperatively sweep T[0..tl] for active polynomials, but
+ * unlike the earlier barrier-based design there is no round structure.
+ * Main continuously drains survivors + refills empty slots; workers
+ * continuously pull tiles off a single atomic cursor and sweep them.
  *
- * Round structure:
- *   Fill:   Main thread fills active slots from L
- *   B0:     Barrier — start sweep
- *   Sweep:  All threads grab T indices via atomic sweep_cursor,
- *           check each T[j] against ALL active slots
- *   B1:     Barrier — sweep done
- *   Merge:  Main merges per-thread SweepResults into per-slot best
- *   Reduce: Main applies ksReducePoly for each slot with a reducer
- *   Update: Zero → mark empty; no reducer → survivor; still reducing → loop
- *   Process survivors, refill, next round
+ *   main:
+ *     loop:
+ *       drain survivor FIFO (main-only)
+ *       for each EMPTY slot: try to refill from L, publish tile batch
+ *       for each slot marked needs_republish: publish a fresh batch
+ *       if L empty AND survivor queue empty AND all slots empty: break
+ *       else wait on slot_freed_cv (short)
+ *
+ *   worker:
+ *     loop:
+ *       claim tile id by CAS on (tile_cursor, tile_end)
+ *       if no tile available: wait on tiles_avail_cv (with shutdown check)
+ *       decode (slot, slice) from tile id via the batch ring
+ *       sweep slot's slice of T[0..sl_snapshot]
+ *       if fetch_sub on tiles_remaining == 1: close the slot
+ *                                              (merge + reduce-one-step)
+ *       if slot transitions to EMPTY or produces a survivor:
+ *         signal slot_freed_cv so main can advance
  *
  * Thread safety relies on:
  *   - posInT0 (append at end, no memmove)
@@ -49,42 +59,6 @@
 #  define KT_TS(ctx, tid)     ((ctx)->tstats[tid])
 #  define KT_TIME_START(var)  long var = kt_now_ns()
 #  define KT_TIME_DELTA(var)  (kt_now_ns() - (var))
-
-static inline void kt_barrier_wait_B0(SweepContext *ctx, int thread_id)
-{
-  if (KT_STATS(ctx))
-  {
-    long t0 = kt_now_ns();
-    pthread_barrier_wait(&ctx->barrier_B0);
-    long dt = kt_now_ns() - t0;
-    ThreadStats &ts = KT_TS(ctx, thread_id);
-    ts.wait_B0_ns += dt;
-    ts.wait_B0_count++;
-    if (dt > ts.wait_B0_max_ns) ts.wait_B0_max_ns = dt;
-  }
-  else
-  {
-    pthread_barrier_wait(&ctx->barrier_B0);
-  }
-}
-
-static inline void kt_barrier_wait_B1(SweepContext *ctx, int thread_id)
-{
-  if (KT_STATS(ctx))
-  {
-    long t0 = kt_now_ns();
-    pthread_barrier_wait(&ctx->barrier_B1);
-    long dt = kt_now_ns() - t0;
-    ThreadStats &ts = KT_TS(ctx, thread_id);
-    ts.wait_B1_ns += dt;
-    ts.wait_B1_count++;
-    if (dt > ts.wait_B1_max_ns) ts.wait_B1_max_ns = dt;
-  }
-  else
-  {
-    pthread_barrier_wait(&ctx->barrier_B1);
-  }
-}
 
 static inline void kt_L_lock(SweepContext *ctx, int thread_id)
 {
@@ -132,8 +106,6 @@ static inline void kt_record_reduce(SweepContext *ctx, int thread_id, long start
 #  define KT_STATS(ctx)       (false)
 #  define KT_TIME_START(var)  ((void)0)
 #  define KT_TIME_DELTA(var)  (0L)
-static inline void kt_barrier_wait_B0(SweepContext *ctx, int /*tid*/) { pthread_barrier_wait(&ctx->barrier_B0); }
-static inline void kt_barrier_wait_B1(SweepContext *ctx, int /*tid*/) { pthread_barrier_wait(&ctx->barrier_B1); }
 static inline void kt_L_lock(SweepContext *ctx, int /*tid*/) { pthread_mutex_lock(&ctx->L_lock); }
 static inline void kt_surv_q_lock(SweepContext *ctx, int /*tid*/) { pthread_mutex_lock(&ctx->survivor_queue_mutex); }
 static inline void kt_record_reduce(SweepContext*, int, long, long) {}
@@ -191,7 +163,17 @@ SweepContext *sweep_context_init(kStrategy strat, int nthreads)
     }
   }
 
-  ctx->max_active = nthreads;  // one slot per thread
+  // Milestone (d) pipeline depth. Default 16 or nthreads (whichever is
+  // larger). Configurable via SINGULAR_PIPELINE_DEPTH for milestone (e)
+  // to sweep without recompiling.
+  {
+    const char *penv = getenv("SINGULAR_PIPELINE_DEPTH");
+    int depth = 16;
+    if (penv != NULL) { depth = atoi(penv); if (depth < 1) depth = 1; }
+    if (depth < nthreads) depth = nthreads;
+    ctx->pipeline_depth = depth;
+  }
+  ctx->max_active = ctx->pipeline_depth;
   if (ctx->max_active < 1) ctx->max_active = 1;
 
   ctx->active = (ActivePoly *)calloc(ctx->max_active, sizeof(ActivePoly));
@@ -199,6 +181,10 @@ SweepContext *sweep_context_init(kStrategy strat, int nthreads)
   {
     ctx->active[i].occupied = false;
     ctx->active[i].is_survivor = false;
+    ctx->active[i].state.store(SLOT_EMPTY, std::memory_order_relaxed);
+    ctx->active[i].gen.store(0, std::memory_order_relaxed);
+    ctx->active[i].needs_republish.store(false, std::memory_order_relaxed);
+    ctx->active[i].tiles_remaining.store(0, std::memory_order_relaxed);
   }
 
   int total_threads = ctx->num_workers + 1;
@@ -209,17 +195,21 @@ SweepContext *sweep_context_init(kStrategy strat, int nthreads)
   ctx->slot_counter.store(0, std::memory_order_relaxed);
   ctx->tile_cursor.store(0, std::memory_order_relaxed);
   ctx->tile_end.store(0, std::memory_order_relaxed);
-  ctx->tiles_K = ctx->num_workers + 1;  // K slices per slot; at least 1
+  ctx->tiles_K = ctx->num_workers + 1;  // K slices per slot
   if (ctx->tiles_K < 1) ctx->tiles_K = 1;
-  for (int i = 0; i < ctx->max_active; i++)
-  {
-    ctx->active[i].tiles_remaining.store(0, std::memory_order_relaxed);
-  }
+
+  // Tile-batch ring. Size oversubscribed to accommodate many
+  // re-publications per slot (multi-pass reductions).
+  ctx->batch_ring_size = ctx->max_active * 64;
+  if (ctx->batch_ring_size < 64) ctx->batch_ring_size = 64;
+  ctx->batches = (TileBatch *)calloc(ctx->batch_ring_size, sizeof(TileBatch));
+  ctx->batch_count.store(0, std::memory_order_relaxed);
+  pthread_mutex_init(&ctx->publish_lock, NULL);
+  pthread_cond_init(&ctx->tiles_avail_cv, NULL);
+  pthread_cond_init(&ctx->slot_freed_cv, NULL);
 
   int barrier_count = ctx->num_workers + 1;
   if (barrier_count < 1) barrier_count = 1;
-  pthread_barrier_init(&ctx->barrier_B0, NULL, barrier_count);
-  pthread_barrier_init(&ctx->barrier_B1, NULL, barrier_count);
   pthread_barrier_init(&ctx->startup_barrier, NULL, barrier_count);
 
   int alloc_n = ctx->num_workers > 0 ? ctx->num_workers : 1;
@@ -259,17 +249,19 @@ SweepContext *sweep_context_init(kStrategy strat, int nthreads)
 void sweep_context_destroy(SweepContext *ctx)
 {
   if (ctx == NULL) return;
-  pthread_barrier_destroy(&ctx->barrier_B0);
-  pthread_barrier_destroy(&ctx->barrier_B1);
   pthread_barrier_destroy(&ctx->startup_barrier);
   pthread_mutex_destroy(&ctx->L_lock);
   pthread_mutex_destroy(&ctx->survivor_queue_mutex);
+  pthread_mutex_destroy(&ctx->publish_lock);
   pthread_cond_destroy(&ctx->pairs_available);
+  pthread_cond_destroy(&ctx->tiles_avail_cv);
+  pthread_cond_destroy(&ctx->slot_freed_cv);
   delete ctx->survivor_queue;
   free(ctx->active);
   free(ctx->sweep_results);
   free(ctx->threads);
   free(ctx->thread_ids);
+  free(ctx->batches);
 #ifdef KTHREAD_INSTRUMENT
   free(ctx->tstats);
   delete ctx->rounds;
@@ -440,17 +432,89 @@ static void merge_slot_results(SweepContext *ctx, int s)
 }
 
 /*
+ * Reset per-thread sweep results for ONE slot across all threads.
+ * Called immediately before publishing a fresh batch for a slot.
+ */
+static void reset_sweep_results_one(SweepContext *ctx, int slot)
+{
+  int total_threads = ctx->num_workers + 1;
+  for (int t = 0; t < total_threads; t++)
+  {
+    SweepResult &sr = sweep_result(ctx, t, slot);
+    sr.best_reducer = -1;
+    sr.best_good = -1;
+    sr.best_pLength = 0;
+  }
+}
+
+/*
+ * Publish a fresh tile batch for slot `s`. Caller holds publish_lock.
+ * Increments the slot's generation, resets per-slot sweep results,
+ * resets tiles_remaining to K, writes the batch record, and advances
+ * tile_end. On exit, tiles_avail_cv is broadcast so waiting workers
+ * wake up.
+ *
+ * Pre-conditions:
+ *   - slot state == SLOT_FILLED (data initialised by pop_and_prepare
+ *     or kept occupied after reduce)
+ *   - tiles_remaining is either 0 (fresh slot) or already 0 after
+ *     the previous close_slot (closer was the one that dropped it)
+ */
+static void publish_slot_tiles_locked(SweepContext *ctx, int s)
+{
+  ActivePoly *ap = &ctx->active[s];
+  int K = ctx->tiles_K;
+
+  uint64_t new_gen = ap->gen.fetch_add(1, std::memory_order_relaxed) + 1;
+  ap->needs_republish.store(false, std::memory_order_relaxed);
+
+  reset_sweep_results_one(ctx, s);
+  ap->tiles_remaining.store(K, std::memory_order_relaxed);
+
+  // Slot data must be visible before the batch is observable: use
+  // release below when advancing tile_end.
+  uint64_t b = ctx->batch_count.fetch_add(1, std::memory_order_relaxed);
+  TileBatch &tb = ctx->batches[b % ctx->batch_ring_size];
+  tb.slot = s;
+  tb.gen = new_gen;
+  tb.tl_snapshot = ap->sl_snapshot;
+
+  // Publish slot state as FILLED before advancing tile_end. Workers
+  // that claim a tile from this batch must observe state=FILLED.
+  ap->state.store(SLOT_FILLED, std::memory_order_release);
+
+  // Release: readers acquiring tile_end see batch fields initialised,
+  // slot data (ap->P, not_sev, sl_snapshot), tiles_remaining, state.
+  ctx->tile_end.store((b + 1) * (uint64_t)K, std::memory_order_release);
+}
+
+/*
+ * Acquire publish_lock and publish, then broadcast tiles_avail_cv
+ * so workers wake.
+ */
+static void publish_slot_tiles(SweepContext *ctx, int s)
+{
+  pthread_mutex_lock(&ctx->publish_lock);
+  publish_slot_tiles_locked(ctx, s);
+  pthread_cond_broadcast(&ctx->tiles_avail_cv);
+  pthread_mutex_unlock(&ctx->publish_lock);
+}
+
+/*
  * Closer-reduce: called by the worker that drops tiles_remaining for
  * slot `s` to zero. Merges results and applies one ksReducePoly step.
  * If the slot becomes a survivor, pushes onto the survivor FIFO.
+ * If the slot is zero'd or turned into a survivor, transitions the
+ * slot state to SLOT_EMPTY and signals slot_freed_cv. If the slot is
+ * still occupied (needs another sweep pass), sets needs_republish
+ * so main will republish tiles for it.
  */
 static void close_slot(SweepContext *ctx, int s, int thread_id)
 {
   ActivePoly *ap = &ctx->active[s];
 
-  // Skip closer-reduce for unoccupied or already-survivor slots: they
-  // had nothing to sweep and need no reduction. (Survivors from a
-  // previous round are drained by main between B1 and next B0.)
+  // Unoccupied or already-survivor: should not happen in the continuous
+  // design (batches only fire for FILLED slots) but keep as a safety.
   if (!ap->occupied || ap->is_survivor) return;
 
   merge_slot_results(ctx, s);
@@ -470,65 +534,151 @@ static void close_slot(SweepContext *ctx, int s, int thread_id)
   }
 #endif
 
-  // If reduce turned the slot into a survivor, push to FIFO so main
-  // drains it (via enterT/enterpairs/enterS) between B1 and next B0.
+  // After reduce_slot_from_sweep, three possible outcomes:
+  //   (1) poly reduced to zero / overflow / syzComp-out → ap->occupied = false
+  //   (2) survivor               → ap->is_survivor = true, still occupied
+  //   (3) still occupied & not survivor → needs another sweep pass
   if (ap->occupied && ap->is_survivor)
+  {
+    // Queue survivor for main to drain; transfer ownership out of slot.
     queue_survivor(ctx, ap);
+    // queue_survivor clears the slot. Publish state=EMPTY.
+    ap->state.store(SLOT_EMPTY, std::memory_order_release);
+    pthread_mutex_lock(&ctx->publish_lock);
+    pthread_cond_broadcast(&ctx->slot_freed_cv);
+    pthread_mutex_unlock(&ctx->publish_lock);
+  }
+  else if (!ap->occupied)
+  {
+    // Slot cleared (zero or overflow). State → EMPTY.
+    ap->state.store(SLOT_EMPTY, std::memory_order_release);
+    pthread_mutex_lock(&ctx->publish_lock);
+    pthread_cond_broadcast(&ctx->slot_freed_cv);
+    pthread_mutex_unlock(&ctx->publish_lock);
+  }
+  else
+  {
+    // Needs another sweep pass on the same slot. Mark for main to
+    // republish; main will pick this up in its loop and call
+    // publish_slot_tiles(s).
+    ap->needs_republish.store(true, std::memory_order_release);
+    pthread_mutex_lock(&ctx->publish_lock);
+    pthread_cond_broadcast(&ctx->slot_freed_cv);
+    pthread_mutex_unlock(&ctx->publish_lock);
+  }
 }
 
-static void sweep_phase(SweepContext *ctx, int thread_id)
+/*
+ * Sweep one tile (target slot + slice). Pure read-only access to
+ * strat->T up to tl_snapshot; writes only to the worker's private
+ * SweepResult.
+ */
+static void sweep_one_tile(SweepContext *ctx, int thread_id,
+                           int s, int slice, int tl_snapshot)
 {
   kStrategy strat = ctx->strat;
   int K = ctx->tiles_K;
-  uint64_t tile_end = ctx->tile_end.load(std::memory_order_acquire);
+  ActivePoly *ap = &ctx->active[s];
+
+  // If the slot has since transitioned to EMPTY (race with closer on
+  // another slot batch?), skip. Should not happen: batches are only
+  // published while state=FILLED and the closer fires after all K
+  // tiles execute, clearing state only afterwards. Defensive anyway.
+  if (ap->state.load(std::memory_order_acquire) != SLOT_FILLED)
+    return;
+  if (!ap->occupied || ap->is_survivor) return;
+
+  unsigned long not_sev_s = ap->not_sev;
+  SweepResult &sr = sweep_result(ctx, thread_id, s);
+
+  for (int j = slice; j <= tl_snapshot; j += K)
+  {
+    unsigned long sev_j = strat->sevT[j];
+    if (sev_j & not_sev_s) continue;
+    if (!p_LmDivisibleBy(strat->T[j].p, ap->P.p, currRing))
+      continue;
+
+    if (sr.best_reducer < 0)
+      sr.best_reducer = j;
+
+    int ecart_j = strat->T[j].ecart;
+    if (ecart_j <= ap->P.ecart)
+    {
+      int pLen = strat->T[j].pLength;
+      if (pLen <= 0) pLen = 3;
+      if (sr.best_good < 0 || pLen < sr.best_pLength)
+      {
+        sr.best_good = j;
+        sr.best_pLength = pLen;
+      }
+    }
+  }
+}
+
+/*
+ * Continuous tile-pull loop. Called by worker_thread and also by
+ * main between fill/drain cycles (pump_tiles_main) so main helps
+ * sweep when there is nothing else for it to do.
+ *
+ * Termination: loops until ctx->done is set AND no pending tiles
+ * remain. Workers called with block=true wait on tiles_avail_cv when
+ * the cursor catches up to end; main calls with block=false and
+ * returns as soon as the cursor is caught up, so it can go back to
+ * refilling / draining.
+ */
+static void tile_pull_loop(SweepContext *ctx, int thread_id, bool block)
+{
+  int K = ctx->tiles_K;
 
   while (true)
   {
-    uint64_t id = ctx->tile_cursor.fetch_add(1, std::memory_order_relaxed);
-    if (id >= tile_end) break;
+    uint64_t end = ctx->tile_end.load(std::memory_order_acquire);
+    uint64_t cur = ctx->tile_cursor.load(std::memory_order_acquire);
 
-    int s = (int)(id / (uint64_t)K);
-    int slice = (int)(id % (uint64_t)K);
-
-    ActivePoly *ap = &ctx->active[s];
-
-    // Skip empty / survivor slots cheaply, but still decrement the
-    // counter so the closer-reduce firing is consistent.
-    if (!ap->occupied || ap->is_survivor)
+    if (cur >= end)
     {
-      if (ap->tiles_remaining.fetch_sub(1, std::memory_order_acq_rel) == 1)
-        close_slot(ctx, s, thread_id);
+      if (!block) return;
+      if (ctx->done.load(std::memory_order_acquire)) return;
+      // Wait for more tiles or shutdown.
+      pthread_mutex_lock(&ctx->publish_lock);
+      // Re-check under lock.
+      uint64_t end2 = ctx->tile_end.load(std::memory_order_acquire);
+      uint64_t cur2 = ctx->tile_cursor.load(std::memory_order_acquire);
+      bool done = ctx->done.load(std::memory_order_acquire);
+      if (cur2 >= end2 && !done)
+        pthread_cond_wait(&ctx->tiles_avail_cv, &ctx->publish_lock);
+      pthread_mutex_unlock(&ctx->publish_lock);
       continue;
     }
 
-    int tl = ap->sl_snapshot;
-    unsigned long not_sev_s = ap->not_sev;
-    SweepResult &sr = sweep_result(ctx, thread_id, s);
+    // Try to claim id via CAS.
+    if (!ctx->tile_cursor.compare_exchange_weak(
+          cur, cur + 1,
+          std::memory_order_acq_rel, std::memory_order_acquire))
+      continue;  // another thread took it; retry
+    uint64_t id = cur;
 
-    // Walk j = slice, slice+K, slice+2K, ... up to tl inclusive.
-    for (int j = slice; j <= tl; j += K)
+    uint64_t b = id / (uint64_t)K;
+    int slice = (int)(id % (uint64_t)K);
+    TileBatch &tb = ctx->batches[b % ctx->batch_ring_size];
+    int s = tb.slot;
+    int tl = tb.tl_snapshot;
+    uint64_t expected_gen = tb.gen;
+
+    ActivePoly *ap = &ctx->active[s];
+    uint64_t cur_gen = ap->gen.load(std::memory_order_acquire);
+
+    if (cur_gen == expected_gen)
     {
-      unsigned long sev_j = strat->sevT[j];
-      if (sev_j & not_sev_s) continue;
-      if (!p_LmDivisibleBy(strat->T[j].p, ap->P.p, currRing))
-        continue;
-
-      if (sr.best_reducer < 0)
-        sr.best_reducer = j;
-
-      int ecart_j = strat->T[j].ecart;
-      if (ecart_j <= ap->P.ecart)
-      {
-        int pLen = strat->T[j].pLength;
-        if (pLen <= 0) pLen = 3;
-        if (sr.best_good < 0 || pLen < sr.best_pLength)
-        {
-          sr.best_good = j;
-          sr.best_pLength = pLen;
-        }
-      }
+      sweep_one_tile(ctx, thread_id, s, slice, tl);
     }
+    // else: stale batch (should not happen given pipeline constraints) —
+    // skip the sweep but still decrement tiles_remaining. But
+    // tiles_remaining belongs to the *current* gen; decrementing it
+    // would break the closer protocol. This is why we sized the ring
+    // generously and only publish a new batch after tiles_remaining==0.
 
+    // Decrement tiles_remaining; closer if we hit zero.
     if (ap->tiles_remaining.fetch_sub(1, std::memory_order_acq_rel) == 1)
       close_slot(ctx, s, thread_id);
   }
@@ -545,17 +695,8 @@ static void sweep_phase(SweepContext *ctx, int thread_id)
 /*  Reset sweep results for all threads and all slots.                 */
 /* ------------------------------------------------------------------ */
 
-static void reset_sweep_results(SweepContext *ctx)
-{
-  int total_threads = ctx->num_workers + 1;
-  int total = total_threads * ctx->max_active;
-  for (int i = 0; i < total; i++)
-  {
-    ctx->sweep_results[i].best_reducer = -1;
-    ctx->sweep_results[i].best_good = -1;
-    ctx->sweep_results[i].best_pLength = 0;
-  }
-}
+/* reset_sweep_results removed in milestone (d): per-slot reset in
+ * publish_slot_tiles_locked via reset_sweep_results_one. */
 
 /* ------------------------------------------------------------------ */
 /*  Reduce one slot: apply ONE ksReducePoly step from sweep result.    */
@@ -658,35 +799,49 @@ static void reduce_slot_from_sweep(SweepContext *ctx, int slot, int thread_id)
 /* ------------------------------------------------------------------ */
 
 /* ------------------------------------------------------------------ */
-/*  Fill empty active slots from L. Returns number of occupied slots.  */
+/*  Refill empty slots from L, then publish tile batches for any     */
+/*  slot that is SLOT_EMPTY (just filled) or has needs_republish     */
+/*  (closer left it occupied and needing another sweep). Returns the */
+/*  number of slots currently FILLED (in pipeline) after the pass.   */
+/*  Main-thread only.                                                 */
 /* ------------------------------------------------------------------ */
 
-static int fill_active_slots(SweepContext *ctx)
+static int refill_and_publish(SweepContext *ctx)
 {
-  int occupied = 0;
+  int in_pipeline = 0;
 
   for (int s = 0; s < ctx->max_active; s++)
   {
-    if (ctx->active[s].occupied)
+    ActivePoly *ap = &ctx->active[s];
+    int st = ap->state.load(std::memory_order_acquire);
+
+    if (st == SLOT_EMPTY)
     {
-      if (!ctx->active[s].is_survivor)
-        occupied++;
+      // Try to fill from L.
+      kt_L_lock(ctx, 0);
+      BOOLEAN got = pop_and_prepare(ctx, ap);
+      pthread_mutex_unlock(&ctx->L_lock);
+      if (got)
+      {
+        ctx->stat_rounds.fetch_add(1, std::memory_order_relaxed);
+        // pop_and_prepare set ap->occupied=true; now publish.
+        publish_slot_tiles(ctx, s);
+        in_pipeline++;
+      }
       continue;
     }
-
-    // Try to fill this empty slot from L
-    kt_L_lock(ctx, 0);
-    BOOLEAN got = pop_and_prepare(ctx, &ctx->active[s]);
-    pthread_mutex_unlock(&ctx->L_lock);
-
-    if (got)
+    // state == SLOT_FILLED
+    if (ap->needs_republish.load(std::memory_order_acquire))
     {
-      occupied++;
-      ctx->stat_rounds.fetch_add(1, std::memory_order_relaxed);
+      // Closer-reduce left this slot needing another sweep pass.
+      // Re-snapshot tl here, in case T has grown since last pass.
+      ap->sl_snapshot = ctx->strat->T.size() - 1;
+      publish_slot_tiles(ctx, s);
     }
+    in_pipeline++;
   }
 
-  return occupied;
+  return in_pipeline;
 }
 
 /* ------------------------------------------------------------------ */
@@ -930,21 +1085,10 @@ struct WorkerArg
 };
 
 /**
- * Worker thread. Each round (milestone c of task 282):
- *   1. B0: barrier_B0 (wait for main to signal start of round)
- *   2. sweep_phase: cooperatively scan T for all active polynomials;
- *      the worker that closes each slot's tiles_remaining counter
- *      runs closer-reduce inline (merge_slot_results + reduce_slot_
- *      from_sweep + queue_survivor on survivors).
- *   3. B1: barrier_B1 (sweep + closer-reduce done, main drains
- *      survivor FIFO + refills)
- * Workers check ctx->done after B0 and exit if true.
- *
- * The 2-barrier protocol per round (B0, B1 remain in place per the
- * milestone-c prompt; the old reduce-B0/reduce-B1 pair is removed):
- *   B0: start sweep + closer-reduce     B1: sweep + reduce done
- * Between B1 and the next B0, main drains the survivor FIFO and
- * refills empty slots. Multiple rounds may be needed per polynomial.
+ * Worker thread (milestone d, task 283). No barriers. The worker is
+ * a continuous tile-pull loop. It waits on tiles_avail_cv when the
+ * tile cursor catches up to tile_end, and exits when ctx->done is
+ * set and no more tiles remain.
  */
 static void *worker_thread(void *arg)
 {
@@ -960,44 +1104,18 @@ static void *worker_thread(void *arg)
   // Wait for all threads to be created and main to be ready
   pthread_barrier_wait(&ctx->startup_barrier);
 
-  while (true)
-  {
-    // Wait for main to signal start of batch (or done)
-    kt_barrier_wait_B0(ctx, thread_id);
-    if (ctx->done.load(std::memory_order_acquire)) break;
-
-    // Phase 1: cooperative sweep
-    //
-    // Task 483: workers do NOT drain during sweep. The drain runs
-    // only on the main thread, between reduce-B1 and the next
-    // round's fill_active_slots. This avoids racing drain-side
-    // mutations of strat->T / strat->S / strat->L against main's
-    // pLength refresh and sweep read of strat->T.
-    //
-    // The multi-drainer capability built into drain_survivor_queue
-    // (S+L lock pair) is retained for future use — e.g., if a
-    // follow-up task adds a dedicated drain barrier or continuous
-    // design. On the measured workloads the survivor queue is empty
-    // 99% of the time (parallel-bba-bottleneck-analysis.md), so
-    // single-drainer on main is not a performance loss.
 #ifdef KTHREAD_INSTRUMENT
-    long sw_t0 = KT_STATS(ctx) ? kt_now_ns() : 0;
-    sweep_phase(ctx, thread_id);
-    if (KT_STATS(ctx))
-    {
-      ThreadStats &ts = KT_TS(ctx, thread_id);
-      ts.sweep_ns += kt_now_ns() - sw_t0;
-      ts.sweep_count++;
-    }
-#else
-    sweep_phase(ctx, thread_id);
+  long sw_t0 = KT_STATS(ctx) ? kt_now_ns() : 0;
 #endif
-    // Milestone (c) of task 282: closer-reduce happens inline in
-    // sweep_phase. No separate reduce barrier pair; B1 here signals
-    // that sweep + closer-reduce are both finished for this round.
-    kt_barrier_wait_B1(ctx, thread_id);
+  tile_pull_loop(ctx, thread_id, /*block=*/true);
+#ifdef KTHREAD_INSTRUMENT
+  if (KT_STATS(ctx))
+  {
+    ThreadStats &ts = KT_TS(ctx, thread_id);
+    ts.sweep_ns += kt_now_ns() - sw_t0;
+    ts.sweep_count++;
   }
-
+#endif
   return NULL;
 }
 
@@ -1052,6 +1170,7 @@ void bba_parallel_loop(SweepContext *ctx)
     long reserve_n = (long)cur_T * 4;
     if (reserve_n < 4096) reserve_n = 4096;
     strat->T.ensure_capacity((int)reserve_n);
+    strat->sevT.ensure_capacity((int)reserve_n);
   }
 
 #ifdef KTHREAD_INSTRUMENT
@@ -1086,223 +1205,114 @@ void bba_parallel_loop(SweepContext *ctx)
   if (ctx->num_workers > 0)
     pthread_barrier_wait(&ctx->startup_barrier);
 
-  // Main loop: cooperative sweep rounds
+  // Continuous refill loop (milestone d, task 283). No barriers.
   //
-  // Each round:
-  //   Fill:    main fills empty active slots from L
-  //   B0:      barrier — start sweep
-  //   Sweep:   all threads cooperatively scan T (atomic cursor)
-  //   B1:      barrier — sweep done
-  //   Merge:   main merges per-thread SweepResults
-  //   Reduce:  main applies ksReducePoly for slots with reducers
-  //   Process: survivors → enterT/enterpairs/enterS (serialized)
-  //   Loop if any slots still need reduction
+  // Each iteration:
+  //   1. If siCntrlc: shutdown path.
+  //   2. Drain any survivors from the FIFO (serially, on main).
+  //   3. Refresh pLength for any new T entries added by drain.
+  //   4. Refill empty slots from L and (re)publish tiles for any slot
+  //      that closer-reduce marked needs_republish.
+  //   5. If nothing to do (all slots empty, L empty, queue empty):
+  //        a. Help sweep any outstanding tiles (non-blocking) so we
+  //           don't sit on main while workers still have work.
+  //        b. If still idle after that, break out — we are done.
+  //   6. Else, wait briefly on slot_freed_cv so closers can wake us.
   //
+  // Main only runs the drain; workers never touch strat->T / strat->S
+  // / strat->L (except the L_lock for pop_and_prepare, which happens
+  // only on the main thread via refill_and_publish).
   while (true)
   {
     if (siCntrlc)
     {
       while (!strat->L.empty()) strat->L.pop_and_erase();
       strat->noClearS = TRUE;
-      if (ctx->num_workers > 0)
-      {
-        // Workers are waiting at B0; signal done and release them
-        ctx->done.store(true, std::memory_order_release);
-        pthread_barrier_wait(&ctx->barrier_B0);
-      }
-      goto parallel_cleanup;
+      goto parallel_shutdown;
     }
-
-    // Fill phase: fill empty active slots from L
-    int occupied = fill_active_slots(ctx);
-
-    // If no occupied slots (all done or L empty), check for remaining work
-    if (occupied == 0)
-    {
-      // Queue any remaining active-slot survivors.
-      for (int i = 0; i < ctx->max_active; i++)
-      {
-        if (ctx->active[i].occupied && ctx->active[i].is_survivor)
-          queue_survivor(ctx, &ctx->active[i]);
-      }
-
-      // Idle-drain: main thread drains any remaining survivors
-      // when it has nothing else to do. Task 483 runs drain only
-      // on main, so there are no other drainers to wait for.
-      bool drained_something = false;
-      {
-        kt_surv_q_lock(ctx, 0);
-        bool queue_empty = ctx->survivor_queue->empty();
-        pthread_mutex_unlock(&ctx->survivor_queue_mutex);
-        if (!queue_empty)
-        {
-          drain_survivor_queue(ctx, 0);
-          drained_something = true;
-        }
-      }
-
-      if (drained_something)
-      {
-        // Re-compute pLength for new T entries
-        for (int j = 0; j < strat->T.size(); j++)
-        {
-          if (strat->T[j].pLength <= 0)
-            strat->T[j].pLength = pLength(strat->T[j].p ? strat->T[j].p : strat->T[j].t_p);
-        }
-        // Try again — process_survivor may have added to L via enterpairs
-        continue;
-      }
-
-      // Nothing queued and no survivors. Either L is now populated
-      // (loop back and fill) or we are done.
-      if (strat->L.empty())
-        break;
-      // L has new entries, loop back to fill
-      continue;
-    }
-
-    // Prepare for sweep round
-    reset_sweep_results(ctx);
-    ctx->sweep_cursor.store(0, std::memory_order_relaxed);
-
-    // Milestone (b): set up tile cursor. K = tiles_K (num_threads).
-    // Every slot — occupied or not — contributes K tiles to keep the
-    // id-to-(slot,slice) decoding a simple divmod. Empty slots are
-    // cheap no-ops in sweep_phase; tiles_remaining for them still
-    // reaches zero. Milestone (c): the worker that drops an occupied
-    // slot's counter to zero runs closer-reduce (see close_slot).
-    {
-      int K = ctx->tiles_K;
-      for (int s = 0; s < ctx->max_active; s++)
-      {
-        ctx->active[s].tiles_remaining.store(K, std::memory_order_relaxed);
-      }
-      ctx->tile_cursor.store(0, std::memory_order_relaxed);
-      // Publish end last, with release, so workers that arrive at B0
-      // see the fully-initialized counters.
-      ctx->tile_end.store((uint64_t)ctx->max_active * (uint64_t)K,
-                          std::memory_order_release);
-    }
-
-#ifdef KTHREAD_INSTRUMENT
-    long round_t0 = 0;
-    int depth_start = 0;
-    if (KT_STATS(ctx))
-    {
-      round_t0 = kt_now_ns();
-      pthread_mutex_lock(&ctx->survivor_queue_mutex);
-      depth_start = (int)ctx->survivor_queue->size();
-      pthread_mutex_unlock(&ctx->survivor_queue_mutex);
-      pthread_mutex_lock(&ctx->stats_lock);
-      ctx->reduces_this_round->clear();
-      pthread_mutex_unlock(&ctx->stats_lock);
-    }
-#endif
-
-    // B0: signal start of sweep (workers are waiting here)
-    if (ctx->num_workers > 0)
-      kt_barrier_wait_B0(ctx, 0);
-
-    // Phase 1: cooperative sweep — all threads scan T for active polys
-#ifdef KTHREAD_INSTRUMENT
-    long sw_t0 = KT_STATS(ctx) ? kt_now_ns() : 0;
-    sweep_phase(ctx, 0);
-    long main_sweep_ns = 0;
-    if (KT_STATS(ctx))
-    {
-      main_sweep_ns = kt_now_ns() - sw_t0;
-      KT_TS(ctx, 0).sweep_ns += main_sweep_ns;
-      KT_TS(ctx, 0).sweep_count++;
-    }
-#else
-    sweep_phase(ctx, 0);
-#endif
-
-    // B1: sweep + closer-reduce done.
-    //
-    // Milestone (c) of task 282: closer-reduce is now inlined in
-    // sweep_phase — the worker that drops a slot's tiles_remaining
-    // to zero merges the per-thread SweepResults for that slot and
-    // runs reduce_slot_from_sweep inline. Survivors are pushed to
-    // the survivor FIFO from inside sweep_phase. No separate reduce
-    // B0/B1 barrier pair is needed.
-    kt_barrier_wait_B1(ctx, 0);
 
     if (strat->overflow || errorreported)
     {
       while (!strat->L.empty()) strat->L.pop_and_erase();
       for (int i = 0; i < ctx->max_active; i++)
         ctx->active[i].occupied = false;
-      break;
+      goto parallel_shutdown;
     }
 
-    // Queue all survivors into the FIFO, then drain them on the
-    // main thread. Task 483 moved the drain onto main so it runs
-    // single-threaded, avoiding races between worker enterT/enterS
-    // mutations of strat->T / strat->S and main's pLength refresh
-    // and sweep-time read of strat->T. See the worker_thread
-    // comment for rationale.
-    for (int i = 0; i < ctx->max_active; i++)
+    // Step 1: drain survivor FIFO on main thread.
     {
-      if (ctx->active[i].occupied && ctx->active[i].is_survivor)
-        queue_survivor(ctx, &ctx->active[i]);
-    }
-
-    // Drain the queue on main while workers wait at the next B0.
-    if (!ctx->survivor_queue->empty())
-      drain_survivor_queue(ctx, 0);
-
-#ifdef KTHREAD_INSTRUMENT
-    if (KT_STATS(ctx))
-    {
-      RoundRecord rr;
-      rr.round_id = (long)ctx->rounds->size();
-      rr.timestamp_ns = round_t0 - ctx->start_ns;
-      rr.queue_depth_start = depth_start;
-      pthread_mutex_lock(&ctx->survivor_queue_mutex);
-      rr.queue_depth_end = (int)ctx->survivor_queue->size();
+      kt_surv_q_lock(ctx, 0);
+      bool queue_empty = ctx->survivor_queue->empty();
       pthread_mutex_unlock(&ctx->survivor_queue_mutex);
-      rr.active_slots = occupied;
-      rr.sweep_ns_main = main_sweep_ns;
-      rr.round_total_ns = kt_now_ns() - round_t0;
-      pthread_mutex_lock(&ctx->stats_lock);
-      rr.reductions = (int)ctx->reduces_this_round->size();
-      long mn = -1, mx = 0, sm = 0;
-      for (auto &ev : *ctx->reduces_this_round)
+      if (!queue_empty)
       {
-        if (mn < 0 || ev.duration_ns < mn) mn = ev.duration_ns;
-        if (ev.duration_ns > mx) mx = ev.duration_ns;
-        sm += ev.duration_ns;
+        drain_survivor_queue(ctx, 0);
+        // Refresh pLength for any T entries added by process_survivor.
+        for (int j = 0; j < strat->T.size(); j++)
+        {
+          if (strat->T[j].pLength <= 0)
+            strat->T[j].pLength = pLength(strat->T[j].p ? strat->T[j].p : strat->T[j].t_p);
+        }
       }
-      rr.min_reduce_ns = (mn < 0) ? 0 : mn;
-      rr.max_reduce_ns = mx;
-      rr.sum_reduce_ns = sm;
-      pthread_mutex_unlock(&ctx->stats_lock);
-      ctx->rounds->push_back(rr);
     }
-#endif
 
-    // Re-compute pLength for any new T entries. A worker may have
-    // drained the queue during the sweep phase, adding new T entries
-    // via enterT, so we unconditionally refresh pLength here.
-    for (int j = 0; j < strat->T.size(); j++)
+    // Step 2: refill empty slots and republish any slot needing another pass.
+    int in_pipeline = refill_and_publish(ctx);
+
+    // Step 3: termination check.
+    if (in_pipeline == 0)
     {
-      if (strat->T[j].pLength <= 0)
-        strat->T[j].pLength = pLength(strat->T[j].p ? strat->T[j].p : strat->T[j].t_p);
+      kt_surv_q_lock(ctx, 0);
+      bool queue_empty = ctx->survivor_queue->empty();
+      pthread_mutex_unlock(&ctx->survivor_queue_mutex);
+      if (queue_empty && strat->L.empty())
+        break;
+      // Else there is still work (drain produced survivors, or L has
+      // new entries) — loop back immediately.
+      continue;
     }
 
-    // Slots may still be occupied and need more reduction rounds.
-    // Loop back: fill empty slots from L, sweep again for all active slots.
+    // Step 4: help sweep with tiles while waiting. Non-blocking: main
+    // returns as soon as the tile cursor catches up with tile_end so
+    // it can go back to refilling/draining.
+    tile_pull_loop(ctx, 0, /*block=*/false);
+
+    // Step 5: wait for a slot-freed event or new tiles available.
+    // We use a short timed wait so we don't rely solely on signals —
+    // if a closer races our check, we won't deadlock.
+    pthread_mutex_lock(&ctx->publish_lock);
+    // Cheap re-check: if any slot is empty or needs republish, or the
+    // survivor queue got work, don't sleep.
+    bool any_free = false;
+    for (int s = 0; s < ctx->max_active; s++)
+    {
+      int st = ctx->active[s].state.load(std::memory_order_acquire);
+      if (st == SLOT_EMPTY ||
+          ctx->active[s].needs_republish.load(std::memory_order_acquire))
+      {
+        any_free = true;
+        break;
+      }
+    }
+    if (!any_free)
+    {
+      struct timespec ts;
+      clock_gettime(CLOCK_REALTIME, &ts);
+      // 1 ms timeout.
+      ts.tv_nsec += 1000000;
+      if (ts.tv_nsec >= 1000000000) { ts.tv_sec++; ts.tv_nsec -= 1000000000; }
+      pthread_cond_timedwait(&ctx->slot_freed_cv, &ctx->publish_lock, &ts);
+    }
+    pthread_mutex_unlock(&ctx->publish_lock);
   }
 
-  // Signal workers to exit: hit B0 with ctx->done=true so they break
-  if (ctx->num_workers > 0)
-  {
-    ctx->done.store(true, std::memory_order_release);
-    pthread_barrier_wait(&ctx->barrier_B0);
-  }
+parallel_shutdown:
+  // Signal done and wake all workers so they exit their tile_pull_loop.
+  ctx->done.store(true, std::memory_order_release);
+  pthread_mutex_lock(&ctx->publish_lock);
+  pthread_cond_broadcast(&ctx->tiles_avail_cv);
+  pthread_mutex_unlock(&ctx->publish_lock);
 
-parallel_cleanup:
   for (int t = 0; t < ctx->num_workers; t++)
     pthread_join(ctx->threads[t], NULL);
 

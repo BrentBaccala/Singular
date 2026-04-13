@@ -119,11 +119,15 @@ struct SweepResult
 
 /**
  * An active polynomial slot in the parallel sweep.
+ *
+ * Milestone (d) of the continuous-cursor redesign (task 283): slots
+ * have explicit state and generation counters so workers can tell
+ * whether a slot they dispatched to via a tile batch is still live.
  */
 struct ActivePoly
 {
   LObject P;                // the polynomial being reduced
-  bool occupied;            // is this slot in use?
+  bool occupied;            // is this slot in use? (main-only view)
   unsigned long not_sev;    // ~P.sev for the sweep filter
   int best_reducer;         // merged: best T[j] found (any divisor), -1 = none
   int best_good;            // merged: best T[j] with ecart <= P.ecart, -1 = none
@@ -133,25 +137,51 @@ struct ActivePoly
   long reddeg;              // degree tracking from redHoney
   int pass;                 // reduction pass count
 
-  // T-snapshot bound: value of strat->T.size()-1 recorded at the moment
-  // this slot was pulled from L (see pop_and_prepare). The sweep uses
-  // this as the per-slot upper bound on T indices rather than the global
-  // strat->T.size()-1. Milestone (a) of the continuous-cursor redesign
-  // (task 280): infrastructure only — snapshots are all equal to the
-  // current T length at sweep time, since enterT is still serialized
-  // after B1. Later milestones will let workers observe growing T.
+  // T-snapshot bound (task 280). Captured on refill; used as the
+  // per-slot upper bound on T indices in the sweep.
   int sl_snapshot;
 
-  // Tile cursor infrastructure (task 281 milestone b, task 282 milestone c).
-  // A tile is a pair (slot, slice); the sweep phase iterates tiles.
-  //
-  // tiles_remaining is initialized to K (the number of slices per slot)
-  // when the slot is filled; each tile that has completed its sweep
-  // fetch_sub(1)s this counter. Task 282: when the counter reaches
-  // zero, that worker ("the closer") merges the per-thread
-  // SweepResults for the slot and runs reduce_slot_from_sweep inline,
-  // pushing survivors onto the survivor FIFO.
+  // Tile cursor infrastructure (task 281/282). tiles_remaining counts
+  // down as worker-tiles sweep the slot; fetch_sub==1 is the closer
+  // and runs reduce_slot_from_sweep.
   std::atomic<int> tiles_remaining;
+
+  // Milestone (d) — slot state and generation.
+  //
+  //   state     : SLOT_EMPTY (main may refill) / SLOT_FILLED (worker
+  //               may sweep). Transitions are release/acquire ordered.
+  //   gen       : incremented every time the slot is re-published
+  //               (fresh refill from L, or re-sweep after a reduce
+  //               that kept the slot occupied). Workers read this
+  //               against the tile batch's `gen` to discard tiles
+  //               from stale publications (though the pipeline design
+  //               avoids stale batches in practice).
+  //   needs_republish: closer-reduce left the slot occupied-and-not-
+  //               survivor — it needs another sweep pass. Main
+  //               notices and publishes a fresh tile batch.
+  std::atomic<int> state;
+  std::atomic<uint64_t> gen;
+  std::atomic<bool> needs_republish;
+};
+
+/**
+ * Slot-state values.
+ */
+enum {
+  SLOT_EMPTY  = 0,
+  SLOT_FILLED = 1,
+};
+
+/**
+ * A tile batch record: K tiles all targeting one (slot, gen). Main
+ * stores one of these into the batches[] ring before publishing
+ * tile_end; workers read it to decode the tile destination.
+ */
+struct TileBatch
+{
+  int slot;           // which ActivePoly slot
+  uint64_t gen;       // expected generation of that slot
+  int tl_snapshot;    // T upper bound to sweep to
 };
 
 /**
@@ -198,15 +228,37 @@ struct SweepContext
   std::atomic<uint64_t> tile_end;
   int tiles_K;
 
+  // Milestone (d) — tile-batch ring.
+  //
+  // Each tile id in [batch*K, (batch+1)*K) targets
+  //   slot  = batches[batch % batch_ring_size].slot
+  //   slice = id % K
+  // batch_ring_size must be large enough that a batch's data is
+  // never overwritten while any worker still holds a tile from it.
+  // In practice the closer-reduce fires before any new batch for
+  // the same slot is published, so a ring of size ~64 * pipeline
+  // depth is plenty. publish_lock serialises main+closer writes
+  // into this ring and the tile_end advance.
+  TileBatch *batches;
+  int batch_ring_size;
+  std::atomic<uint64_t> batch_count;   // total batches published
+  pthread_mutex_t publish_lock;
+  pthread_cond_t  tiles_avail_cv;      // workers wait here for new tiles
+  pthread_cond_t  slot_freed_cv;       // main waits here for slot/queue event
+
   // Shared atomic slot counter for Phase 1 and Phase 3
   std::atomic<int> slot_counter;
 
-  // Barriers for phase synchronization (separate to prevent reuse races)
-  pthread_barrier_t barrier_B0;   // start of batch
-  pthread_barrier_t barrier_B1;   // end of batch (all done reducing)
-
-  // Startup barrier: ensures all workers are running before main loop
+  // Barriers remain only for startup synchronisation. B0/B1 removed
+  // in milestone (d) — main and workers now run continuously.
   pthread_barrier_t startup_barrier;
+
+  // Pipeline depth: how many slots we allow to be filled at once.
+  // Replaces max_active as the "target concurrency" knob.
+  // Configurable via SINGULAR_PIPELINE_DEPTH (default 16 or num_threads,
+  // whichever is larger). Note: max_active (number of slot records)
+  // is set to pipeline_depth.
+  int pipeline_depth;
 
   // Thread handles and IDs
   pthread_t *threads;
