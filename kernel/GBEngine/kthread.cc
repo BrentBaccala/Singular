@@ -214,7 +214,6 @@ SweepContext *sweep_context_init(kStrategy strat, int nthreads)
   for (int i = 0; i < ctx->max_active; i++)
   {
     ctx->active[i].tiles_remaining.store(0, std::memory_order_relaxed);
-    ctx->active[i].ready = false;
   }
 
   int barrier_count = ctx->num_workers + 1;
@@ -377,7 +376,7 @@ static BOOLEAN pop_and_prepare(SweepContext *ctx, ActivePoly *ap)
 }
 
 /* ------------------------------------------------------------------ */
-/*  Sweep phase: tile cursor (milestone b of task 281).                */
+/*  Sweep phase: tile cursor with closer-reduce (milestone c, task 282)*/
 /*                                                                     */
 /*  A tile is a pair (slot, slice). For each occupied slot, its        */
 /*  sl_snapshot range [0..sl_snapshot] is split into K slices where    */
@@ -387,13 +386,95 @@ static BOOLEAN pop_and_prepare(SweepContext *ctx, ActivePoly *ap)
 /*  Per-slot SweepResult remains per-thread to avoid contention (a     */
 /*  single slot's K slices may be claimed by K different workers).     */
 /*  After sweeping a tile, the worker fetch_sub(1)s the slot's         */
-/*  tiles_remaining counter; the worker that drops it to zero sets     */
-/*  the slot's `ready` flag. In this milestone the flag is only        */
-/*  consulted informationally after B1 — correctness is unchanged from */
-/*  milestone (a). Milestone (c) will use it to trigger closer-reduce  */
-/*  inside the sweep phase, and milestone (d) will remove the          */
-/*  surrounding B0/B1 barriers.                                        */
+/*  tiles_remaining counter. The worker that drops it to zero is the   */
+/*  "closer": it merges the K per-thread SweepResults for the slot     */
+/*  and immediately calls reduce_slot_from_sweep on it (closer-        */
+/*  reduces). Survivors are pushed to the survivor FIFO via            */
+/*  queue_survivor; the main thread drains them between B1 and the     */
+/*  next B0 as in milestone (b).                                       */
+/*                                                                     */
+/*  Safety: reduce_slot_from_sweep writes only slot-local state        */
+/*  (ap->P, ap->not_sev, ap->d, ap->pass, ...) plus idempotent-store   */
+/*  of strat->overflow and atomic stat_* counters. It reads strat->T   */
+/*  (stable while enterT is serialized on main between B1 and B0) and  */
+/*  calls ksReducePoly (operates on ap->P and read-only T entry).      */
+/*  No two workers can close the same slot (fetch_sub(1)==1 is         */
+/*  single-winner). Workers closing *different* slots run in           */
+/*  parallel; their only shared writes are the atomic counters.        */
 /* ------------------------------------------------------------------ */
+
+// Forward declarations: closer-reduce calls these from inside sweep_phase.
+static void reduce_slot_from_sweep(SweepContext *ctx, int slot, int thread_id);
+static void queue_survivor(SweepContext *ctx, ActivePoly *ap);
+
+/*
+ * Merge the per-thread SweepResults for one slot into ap->best_*.
+ * Called by the single worker that closes the slot's tiles_remaining
+ * counter, so no locking is required: the acq_rel fetch_sub that
+ * selects the closer synchronizes-with every other worker's release
+ * of its per-thread SweepResult for this slot.
+ */
+static void merge_slot_results(SweepContext *ctx, int s)
+{
+  int total_threads = ctx->num_workers + 1;
+  int best_reducer = -1, best_good = -1, best_pLength = 0;
+
+  for (int t = 0; t < total_threads; t++)
+  {
+    SweepResult &sr = sweep_result(ctx, t, s);
+    if (sr.best_reducer >= 0 && best_reducer < 0)
+      best_reducer = sr.best_reducer;
+    if (sr.best_good >= 0)
+    {
+      if (best_good < 0 || sr.best_pLength < best_pLength)
+      {
+        best_good = sr.best_good;
+        best_pLength = sr.best_pLength;
+      }
+    }
+  }
+
+  ctx->active[s].best_reducer = best_reducer;
+  ctx->active[s].best_good = best_good;
+  ctx->active[s].best_pLength = best_pLength;
+}
+
+/*
+ * Closer-reduce: called by the worker that drops tiles_remaining for
+ * slot `s` to zero. Merges results and applies one ksReducePoly step.
+ * If the slot becomes a survivor, pushes onto the survivor FIFO.
+ */
+static void close_slot(SweepContext *ctx, int s, int thread_id)
+{
+  ActivePoly *ap = &ctx->active[s];
+
+  // Skip closer-reduce for unoccupied or already-survivor slots: they
+  // had nothing to sweep and need no reduction. (Survivors from a
+  // previous round are drained by main between B1 and next B0.)
+  if (!ap->occupied || ap->is_survivor) return;
+
+  merge_slot_results(ctx, s);
+
+#ifdef KTHREAD_INSTRUMENT
+  long rstart = KT_STATS(ctx) ? kt_now_ns() : 0;
+#endif
+  reduce_slot_from_sweep(ctx, s, thread_id);
+#ifdef KTHREAD_INSTRUMENT
+  if (KT_STATS(ctx))
+  {
+    long rdur = kt_now_ns() - rstart;
+    ThreadStats &ts = KT_TS(ctx, thread_id);
+    ts.reduce_ns += rdur;
+    ts.reduce_count++;
+    kt_record_reduce(ctx, thread_id, rstart - ctx->start_ns, rdur);
+  }
+#endif
+
+  // If reduce turned the slot into a survivor, push to FIFO so main
+  // drains it (via enterT/enterpairs/enterS) between B1 and next B0.
+  if (ap->occupied && ap->is_survivor)
+    queue_survivor(ctx, ap);
+}
 
 static void sweep_phase(SweepContext *ctx, int thread_id)
 {
@@ -412,11 +493,11 @@ static void sweep_phase(SweepContext *ctx, int thread_id)
     ActivePoly *ap = &ctx->active[s];
 
     // Skip empty / survivor slots cheaply, but still decrement the
-    // counter so the slot's "ready" bookkeeping stays consistent.
+    // counter so the closer-reduce firing is consistent.
     if (!ap->occupied || ap->is_survivor)
     {
       if (ap->tiles_remaining.fetch_sub(1, std::memory_order_acq_rel) == 1)
-        ap->ready = true;
+        close_slot(ctx, s, thread_id);
       continue;
     }
 
@@ -449,46 +530,16 @@ static void sweep_phase(SweepContext *ctx, int thread_id)
     }
 
     if (ap->tiles_remaining.fetch_sub(1, std::memory_order_acq_rel) == 1)
-      ap->ready = true;
+      close_slot(ctx, s, thread_id);
   }
 }
 
 /* ------------------------------------------------------------------ */
 /*  Merge per-thread sweep results into per-slot best reducer.         */
-/*  Called by main thread after sweep barrier.                          */
+/*  (merge_sweep_results removed in milestone c of task 282:            */
+/*   merging is now done per-slot by the closer worker via              */
+/*   merge_slot_results inside sweep_phase.)                             */
 /* ------------------------------------------------------------------ */
-
-static void merge_sweep_results(SweepContext *ctx)
-{
-  int total_threads = ctx->num_workers + 1;
-
-  for (int s = 0; s < ctx->max_active; s++)
-  {
-    if (!ctx->active[s].occupied) continue;
-    if (ctx->active[s].is_survivor) continue;
-
-    int best_reducer = -1, best_good = -1, best_pLength = 0;
-
-    for (int t = 0; t < total_threads; t++)
-    {
-      SweepResult &sr = sweep_result(ctx, t, s);
-      if (sr.best_reducer >= 0 && best_reducer < 0)
-        best_reducer = sr.best_reducer;
-      if (sr.best_good >= 0)
-      {
-        if (best_good < 0 || sr.best_pLength < best_pLength)
-        {
-          best_good = sr.best_good;
-          best_pLength = sr.best_pLength;
-        }
-      }
-    }
-
-    ctx->active[s].best_reducer = best_reducer;
-    ctx->active[s].best_good = best_good;
-    ctx->active[s].best_pLength = best_pLength;
-  }
-}
 
 /* ------------------------------------------------------------------ */
 /*  Reset sweep results for all threads and all slots.                 */
@@ -601,36 +652,10 @@ static void reduce_slot_from_sweep(SweepContext *ctx, int slot, int thread_id)
 }
 
 /* ------------------------------------------------------------------ */
-/*  Parallel reduce phase: threads grab slots via atomic counter.      */
+/*  (reduce_phase_parallel removed in milestone c of task 282:          */
+/*   reduction now happens inline in sweep_phase via close_slot when    */
+/*   a worker drops the slot's tiles_remaining counter to zero.)        */
 /* ------------------------------------------------------------------ */
-
-static void reduce_phase_parallel(SweepContext *ctx, int thread_id)
-{
-  while (true)
-  {
-    int s = ctx->slot_counter.fetch_add(1, std::memory_order_relaxed);
-    if (s >= ctx->max_active) break;
-
-    ActivePoly *ap = &ctx->active[s];
-    if (!ap->occupied) continue;
-    if (ap->is_survivor) continue;
-
-#ifdef KTHREAD_INSTRUMENT
-    long rstart = kt_now_ns();
-    reduce_slot_from_sweep(ctx, s, thread_id);
-    long rdur = kt_now_ns() - rstart;
-    if (KT_STATS(ctx))
-    {
-      ThreadStats &ts = KT_TS(ctx, thread_id);
-      ts.reduce_ns += rdur;
-      ts.reduce_count++;
-      kt_record_reduce(ctx, thread_id, rstart - ctx->start_ns, rdur);
-    }
-#else
-    reduce_slot_from_sweep(ctx, s, thread_id);
-#endif
-  }
-}
 
 /* ------------------------------------------------------------------ */
 /*  Fill empty active slots from L. Returns number of occupied slots.  */
@@ -905,19 +930,20 @@ struct WorkerArg
 };
 
 /**
- * Worker thread. Each round:
+ * Worker thread. Each round (milestone c of task 282):
  *   1. B0: barrier_B0 (wait for main to signal start of round)
- *   2. sweep_phase: cooperatively scan T for all active polynomials
- *   3. B1: barrier_B1 (sweep done, main merges results)
- *   4. B0: barrier_B0 (wait for main to prepare reduce phase)
- *   5. reduce_phase_parallel: grab a slot, apply ONE ksReducePoly step
- *   6. B1: barrier_B1 (reduce done, main processes survivors + refills)
- * Workers check ctx->done after each B0 and exit if true.
+ *   2. sweep_phase: cooperatively scan T for all active polynomials;
+ *      the worker that closes each slot's tiles_remaining counter
+ *      runs closer-reduce inline (merge_slot_results + reduce_slot_
+ *      from_sweep + queue_survivor on survivors).
+ *   3. B1: barrier_B1 (sweep + closer-reduce done, main drains
+ *      survivor FIFO + refills)
+ * Workers check ctx->done after B0 and exit if true.
  *
- * The 4-barrier protocol per round:
- *   B0: start sweep       B1: sweep done
- *   B0: start reduce      B1: reduce done
- * Between B1(reduce) and B0(sweep), main processes survivors and
+ * The 2-barrier protocol per round (B0, B1 remain in place per the
+ * milestone-c prompt; the old reduce-B0/reduce-B1 pair is removed):
+ *   B0: start sweep + closer-reduce     B1: sweep + reduce done
+ * Between B1 and the next B0, main drains the survivor FIFO and
  * refills empty slots. Multiple rounds may be needed per polynomial.
  */
 static void *worker_thread(void *arg)
@@ -966,14 +992,9 @@ static void *worker_thread(void *arg)
 #else
     sweep_phase(ctx, thread_id);
 #endif
-    kt_barrier_wait_B1(ctx, thread_id);
-
-    // Phase 2: parallel reduction (main merges first, then signals)
-    // Workers wait at B0 for main to finish merge, then reduce
-    kt_barrier_wait_B0(ctx, thread_id);
-    if (ctx->done.load(std::memory_order_acquire)) break;
-
-    reduce_phase_parallel(ctx, thread_id);
+    // Milestone (c) of task 282: closer-reduce happens inline in
+    // sweep_phase. No separate reduce barrier pair; B1 here signals
+    // that sweep + closer-reduce are both finished for this round.
     kt_barrier_wait_B1(ctx, thread_id);
   }
 
@@ -1148,13 +1169,13 @@ void bba_parallel_loop(SweepContext *ctx)
     // Every slot — occupied or not — contributes K tiles to keep the
     // id-to-(slot,slice) decoding a simple divmod. Empty slots are
     // cheap no-ops in sweep_phase; tiles_remaining for them still
-    // reaches zero and sets `ready` but no one consults it.
+    // reaches zero. Milestone (c): the worker that drops an occupied
+    // slot's counter to zero runs closer-reduce (see close_slot).
     {
       int K = ctx->tiles_K;
       for (int s = 0; s < ctx->max_active; s++)
       {
         ctx->active[s].tiles_remaining.store(K, std::memory_order_relaxed);
-        ctx->active[s].ready = false;
       }
       ctx->tile_cursor.store(0, std::memory_order_relaxed);
       // Publish end last, with release, so workers that arrive at B0
@@ -1197,25 +1218,14 @@ void bba_parallel_loop(SweepContext *ctx)
     sweep_phase(ctx, 0);
 #endif
 
-    // B1: sweep done
-    kt_barrier_wait_B1(ctx, 0);
-
-    // Merge per-thread sweep results into per-slot best reducer
-    merge_sweep_results(ctx);
-
-    // Prepare slot counter for parallel reduction
-    ctx->slot_counter.store(0, std::memory_order_relaxed);
-
-    // B0: signal start of reduction phase (workers waiting)
-    if (ctx->num_workers > 0)
-      kt_barrier_wait_B0(ctx, 0);
-
-    // Phase 2: parallel reduction — each thread grabs a slot and applies
-    // ONE ksReducePoly step. Slots that are still non-zero and non-survivor
-    // stay active and will be swept again on the next round.
-    reduce_phase_parallel(ctx, 0);
-
-    // B1: reduction done
+    // B1: sweep + closer-reduce done.
+    //
+    // Milestone (c) of task 282: closer-reduce is now inlined in
+    // sweep_phase — the worker that drops a slot's tiles_remaining
+    // to zero merges the per-thread SweepResults for that slot and
+    // runs reduce_slot_from_sweep inline. Survivors are pushed to
+    // the survivor FIFO from inside sweep_phase. No separate reduce
+    // B0/B1 barrier pair is needed.
     kt_barrier_wait_B1(ctx, 0);
 
     if (strat->overflow || errorreported)

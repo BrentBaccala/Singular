@@ -142,19 +142,16 @@ struct ActivePoly
   // after B1. Later milestones will let workers observe growing T.
   int sl_snapshot;
 
-  // Milestone (b) of the continuous-cursor redesign (task 281): tile
-  // cursor infrastructure. A tile is a pair (slot, slice); the sweep
-  // phase now iterates tiles rather than partitioning T by thread.
+  // Tile cursor infrastructure (task 281 milestone b, task 282 milestone c).
+  // A tile is a pair (slot, slice); the sweep phase iterates tiles.
   //
   // tiles_remaining is initialized to K (the number of slices per slot)
   // when the slot is filled; each tile that has completed its sweep
-  // fetch_sub(1)s this counter. When the counter reaches zero, the slot
-  // is "ready" — all slices have been swept, so the per-slot best
-  // reducer has been determined. In this milestone the readiness flag
-  // is just observed by the main thread after B1; milestone (c) will
-  // use it to drive closer-reduction as soon as each slot completes.
+  // fetch_sub(1)s this counter. Task 282: when the counter reaches
+  // zero, that worker ("the closer") merges the per-thread
+  // SweepResults for the slot and runs reduce_slot_from_sweep inline,
+  // pushing survivors onto the survivor FIFO.
   std::atomic<int> tiles_remaining;
-  bool ready;  // set by worker that decrements tiles_remaining to 0
 };
 
 /**
