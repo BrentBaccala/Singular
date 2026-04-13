@@ -207,6 +207,15 @@ SweepContext *sweep_context_init(kStrategy strat, int nthreads)
 
   ctx->sweep_cursor.store(0, std::memory_order_relaxed);
   ctx->slot_counter.store(0, std::memory_order_relaxed);
+  ctx->tile_cursor.store(0, std::memory_order_relaxed);
+  ctx->tile_end.store(0, std::memory_order_relaxed);
+  ctx->tiles_K = ctx->num_workers + 1;  // K slices per slot; at least 1
+  if (ctx->tiles_K < 1) ctx->tiles_K = 1;
+  for (int i = 0; i < ctx->max_active; i++)
+  {
+    ctx->active[i].tiles_remaining.store(0, std::memory_order_relaxed);
+    ctx->active[i].ready = false;
+  }
 
   int barrier_count = ctx->num_workers + 1;
   if (barrier_count < 1) barrier_count = 1;
@@ -368,70 +377,79 @@ static BOOLEAN pop_and_prepare(SweepContext *ctx, ActivePoly *ap)
 }
 
 /* ------------------------------------------------------------------ */
-/*  Sweep phase: all threads cooperatively scan T for active polys.    */
-/*  Each thread grabs T indices via atomic cursor and checks each T[j] */
-/*  against ALL active slots, recording per-thread best reducers.      */
+/*  Sweep phase: tile cursor (milestone b of task 281).                */
+/*                                                                     */
+/*  A tile is a pair (slot, slice). For each occupied slot, its        */
+/*  sl_snapshot range [0..sl_snapshot] is split into K slices where    */
+/*  slice `i` visits j with (j % K == i). Workers pull tile ids from   */
+/*  an atomic cursor; decoding is slot = id / K, slice = id % K.       */
+/*                                                                     */
+/*  Per-slot SweepResult remains per-thread to avoid contention (a     */
+/*  single slot's K slices may be claimed by K different workers).     */
+/*  After sweeping a tile, the worker fetch_sub(1)s the slot's         */
+/*  tiles_remaining counter; the worker that drops it to zero sets     */
+/*  the slot's `ready` flag. In this milestone the flag is only        */
+/*  consulted informationally after B1 — correctness is unchanged from */
+/*  milestone (a). Milestone (c) will use it to trigger closer-reduce  */
+/*  inside the sweep phase, and milestone (d) will remove the          */
+/*  surrounding B0/B1 barriers.                                        */
 /* ------------------------------------------------------------------ */
-
-static const int SWEEP_CHUNK = 64;
 
 static void sweep_phase(SweepContext *ctx, int thread_id)
 {
   kStrategy strat = ctx->strat;
-  int max_active = ctx->max_active;
-
-  // Task 280 milestone (a): cursor bound is max over per-slot sl_snapshot
-  // values. Later milestones may let this grow during the sweep; for now
-  // all snapshots equal strat->T.size()-1 at the moment the sweep begins,
-  // so behavior is unchanged.
-  int tl = -1;
-  for (int s = 0; s < max_active; s++)
-  {
-    if (!ctx->active[s].occupied) continue;
-    if (ctx->active[s].is_survivor) continue;
-    if (ctx->active[s].sl_snapshot > tl)
-      tl = ctx->active[s].sl_snapshot;
-  }
+  int K = ctx->tiles_K;
+  uint64_t tile_end = ctx->tile_end.load(std::memory_order_acquire);
 
   while (true)
   {
-    int start = ctx->sweep_cursor.fetch_add(SWEEP_CHUNK, std::memory_order_relaxed);
-    if (start > tl) break;
-    int end = start + SWEEP_CHUNK;
-    if (end > tl + 1) end = tl + 1;
+    uint64_t id = ctx->tile_cursor.fetch_add(1, std::memory_order_relaxed);
+    if (id >= tile_end) break;
 
-    for (int j = start; j < end; j++)
+    int s = (int)(id / (uint64_t)K);
+    int slice = (int)(id % (uint64_t)K);
+
+    ActivePoly *ap = &ctx->active[s];
+
+    // Skip empty / survivor slots cheaply, but still decrement the
+    // counter so the slot's "ready" bookkeeping stays consistent.
+    if (!ap->occupied || ap->is_survivor)
+    {
+      if (ap->tiles_remaining.fetch_sub(1, std::memory_order_acq_rel) == 1)
+        ap->ready = true;
+      continue;
+    }
+
+    int tl = ap->sl_snapshot;
+    unsigned long not_sev_s = ap->not_sev;
+    SweepResult &sr = sweep_result(ctx, thread_id, s);
+
+    // Walk j = slice, slice+K, slice+2K, ... up to tl inclusive.
+    for (int j = slice; j <= tl; j += K)
     {
       unsigned long sev_j = strat->sevT[j];
+      if (sev_j & not_sev_s) continue;
+      if (!p_LmDivisibleBy(strat->T[j].p, ap->P.p, currRing))
+        continue;
 
-      for (int s = 0; s < max_active; s++)
+      if (sr.best_reducer < 0)
+        sr.best_reducer = j;
+
+      int ecart_j = strat->T[j].ecart;
+      if (ecart_j <= ap->P.ecart)
       {
-        if (!ctx->active[s].occupied) continue;
-        if (ctx->active[s].is_survivor) continue;
-        // Per-slot T bound: don't let slot s see T entries beyond its snapshot.
-        if (j > ctx->active[s].sl_snapshot) continue;
-        if (sev_j & ctx->active[s].not_sev) continue;
-        if (!p_LmDivisibleBy(strat->T[j].p, ctx->active[s].P.p, currRing))
-          continue;
-
-        // Found a divisor for slot s
-        SweepResult &sr = sweep_result(ctx, thread_id, s);
-        if (sr.best_reducer < 0)
-          sr.best_reducer = j;
-
-        int ecart_j = strat->T[j].ecart;
-        if (ecart_j <= ctx->active[s].P.ecart)
+        int pLen = strat->T[j].pLength;
+        if (pLen <= 0) pLen = 3;
+        if (sr.best_good < 0 || pLen < sr.best_pLength)
         {
-          int pLen = strat->T[j].pLength;
-          if (pLen <= 0) pLen = 3;
-          if (sr.best_good < 0 || pLen < sr.best_pLength)
-          {
-            sr.best_good = j;
-            sr.best_pLength = pLen;
-          }
+          sr.best_good = j;
+          sr.best_pLength = pLen;
         }
       }
     }
+
+    if (ap->tiles_remaining.fetch_sub(1, std::memory_order_acq_rel) == 1)
+      ap->ready = true;
   }
 }
 
@@ -1125,6 +1143,25 @@ void bba_parallel_loop(SweepContext *ctx)
     // Prepare for sweep round
     reset_sweep_results(ctx);
     ctx->sweep_cursor.store(0, std::memory_order_relaxed);
+
+    // Milestone (b): set up tile cursor. K = tiles_K (num_threads).
+    // Every slot — occupied or not — contributes K tiles to keep the
+    // id-to-(slot,slice) decoding a simple divmod. Empty slots are
+    // cheap no-ops in sweep_phase; tiles_remaining for them still
+    // reaches zero and sets `ready` but no one consults it.
+    {
+      int K = ctx->tiles_K;
+      for (int s = 0; s < ctx->max_active; s++)
+      {
+        ctx->active[s].tiles_remaining.store(K, std::memory_order_relaxed);
+        ctx->active[s].ready = false;
+      }
+      ctx->tile_cursor.store(0, std::memory_order_relaxed);
+      // Publish end last, with release, so workers that arrive at B0
+      // see the fully-initialized counters.
+      ctx->tile_end.store((uint64_t)ctx->max_active * (uint64_t)K,
+                          std::memory_order_release);
+    }
 
 #ifdef KTHREAD_INSTRUMENT
     long round_t0 = 0;

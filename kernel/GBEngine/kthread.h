@@ -17,6 +17,7 @@
 #include "kernel/GBEngine/kutil.h"
 #include <pthread.h>
 #include <atomic>
+#include <cstdint>
 #include <deque>
 #include <vector>
 
@@ -140,6 +141,20 @@ struct ActivePoly
   // current T length at sweep time, since enterT is still serialized
   // after B1. Later milestones will let workers observe growing T.
   int sl_snapshot;
+
+  // Milestone (b) of the continuous-cursor redesign (task 281): tile
+  // cursor infrastructure. A tile is a pair (slot, slice); the sweep
+  // phase now iterates tiles rather than partitioning T by thread.
+  //
+  // tiles_remaining is initialized to K (the number of slices per slot)
+  // when the slot is filled; each tile that has completed its sweep
+  // fetch_sub(1)s this counter. When the counter reaches zero, the slot
+  // is "ready" — all slices have been swept, so the per-slot best
+  // reducer has been determined. In this milestone the readiness flag
+  // is just observed by the main thread after B1; milestone (c) will
+  // use it to drive closer-reduction as soon as each slot completes.
+  std::atomic<int> tiles_remaining;
+  bool ready;  // set by worker that decrements tiles_remaining to 0
 };
 
 /**
@@ -161,6 +176,30 @@ struct SweepContext
 
   // Shared atomic cursor for Phase 2 sweep
   std::atomic<int> sweep_cursor;
+
+  // Milestone (b) tile cursor (task 281).
+  //
+  // A tile is identified by an integer id in [0, tile_end). The
+  // encoding is:
+  //     slot  = id / tiles_K
+  //     slice = id % tiles_K
+  // so slices 0..K-1 of one slot are contiguous tile ids. This keeps
+  // adjacent ids likely to hit the same slot (same LObject), which is
+  // cache-friendly on the reducer side; slices within a slot step
+  // through T with stride K (slice `i` visits j with j%K==i) which
+  // still gives every thread a mix of small and large j values.
+  //
+  // Usage (this milestone): main thread sets tiles_K (= num_threads),
+  // initializes each occupied slot's tiles_remaining to tiles_K, stores
+  // 0 into tile_cursor, then publishes tile_end = max_active * tiles_K
+  // with release semantics. Workers fetch_add on tile_cursor to claim
+  // tiles. Each worker, after sweeping one tile, fetch_sub(1) on the
+  // slot's tiles_remaining; the one that decrements to zero sets the
+  // slot's `ready` flag. All this is still bracketed by B0/B1, so the
+  // main thread can observe `ready` after B1 without further sync.
+  std::atomic<uint64_t> tile_cursor;
+  std::atomic<uint64_t> tile_end;
+  int tiles_K;
 
   // Shared atomic slot counter for Phase 1 and Phase 3
   std::atomic<int> slot_counter;
