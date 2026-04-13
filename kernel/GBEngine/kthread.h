@@ -131,6 +131,15 @@ struct ActivePoly
   long d;                   // ecart tracking: h_d + h->ecart
   long reddeg;              // degree tracking from redHoney
   int pass;                 // reduction pass count
+
+  // T-snapshot bound: value of strat->T.size()-1 recorded at the moment
+  // this slot was pulled from L (see pop_and_prepare). The sweep uses
+  // this as the per-slot upper bound on T indices rather than the global
+  // strat->T.size()-1. Milestone (a) of the continuous-cursor redesign
+  // (task 280): infrastructure only — snapshots are all equal to the
+  // current T length at sweep time, since enterT is still serialized
+  // after B1. Later milestones will let workers observe growing T.
+  int sl_snapshot;
 };
 
 /**

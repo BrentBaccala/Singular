@@ -354,6 +354,12 @@ static BOOLEAN pop_and_prepare(SweepContext *ctx, ActivePoly *ap)
     ap->best_reducer = -1;
     ap->best_good = -1;
 
+    // Task 280 milestone (a): record current T bound for this slot.
+    // At this stage the sweep still reads the global strat->T.size()-1,
+    // but we capture per-slot sl_snapshot so later milestones can tile
+    // against it without reading a moving global bound.
+    ap->sl_snapshot = strat->T.size() - 1;
+
     ap->P.PrepareRed(strat->use_buckets);
     return TRUE;
   }
@@ -372,8 +378,20 @@ static const int SWEEP_CHUNK = 64;
 static void sweep_phase(SweepContext *ctx, int thread_id)
 {
   kStrategy strat = ctx->strat;
-  int tl = strat->T.size()-1;
   int max_active = ctx->max_active;
+
+  // Task 280 milestone (a): cursor bound is max over per-slot sl_snapshot
+  // values. Later milestones may let this grow during the sweep; for now
+  // all snapshots equal strat->T.size()-1 at the moment the sweep begins,
+  // so behavior is unchanged.
+  int tl = -1;
+  for (int s = 0; s < max_active; s++)
+  {
+    if (!ctx->active[s].occupied) continue;
+    if (ctx->active[s].is_survivor) continue;
+    if (ctx->active[s].sl_snapshot > tl)
+      tl = ctx->active[s].sl_snapshot;
+  }
 
   while (true)
   {
@@ -390,6 +408,8 @@ static void sweep_phase(SweepContext *ctx, int thread_id)
       {
         if (!ctx->active[s].occupied) continue;
         if (ctx->active[s].is_survivor) continue;
+        // Per-slot T bound: don't let slot s see T entries beyond its snapshot.
+        if (j > ctx->active[s].sl_snapshot) continue;
         if (sev_j & ctx->active[s].not_sev) continue;
         if (!p_LmDivisibleBy(strat->T[j].p, ctx->active[s].P.p, currRing))
           continue;
@@ -969,6 +989,31 @@ void bba_parallel_loop(SweepContext *ctx)
   ctx->saved_si_opt_2 = si_opt_2 & ~Sy_bit(OPT_PROT);
 
   ctx->done.store(false, std::memory_order_release);
+
+  // Task 280 milestone (a): reserve T capacity up front.
+  //
+  // T is BlockArray<TObject>. Individual element addresses are stable
+  // across push_back (existing blocks are never moved), but the
+  // directory of block pointers (`blocks[]`) is grown by realloc — via
+  // free()+calloc()+memcpy in BlockArray::ensure_capacity. A reader
+  // dereferencing the directory pointer (`blocks[i>>BLOCK_SHIFT][...]`)
+  // concurrently with that realloc would observe a freed pointer.
+  //
+  // Later milestones let workers scan T concurrently with enterT's
+  // push_back, so the directory must not be reallocated during the
+  // parallel window. Reserve directory capacity now for 4x the current
+  // T length (with a floor) so enterT during the parallel phase only
+  // appends into existing directory slots.
+  //
+  // The BlockArray block size is 1024 (BLOCK_SHIFT=10); reserving
+  // capacity for N elements allocates ceil(N/1024) blocks and sizes
+  // the directory accordingly.
+  {
+    int cur_T = strat->T.size();
+    long reserve_n = (long)cur_T * 4;
+    if (reserve_n < 4096) reserve_n = 4096;
+    strat->T.ensure_capacity((int)reserve_n);
+  }
 
 #ifdef KTHREAD_INSTRUMENT
   if (KT_STATS(ctx))
