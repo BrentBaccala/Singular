@@ -6242,7 +6242,6 @@ BOOLEAN arriRewCriterionPre(poly sig, unsigned long not_sevSig, poly lm, kStrate
  ***************************************************************/
 TObject* kFindDivisibleByInS_T(kStrategy strat, int end_pos, LObject* L, TObject *T, long ecart)
 {
-  int j = 0;
   const unsigned long not_sev = ~L->sev;
   poly p;
   ring r;
@@ -6250,99 +6249,98 @@ TObject* kFindDivisibleByInS_T(kStrategy strat, int end_pos, LObject* L, TObject
 
   assume(~not_sev == p_GetShortExpVector(p, r));
 
+  // Walk S as iterator; end_pos is an inclusive last index on raw positions.
+  auto at_end = [&](sBasisSet::iterator it) {
+    return it == strat->S.end() || it.index() > end_pos;
+  };
+
   if (r == currRing)
   {
+    auto sit = strat->S.begin();
     if(!rField_is_Ring(r))
     {
-      loop
+      for (; !at_end(sit); ++sit)
       {
-        if (j > end_pos) return NULL;
   #if defined(PDEBUG) || defined(PDIV_DEBUG)
-        if (strat->S.iterator_at(j)->p!= NULL && p_LmShortDivisibleBy(strat->S.iterator_at(j)->p, strat->S.iterator_at(j)->sev, p, not_sev, r) &&
-            (ecart== LONG_MAX || ecart>= strat->S.iterator_at(j)->ecart))
+        if (sit->p != NULL && p_LmShortDivisibleBy(sit->p, sit->sev, p, not_sev, r) &&
+            (ecart== LONG_MAX || ecart >= sit->ecart))
   #else
-        if (!(strat->S.iterator_at(j)->sev & not_sev) &&
-            (ecart== LONG_MAX || ecart>= strat->S.iterator_at(j)->ecart) &&
-            p_LmDivisibleBy(strat->S.iterator_at(j)->p, p, r))
+        if (!(sit->sev & not_sev) &&
+            (ecart== LONG_MAX || ecart >= sit->ecart) &&
+            p_LmDivisibleBy(sit->p, p, r))
   #endif
         {
-            break;
+          break;
         }
-        j++;
       }
     }
     else
     {
-      loop
+      for (; !at_end(sit); ++sit)
       {
-        if (j > end_pos) return NULL;
   #if defined(PDEBUG) || defined(PDIV_DEBUG)
-        if (strat->S.iterator_at(j)->p!= NULL
-        && p_LmShortDivisibleBy(strat->S.iterator_at(j)->p, strat->S.iterator_at(j)->sev, p, not_sev, r)
-        && (ecart== LONG_MAX || ecart>= strat->S.iterator_at(j)->ecart)
-        && n_DivBy(pGetCoeff(p), pGetCoeff(strat->S.iterator_at(j)->p), r->cf))
+        if (sit->p != NULL
+        && p_LmShortDivisibleBy(sit->p, sit->sev, p, not_sev, r)
+        && (ecart== LONG_MAX || ecart >= sit->ecart)
+        && n_DivBy(pGetCoeff(p), pGetCoeff(sit->p), r->cf))
   #else
-        if (!(strat->S.iterator_at(j)->sev & not_sev)
-        && (ecart== LONG_MAX || ecart>= strat->S.iterator_at(j)->ecart)
-        && p_LmDivisibleBy(strat->S.iterator_at(j)->p, p, r)
-        && n_DivBy(pGetCoeff(p), pGetCoeff(strat->S.iterator_at(j)->p), r->cf))
+        if (!(sit->sev & not_sev)
+        && (ecart== LONG_MAX || ecart >= sit->ecart)
+        && p_LmDivisibleBy(sit->p, p, r)
+        && n_DivBy(pGetCoeff(p), pGetCoeff(sit->p), r->cf))
   #endif
         {
           break; // found
         }
-        j++;
       }
     }
+    if (at_end(sit)) return NULL;
     // if called from NF, T objects do not exist:
-    if (strat->T.empty() || strat->S.iterator_at(j)->s_2_r == -1)
+    if (strat->T.empty() || sit->s_2_r == -1)
     {
-      T->Set(strat->S.iterator_at(j)->p, r, strat->tailRing);
+      T->Set(sit->p, r, strat->tailRing);
       assume(T->GetpLength()==pLength(T->p != __null ? T->p : T->t_p));
       return T;
     }
     else
     {
-/////      assume (j >= 0 && j < strat->T.size() && strat->S_2_T(j) != NULL
-/////      && strat->S_2_T(j)->p == strat->S[j].p); // wrong?
-//      assume (j >= 0 && j < strat->S.size() && strat->S_2_T(j) != NULL && strat->S_2_T(j)->p == strat->S[j].p);
-      return strat->S_2_T(j);
+      return strat->S.S_2_T(sit, strat);
     }
   }
   else
   {
     TObject* t;
+    auto sit = strat->S.begin();
     if(!rField_is_Ring(r))
     {
-      loop
+      for (; !at_end(sit); ++sit)
       {
-        if (j > end_pos) return NULL;
-        assume(strat->S.iterator_at(j)->s_2_r != -1);
+        assume(sit->s_2_r != -1);
   #if defined(PDEBUG) || defined(PDIV_DEBUG)
-        t = strat->S_2_T(j);
+        t = strat->S.S_2_T(sit, strat);
         assume(t != NULL && t->t_p != NULL && t->tailRing == r);
-        if (p_LmShortDivisibleBy(t->t_p, strat->S.iterator_at(j)->sev, p, not_sev, r)
-        && (ecart== LONG_MAX || ecart>= strat->S.iterator_at(j)->ecart))
+        if (p_LmShortDivisibleBy(t->t_p, sit->sev, p, not_sev, r)
+        && (ecart== LONG_MAX || ecart >= sit->ecart))
         {
           t->pLength=pLength(t->t_p);
           return t;
         }
   #else
-        if (! (strat->S.iterator_at(j)->sev & not_sev)
-        && (ecart== LONG_MAX || ecart>= strat->S.iterator_at(j)->ecart))
+        if (! (sit->sev & not_sev)
+        && (ecart== LONG_MAX || ecart >= sit->ecart))
         {
-          if (strat->S.iterator_at(j)->s_2_r == -1)
+          if (sit->s_2_r == -1)
           {
-            T->Set(strat->S.iterator_at(j)->p, r, strat->tailRing);
+            T->Set(sit->p, r, strat->tailRing);
             if (p_LmDivisibleBy(T->t_p != NULL ? T->t_p : T->p, p, r))
             {
               T->pLength=pLength(T->t_p != NULL ? T->t_p : T->p);
               return T;
             }
-            j++;
             continue;
           }
-          t = strat->S_2_T(j);
-          assume(t != NULL && t->t_p != NULL && t->tailRing == r && t->p == strat->S.iterator_at(j)->p);
+          t = strat->S.S_2_T(sit, strat);
+          assume(t != NULL && t->t_p != NULL && t->tailRing == r && t->p == sit->p);
           if (p_LmDivisibleBy(t->t_p, p, r))
           {
             t->pLength=pLength(t->t_p);
@@ -6350,42 +6348,40 @@ TObject* kFindDivisibleByInS_T(kStrategy strat, int end_pos, LObject* L, TObject
           }
         }
   #endif
-        j++;
       }
+      return NULL;
     }
     else
     {
-      loop
+      for (; !at_end(sit); ++sit)
       {
-        if (j > end_pos) return NULL;
-        assume(strat->S.iterator_at(j)->s_2_r != -1);
+        assume(sit->s_2_r != -1);
   #if defined(PDEBUG) || defined(PDIV_DEBUG)
-        t = strat->S_2_T(j);
+        t = strat->S.S_2_T(sit, strat);
         assume(t != NULL && t->t_p != NULL && t->tailRing == r);
-        if (p_LmShortDivisibleBy(t->t_p, strat->S.iterator_at(j)->sev, p, not_sev, r)
-        && (ecart== LONG_MAX || ecart>= strat->S.iterator_at(j)->ecart)
+        if (p_LmShortDivisibleBy(t->t_p, sit->sev, p, not_sev, r)
+        && (ecart== LONG_MAX || ecart >= sit->ecart)
         && n_DivBy(pGetCoeff(p), pGetCoeff(t->t_p), r->cf))
         {
           t->pLength=pLength(t->t_p);
           return t;
         }
   #else
-        if (! (strat->S.iterator_at(j)->sev & not_sev)
-        && (ecart== LONG_MAX || ecart>= strat->S.iterator_at(j)->ecart))
+        if (! (sit->sev & not_sev)
+        && (ecart== LONG_MAX || ecart >= sit->ecart))
         {
-          if (strat->S.iterator_at(j)->s_2_r == -1)
+          if (sit->s_2_r == -1)
           {
-            T->Set(strat->S.iterator_at(j)->p, r, strat->tailRing);
+            T->Set(sit->p, r, strat->tailRing);
             if (p_LmDivisibleBy(T->t_p != NULL ? T->t_p : T->p, p, r))
             {
               T->pLength=pLength(T->t_p != NULL ? T->t_p : T->p);
               return T;
             }
-            j++;
             continue;
           }
-          t = strat->S_2_T(j);
-          assume(t != NULL && t->t_p != NULL && t->tailRing == r && t->p == strat->S.iterator_at(j)->p);
+          t = strat->S.S_2_T(sit, strat);
+          assume(t != NULL && t->t_p != NULL && t->tailRing == r && t->p == sit->p);
           if (p_LmDivisibleBy(t->t_p, p, r)
           && n_DivBy(pGetCoeff(p), pGetCoeff(t->t_p), r->cf))
           {
@@ -6394,8 +6390,8 @@ TObject* kFindDivisibleByInS_T(kStrategy strat, int end_pos, LObject* L, TObject
           }
         }
   #endif
-        j++;
       }
+      return NULL;
     }
   }
 }
