@@ -712,7 +712,7 @@ sBasisSet::iterator kFindDivisibleByInS(const kStrategy strat, int* max_ind, LOb
 }
 
 // same as above, only with set S
-int kFindDivisibleByInS_noCF(const kStrategy strat, int* max_ind, LObject* L)
+sBasisSet::iterator kFindDivisibleByInS_noCF(const kStrategy strat, int* max_ind, LObject* L)
 {
   unsigned long not_sev = ~L->sev;
   poly p = L->GetLmCurrRing();
@@ -735,10 +735,10 @@ int kFindDivisibleByInS_noCF(const kStrategy strat, int* max_ind, LObject* L)
          p_LmDivisibleBy(sit->p, p, currRing))
 #endif
     {
-      return sit.index();
+      return sit;
     }
   }
-  return -1;
+  return strat->S.end();
 }
 
 int kFindNextDivisibleByInS(const kStrategy strat, int start,int max_ind, LObject* L)
@@ -2520,7 +2520,11 @@ poly redNF (poly h,int &max_ind,int nonorm,kStrategy strat)
   P.p=kBucketGetLm(P.bucket);
   loop
   {
-    j_ring=j=kFindDivisibleByInS_noCF(strat,&max_ind,&P);
+    {
+      auto it = kFindDivisibleByInS_noCF(strat,&max_ind,&P);
+      j = (it == strat->S.end()) ? -1 : it.index();
+      j_ring = j;
+    }
     while ((j>=0)
     && (nonorm)
     && (!n_DivBy(pGetCoeff(P.p),pGetCoeff(strat->S.iterator_at(j)->p),currRing->cf)))
