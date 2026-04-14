@@ -316,18 +316,18 @@ static void completeReduceFac (kStrategy strat, ideal_list FL)
       //n->P.pLength=pLength(n->P.p); // by initEcart
       n->initEcart(&n->P);
       /* enter P.p into s and L */
-      int pos;
-      if (n->S.empty()) pos=0;
-      else pos=n->S.find_pos(n,n->P.p,n->P.ecart,n->S.size()-1);
+      sBasisSet::iterator pos;
+      if (n->S.empty()) pos=n->S.begin();
+      else pos=n->S.find_pos(n->P.p,n->P.ecart);
       if (TEST_OPT_INTSTRATEGY)
       {
-        n->P.p = redtailBba(n->P.p,pos-1,n);
+        n->P.p = redtailBba(n->P.p,pos.index()-1,n);
         n->P.pCleardenom();
       }
       else
       {
         pNorm(n->P.p);
-        n->P.p = redtailBba(n->P.p,pos-1,n);
+        n->P.p = redtailBba(n->P.p,pos.index()-1,n);
       }
       n->P.pLength=pLength(n->P.p);
       if (TEST_OPT_DEBUG)
@@ -335,7 +335,7 @@ static void completeReduceFac (kStrategy strat, ideal_list FL)
         Print("new s(%d)->S:",n->nr);
         pWrite(n->P.p);
       }
-      enterpairs(n->P.p,n->S.size()-1,n->P.ecart,pos,n);
+      enterpairs(n->P.p,n->S.size()-1,n->P.ecart,pos.index(),n);
       enterT(n->P,n);
       n->enterS(n->P, n, n->T.size()-1, -1);
 
@@ -572,14 +572,14 @@ ideal bbafac (ideal /*F*/, ideal Q,intvec* /*w*/,kStrategy strat, ideal_list FL)
         kTest_TS(n);
 
         /* enter P.p into s and L */
-        int pos;
-        if (n->S.empty()) pos=0;
-        else pos=n->S.find_pos(n,n->P.p,n->P.ecart,n->S.size()-1);
+        sBasisSet::iterator pos;
+        if (n->S.empty()) pos=n->S.begin();
+        else pos=n->S.find_pos(n->P.p,n->P.ecart);
 
         // we have already reduced all elements from fac....
         if (TEST_OPT_INTSTRATEGY)
         {
-          n->P.p = redtailBba(n->P.p,pos-1,n);
+          n->P.p = redtailBba(n->P.p,pos.index()-1,n);
           if (n->redTailChange)
           {
             n->P.pCleardenom();
@@ -589,7 +589,7 @@ ideal bbafac (ideal /*F*/, ideal Q,intvec* /*w*/,kStrategy strat, ideal_list FL)
         else
         {
           pNorm(n->P.p);
-          n->P.p = redtailBba(n->P.p,pos-1,n);
+          n->P.p = redtailBba(n->P.p,pos.index()-1,n);
           if (n->redTailChange)
           {
             n->P.pLength=pLength(n->P.p);
@@ -603,7 +603,7 @@ ideal bbafac (ideal /*F*/, ideal Q,intvec* /*w*/,kStrategy strat, ideal_list FL)
           wrp(n->P.p);
           PrintLn();
         }
-        enterpairs(n->P.p,n->S.size()-1,n->P.ecart,pos,n);
+        enterpairs(n->P.p,n->S.size()-1,n->P.ecart,pos.index(),n);
         enterT(n->P,n);
         n->enterS(n->P, n, n->T.size()-1, -1);
         {

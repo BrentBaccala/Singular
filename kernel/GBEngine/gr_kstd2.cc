@@ -1188,7 +1188,7 @@ ideal k_gnc_gr_bba(const ideal F, const ideal Q, const intvec *, const bigintmat
       }
 #endif
         strat->P.sev=0;
-        int pos=strat->S.find_pos(strat,strat->P.p,strat->P.ecart,strat->S.size()-1);
+        auto pos=strat->S.find_pos(strat->P.p,strat->P.ecart);
         {
           if (TEST_OPT_INTSTRATEGY)
           {
@@ -1197,7 +1197,7 @@ ideal k_gnc_gr_bba(const ideal F, const ideal Q, const intvec *, const bigintmat
               #ifdef HAVE_RATGRING
               if(!rIsRatGRing(currRing))
               #endif
-                strat->P.p = redtailBba(strat->P.p,pos-1,strat);
+                strat->P.p = redtailBba(strat->P.p,pos.index()-1,strat);
             }
 
             strat->P.p=p_Cleardenom(strat->P.p, currRing);
@@ -1207,7 +1207,7 @@ ideal k_gnc_gr_bba(const ideal F, const ideal Q, const intvec *, const bigintmat
             pNorm(strat->P.p);
             if ((strat->syzComp==0)||(!strat->homog))
             {
-              strat->P.p = redtailBba(strat->P.p,pos-1,strat);
+              strat->P.p = redtailBba(strat->P.p,pos.index()-1,strat);
             }
           }
           if (TEST_OPT_DEBUG)
@@ -1221,10 +1221,10 @@ ideal k_gnc_gr_bba(const ideal F, const ideal Q, const intvec *, const bigintmat
           }
           // kTest(strat);
           //
-          enterpairs(strat->P.p,strat->S.size()-1,strat->P.ecart,pos,strat);
+          enterpairs(strat->P.p,strat->S.size()-1,strat->P.ecart,pos.index(),strat);
 
-          if (strat->S.empty()) pos=0;
-          else pos=strat->S.find_pos(strat,strat->P.p,strat->P.ecart,strat->S.size()-1);
+          if (strat->S.empty()) pos=strat->S.begin();
+          else pos=strat->S.find_pos(strat->P.p,strat->P.ecart);
 
           strat->enterS(strat->P, strat, -1, -1);
         }

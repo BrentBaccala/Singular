@@ -1732,7 +1732,7 @@ static BOOLEAN enterOneStrongPoly (const SElement &si,poly p,int /*ecart*/, int 
     if(!h.IsNull())
     {
       enterT(h, strat,-1);
-      //int pos = strat->S.find_pos(strat,h.p,h.ecart,strat->S.size()-1);
+      //auto pos = strat->S.find_pos(h.p,h.ecart);
       //strat->enterS(h, strat, strat->T.size()-1, -1);
     }
   }
@@ -4670,7 +4670,7 @@ void sBasisSet::reorder(int *suc, kStrategy strat)
   for (; i < size(); i++)
   {
     // Search within the first i elements for the new position of elem(i).
-    at = find_pos(strat, elem(i).p, elem(i).ecart, i - 1);
+    at = find_pos(elem(i).p, elem(i).ecart, iterator_at(i)).index();
     if (at != i)
     {
       if (new_suc > at) new_suc = at;
@@ -4691,11 +4691,20 @@ void sBasisSet::reorder(int *suc, kStrategy strat)
 
 /*2
 * sBasisSet::find_pos — binary search for sorted insertion position.
-* Replaces the old free posInS function.
+* Replaces the old free posInS function. Public form scans all of S.
 */
-int sBasisSet::find_pos(kStrategy strat, const poly p, int ecart_p, int length)
+sBasisSet::iterator sBasisSet::find_pos(const poly p, int ecart_p)
 {
-  if (length == -1) return 0;
+  return find_pos(p, ecart_p, end());
+}
+
+/* Bounded form: search within [0 .. end_bound). Only used internally
+ * by find_divisor_search_bound. */
+sBasisSet::iterator sBasisSet::find_pos(const poly p, int ecart_p, iterator end_bound)
+{
+  if (empty()) return begin();
+  int length = end_bound.index() - 1;
+  if (length < 0) return begin();
   int i;
   int an = 0;
   int en = length;
@@ -4714,7 +4723,7 @@ int sBasisSet::find_pos(kStrategy strat, const poly p, int ecart_p, int length)
 
     if ((oo<o)
     || ((o==oo) && (pLmCmp(elem(length).p,p)!= cmp_int)))
-      return length+1;
+      return iterator_at(length+1);
 
     loop
     {
@@ -4722,9 +4731,9 @@ int sBasisSet::find_pos(kStrategy strat, const poly p, int ecart_p, int length)
       {
         if ((p_Deg(elem(an).p,currRing)>=o) && (pLmCmp(elem(an).p,p) == cmp_int))
         {
-          return an;
+          return iterator_at(an);
         }
-        return en;
+        return iterator_at(en);
       }
       i=(an+en) / 2;
       if ((p_Deg(elem(i).p,currRing)>=o) && (pLmCmp(elem(i).p,p) == cmp_int)) en=i;
@@ -4736,17 +4745,17 @@ int sBasisSet::find_pos(kStrategy strat, const poly p, int ecart_p, int length)
     if (rField_is_Ring(currRing))
     {
       if (pLmCmp(elem(length).p,p)== -cmp_int)
-        return length+1;
+        return iterator_at(length+1);
       int cmp;
       loop
       {
         if (an >= en-1)
         {
           cmp = pLmCmp(elem(an).p,p);
-          if (cmp == cmp_int)  return an;
-          if (cmp == -cmp_int) return en;
-          if (n_DivBy(pGetCoeff(p), pGetCoeff(elem(an).p), currRing->cf)) return en;
-          return an;
+          if (cmp == cmp_int)  return iterator_at(an);
+          if (cmp == -cmp_int) return iterator_at(en);
+          if (n_DivBy(pGetCoeff(p), pGetCoeff(elem(an).p), currRing->cf)) return iterator_at(en);
+          return iterator_at(an);
         }
         i = (an+en) / 2;
         cmp = pLmCmp(elem(i).p,p);
@@ -4761,18 +4770,18 @@ int sBasisSet::find_pos(kStrategy strat, const poly p, int ecart_p, int length)
     }
     else
     if (pLmCmp(elem(length).p,p)== -cmp_int)
-      return length+1;
+      return iterator_at(length+1);
 
     loop
     {
       if (an >= en-1)
       {
-        if (pLmCmp(elem(an).p,p) == cmp_int) return an;
-        if (pLmCmp(elem(an).p,p) == -cmp_int) return en;
+        if (pLmCmp(elem(an).p,p) == cmp_int) return iterator_at(an);
+        if (pLmCmp(elem(an).p,p) == -cmp_int) return iterator_at(en);
         if ((cmp_int!=1)
         && ((elem(an).ecart)>ecart_p))
-          return an;
-        return en;
+          return iterator_at(an);
+        return iterator_at(en);
       }
       i=(an+en) / 2;
       if (pLmCmp(elem(i).p,p) == cmp_int) en=i;
@@ -4789,43 +4798,41 @@ int sBasisSet::find_pos(kStrategy strat, const poly p, int ecart_p, int length)
   }
 }
 
-/* Backward-compat wrapper around sBasisSet::find_pos.
- * Some callers (notably kthread.cc, which is not modified by this
- * refactor) still call posInS directly. Keep it as a one-line forward
- * to the member method.
- */
-int posInS (const kStrategy strat, const int length, const poly p,
-            const int ecart_p)
-{
-  return strat->S.find_pos(strat, p, ecart_p, length);
-}
-
 /* sBasisSet::find_divisor_search_bound — encapsulates the search-range
  * narrowing used by kFindDivisibleByInS / kFindDivisibleByInS_noCF.
  *
  * For Ring/component/lex orderings, narrowing is not safe and we return
- * max_ind unchanged. Otherwise, we use find_pos with ecart_p=0 to
- * compute the position p would occupy if inserted, and clamp the result
- * to max_ind. The caller is expected to use the returned value as an
- * inclusive upper bound on the divisor scan.
+ * max unchanged. Otherwise, we use the bounded find_pos with ecart_p=0
+ * to compute the position p would occupy if inserted, then clamp to
+ * max. The caller uses the returned iterator as an exclusive upper
+ * bound on the divisor scan.
  */
-int sBasisSet::find_divisor_search_bound(poly p, int max_ind, kStrategy strat)
+sBasisSet::iterator sBasisSet::find_divisor_search_bound(poly p, iterator max, kStrategy strat)
 {
   if (rField_is_Ring(currRing) || (strat->ak > 0) || currRing->pLexOrder)
-    return max_ind;
-  int ende = find_pos(strat, p, 0, max_ind) + 1;
-  if (ende > max_ind) ende = max_ind;
+    return max;
+  // Bounded find_pos returns the insertion point within [0, max). The
+  // old code used an inclusive "ende = fp + 1" clamp; translated to an
+  // exclusive iterator-end, that's fp + 2 clamped to max.
+  iterator ende = find_pos(p, 0, max);
+  // Advance two raw slots: one for the "+1" inclusive -> exclusive shift
+  // (we want to include the element at fp), one more for the historic
+  // "+1" overshoot. Cap at max.
+  if (ende.index() + 2 <= max.index())
+    ende = iterator_at(ende.index() + 2);
+  else
+    ende = max;
   return ende;
 }
 
 /*
 * sBasisSet::find_pos_monfirst — binary search for monfirst insertion position.
-* Replaces the old free posInSMonFirst function. Length is the upper
-* bound of the search range (typically size()-1).
+* Replaces the old free posInSMonFirst function. Scans all of S.
 */
-int sBasisSet::find_pos_monfirst(kStrategy strat, const poly p, int length)
+sBasisSet::iterator sBasisSet::find_pos_monfirst(const poly p)
 {
-  if (length < 0) return 0;
+  if (empty()) return begin();
+  int length = size() - 1;
   if (pNext(p) == NULL)
   {
     // p is a monomial — insert among the leading monomials
@@ -4840,7 +4847,7 @@ int sBasisSet::find_pos_monfirst(kStrategy strat, const poly p, int length)
 
     if ((op < o)
     || ((op == o) && (pLtCmp(elem(mon).p, p) == -1)))
-      return length + 1;
+      return iterator_at(length + 1);
     int i;
     int an = 0;
     int en = mon;
@@ -4851,8 +4858,8 @@ int sBasisSet::find_pos_monfirst(kStrategy strat, const poly p, int length)
         op = p_Deg(elem(an).p, currRing);
         if ((op < o)
         || ((op == o) && (pLtCmp(elem(an).p, p) == -1)))
-          return en;
-        return an;
+          return iterator_at(en);
+        return iterator_at(an);
       }
       i = (an + en) / 2;
       op = p_Deg(elem(i).p, currRing);
@@ -4870,7 +4877,7 @@ int sBasisSet::find_pos_monfirst(kStrategy strat, const poly p, int length)
 
     if ((op < o)
     || ((op == o) && (pLtCmp(elem(length).p, p) == -1)))
-      return length + 1;
+      return iterator_at(length + 1);
     int i;
     int an = 0;
     for (i = 0; i <= length; i++)
@@ -4884,8 +4891,8 @@ int sBasisSet::find_pos_monfirst(kStrategy strat, const poly p, int length)
         op = p_Deg(elem(an).p, currRing);
         if ((op < o)
         || ((op == o) && (pLtCmp(elem(an).p, p) == -1)))
-          return en;
-        return an;
+          return iterator_at(en);
+        return iterator_at(an);
       }
       i = (an + en) / 2;
       op = p_Deg(elem(i).p, currRing);
@@ -4910,13 +4917,13 @@ sBasisSet::iterator sBasisSet::insert(const SElement& val, kStrategy strat)
     live_count_++;
     return iterator(this, count - 1);
   case SORDER_MONFIRST: {
-    int pos = find_pos_monfirst(strat, val.p, size() - 1);
-    return insert_at(pos, val);
+    iterator pos = find_pos_monfirst(val.p);
+    return insert_at(pos.index(), val);
   }
   case SORDER_STANDARD:
   default: {
-    int pos = find_pos(strat, val.p, val.ecart, size() - 1);
-    return insert_at(pos, val);
+    iterator pos = find_pos(val.p, val.ecart);
+    return insert_at(pos.index(), val);
   }
   }
 }
@@ -7746,8 +7753,8 @@ void initSSpecial (ideal F, ideal Q, ideal P,kStrategy strat)
           }
           h.sev = pGetShortExpVector(h.p);
           h.SetpFDeg();
-          pos = strat->S.find_pos(strat,h.p,h.ecart,strat->S.size()-1);
-          enterpairsSpecial(h.p,strat->S.size()-1,h.ecart,pos,strat,strat->T.size());
+          auto pos_it = strat->S.find_pos(h.p,h.ecart);
+          enterpairsSpecial(h.p,strat->S.size()-1,h.ecart,pos_it.index(),strat,strat->T.size());
           strat->enterS(h, strat, strat->T.size(), -1);
           enterT(h,strat);
         }
@@ -7879,8 +7886,8 @@ void initSSpecialSba (ideal F, ideal Q, ideal P,kStrategy strat)
           }
           h.sev = pGetShortExpVector(h.p);
           h.SetpFDeg();
-          pos = strat->S.find_pos(strat,h.p,h.ecart,strat->S.size()-1);
-          enterpairsSpecial(h.p,strat->S.size()-1,h.ecart,pos,strat,strat->T.size());
+          auto pos_it = strat->S.find_pos(h.p,h.ecart);
+          enterpairsSpecial(h.p,strat->S.size()-1,h.ecart,pos_it.index(),strat,strat->T.size());
           strat->enterS(h, strat, strat->T.size(), -1);
           enterT(h,strat);
         }
@@ -8338,7 +8345,7 @@ sBasisSet::iterator sBasisSet::enter_bba(LObject &p, kStrategy strat, int atR, i
   else if (order_ == SORDER_APPEND)
     pos = size();
   else
-    pos = find_pos(strat, p.p, p.ecart, size() - 1);
+    pos = find_pos(p.p, p.ecart).index();
 
   SElement sobj;
   sobj.p = p.p;
@@ -8407,7 +8414,7 @@ sBasisSet::iterator sBasisSet::enter_sba(LObject &p, kStrategy strat, int atR, i
   else if (order_ == SORDER_APPEND)
     pos = size();
   else
-    pos = find_pos(strat, p.p, p.ecart, size() - 1);
+    pos = find_pos(p.p, p.ecart).index();
 
   SElement sobj;
   sobj.p = p.p;
@@ -8475,7 +8482,6 @@ void replaceInLAndSAndT(LObject &p, int tj, kStrategy strat)
   assume(strat->tailRing == p.tailRing);
   assume(p.pLength == 0 || pLength(p.p) == p.pLength || rIsSyzIndexRing(currRing)); // modulo syzring
 
-  int pos;
   poly tp = strat->T[tj].p;
 
   /* enter p to T set */
@@ -8497,7 +8503,7 @@ void replaceInLAndSAndT(LObject &p, int tj, kStrategy strat)
     deleteInS(sit_match.index(), strat);
   }
 
-  pos = strat->S.find_pos(strat, p.p, p.ecart, strat->S.size()-1);
+  auto pos = strat->S.find_pos(p.p, p.ecart);
 
   pp_Test(p.p, currRing, p.tailRing);
   assume(p.FDeg == p.pFDeg());
@@ -8518,12 +8524,12 @@ void replaceInLAndSAndT(LObject &p, int tj, kStrategy strat)
   }
 #ifdef HAVE_SHIFTBBA
   if (rIsLPRing(currRing))
-    enterpairsShift(p.p, strat->S.size()-1, p.ecart, pos, strat, strat->T.size()-1); // TODO LP
+    enterpairsShift(p.p, strat->S.size()-1, p.ecart, pos.index(), strat, strat->T.size()-1); // TODO LP
   else
 #endif
   {
     /* generate new pairs with p, probably removing older, now useless pairs */
-    superenterpairs(p.p, strat->S.size()-1, p.ecart, pos, strat, strat->T.size()-1);
+    superenterpairs(p.p, strat->S.size()-1, p.ecart, pos.index(), strat, strat->T.size()-1);
   }
   /* enter p to S set */
   strat->enterS(p, strat, strat->T.size()-1, -1);

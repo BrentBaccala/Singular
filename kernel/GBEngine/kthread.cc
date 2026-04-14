@@ -875,7 +875,7 @@ static void process_survivor_lobject(SweepContext *ctx, LObject *P, int thread_i
 
   if (TEST_OPT_PROT) PrintS("s");
 
-  int pos = posInS(strat, strat->S.size()-1, P->p, P->ecart);
+  int pos = strat->S.find_pos(P->p, P->ecart).index();
 
   strat->redTailChange = FALSE;
 

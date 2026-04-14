@@ -670,7 +670,10 @@ sBasisSet::iterator kFindDivisibleByInS(const kStrategy strat, int* max_ind, LOb
 
   BOOLEAN is_Ring=rField_is_Ring(currRing);
 #if 1
-  int ende = strat->S.find_divisor_search_bound(p, *max_ind, strat);
+  // find_divisor_search_bound returns an exclusive-end iterator; the
+  // inclusive bound for the loop is one less.
+  auto ende_it = strat->S.find_divisor_search_bound(p, strat->S.iterator_at(*max_ind + 1), strat);
+  int ende = ende_it.index() - 1;
 #else
   int ende=strat->S.size()-1;
 #endif
@@ -721,7 +724,10 @@ sBasisSet::iterator kFindDivisibleByInS_noCF(const kStrategy strat, int* max_ind
 
   BOOLEAN is_Ring=rField_is_Ring(currRing);
 #if 1
-  int ende = strat->S.find_divisor_search_bound(p, *max_ind, strat);
+  // find_divisor_search_bound returns an exclusive-end iterator; the
+  // inclusive bound for the loop is one less.
+  auto ende_it = strat->S.find_divisor_search_bound(p, strat->S.iterator_at(*max_ind + 1), strat);
+  int ende = ende_it.index() - 1;
 #else
   int ende=strat->S.size()-1;
 #endif
@@ -2948,7 +2954,7 @@ ideal bba (ideal F, ideal Q,intvec *w,bigintmat *hilb,kStrategy strat)
       /* statistic */
       if (TEST_OPT_PROT) PrintS("s");
 
-      int pos=strat->S.find_pos(strat,strat->P.p,strat->P.ecart,strat->S.size()-1);
+      auto pos=strat->S.find_pos(strat->P.p,strat->P.ecart);
 
       // reduce the tail and normalize poly
       // in the ring case we cannot expect LC(f) = 1,
@@ -2966,7 +2972,7 @@ ideal bba (ideal F, ideal Q,intvec *w,bigintmat *hilb,kStrategy strat)
         strat->P.pCleardenom();
         if ((TEST_OPT_REDSB)||(TEST_OPT_REDTAIL))
         {
-          strat->P.p = redtailBba(&(strat->P),pos-1,strat, withT,!TEST_OPT_CONTENTSB);
+          strat->P.p = redtailBba(&(strat->P),pos.index()-1,strat, withT,!TEST_OPT_CONTENTSB);
           strat->P.pCleardenom();
           if (strat->redTailChange) { strat->P.t_p=NULL; }
         }
@@ -2976,7 +2982,7 @@ ideal bba (ideal F, ideal Q,intvec *w,bigintmat *hilb,kStrategy strat)
         strat->P.pNorm();
         if ((TEST_OPT_REDSB)||(TEST_OPT_REDTAIL))
         {
-          strat->P.p = redtailBba(&(strat->P),pos-1,strat, withT);
+          strat->P.p = redtailBba(&(strat->P),pos.index()-1,strat, withT);
           if (strat->redTailChange) { strat->P.t_p=NULL; }
         }
       }
@@ -3012,9 +3018,9 @@ ideal bba (ideal F, ideal Q,intvec *w,bigintmat *hilb,kStrategy strat)
         strat->P.SetShortExpVector();
         enterT(strat->P, strat);
         if (rField_is_Ring(currRing))
-          superenterpairs(strat->P.p,strat->S.size()-1,strat->P.ecart,pos,strat, strat->T.size()-1);
+          superenterpairs(strat->P.p,strat->S.size()-1,strat->P.ecart,pos.index(),strat, strat->T.size()-1);
         else
-          enterpairs(strat->P.p,strat->S.size()-1,strat->P.ecart,pos,strat, strat->T.size()-1);
+          enterpairs(strat->P.p,strat->S.size()-1,strat->P.ecart,pos.index(),strat, strat->T.size()-1);
         // posInS only depends on the leading term
         strat->enterS(strat->P, strat, strat->T.size()-1, -1);
 #if 0
@@ -3044,12 +3050,12 @@ ideal bba (ideal F, ideal Q,intvec *w,bigintmat *hilb,kStrategy strat)
           // we are called AFTER enterS, i.e. if we change P
           // we have to add it also to S/T
           // and add pairs
-          int pos=strat->S.find_pos(strat,strat->P.p,strat->P.ecart,strat->S.size()-1);
+          auto pos=strat->S.find_pos(strat->P.p,strat->P.ecart);
           enterT(strat->P, strat);
           if (rField_is_Ring(currRing))
-            superenterpairs(strat->P.p,strat->S.size()-1,strat->P.ecart,pos,strat, strat->T.size()-1);
+            superenterpairs(strat->P.p,strat->S.size()-1,strat->P.ecart,pos.index(),strat, strat->T.size()-1);
           else
-            enterpairs(strat->P.p,strat->S.size()-1,strat->P.ecart,pos,strat, strat->T.size()-1);
+            enterpairs(strat->P.p,strat->S.size()-1,strat->P.ecart,pos.index(),strat, strat->T.size()-1);
           strat->enterS(strat->P, strat, strat->T.size()-1, -1);
         }
       }
@@ -3608,7 +3614,7 @@ ideal sba (ideal F0, ideal Q,intvec *w,bigintmat *hilb,kStrategy strat)
       /* statistic */
       if (TEST_OPT_PROT) PrintS("s");
 
-      //int pos=strat->S.find_pos(strat,strat->P.p,strat->P.ecart,strat->S.size()-1);
+      //auto pos=strat->S.find_pos(strat->P.p,strat->P.ecart);
       // in F5E we know that the last reduced element is already the
       // the one with highest signature
       int pos = strat->S.size();
@@ -4604,14 +4610,14 @@ void f5c (kStrategy strat, int& olddeg, int& minimcnt, int& hilbeledeg,
 
       /* statistic */
       if (TEST_OPT_PROT) PrintS("s");
-      int pos;
+      sBasisSet::iterator pos;
       #if 1
       if(!rField_is_Ring(currRing))
-        pos = strat->S.find_pos(strat,strat->P.p,strat->P.ecart,strat->S.size()-1);
+        pos = strat->S.find_pos(strat->P.p,strat->P.ecart);
       else
-        pos = strat->S.find_pos_monfirst(strat,strat->P.p,strat->S.size()-1);
+        pos = strat->S.find_pos_monfirst(strat->P.p);
       #else
-      pos = strat->S.find_pos(strat,strat->P.p,strat->P.ecart,strat->S.size()-1);
+      pos = strat->S.find_pos(strat->P.p,strat->P.ecart);
       #endif
       // reduce the tail and normalize poly
       // in the ring case we cannot expect LC(f) = 1,
@@ -4622,7 +4628,7 @@ void f5c (kStrategy strat, int& olddeg, int& minimcnt, int& hilbeledeg,
         strat->P.pCleardenom();
         if ((TEST_OPT_REDSB)||(TEST_OPT_REDTAIL))
         {
-          strat->P.p = redtailBba(&(strat->P),pos-1,strat, withT);
+          strat->P.p = redtailBba(&(strat->P),pos.index()-1,strat, withT);
           strat->P.pCleardenom();
         }
       }
@@ -4630,7 +4636,7 @@ void f5c (kStrategy strat, int& olddeg, int& minimcnt, int& hilbeledeg,
       {
         strat->P.pNorm();
         if ((TEST_OPT_REDSB)||(TEST_OPT_REDTAIL))
-          strat->P.p = redtailBba(&(strat->P),pos-1,strat, withT);
+          strat->P.p = redtailBba(&(strat->P),pos.index()-1,strat, withT);
       }
 #endif
 #ifdef KDEBUG
@@ -4912,7 +4918,7 @@ ideal bbaShift(ideal F, ideal Q,intvec *w,bigintmat *hilb,kStrategy strat)
       /* statistic */
       if (TEST_OPT_PROT) PrintS("s");
 
-      int pos=strat->S.find_pos(strat,strat->P.p,strat->P.ecart,strat->S.size()-1);
+      auto pos=strat->S.find_pos(strat->P.p,strat->P.ecart);
 
       // reduce the tail and normalize poly
       // in the ring case we cannot expect LC(f) = 1,
@@ -4930,7 +4936,7 @@ ideal bbaShift(ideal F, ideal Q,intvec *w,bigintmat *hilb,kStrategy strat)
         strat->P.pCleardenom();
         if ((TEST_OPT_REDSB)||(TEST_OPT_REDTAIL))
         {
-          strat->P.p = redtailBba(&(strat->P),pos-1,strat, withT,!TEST_OPT_CONTENTSB);
+          strat->P.p = redtailBba(&(strat->P),pos.index()-1,strat, withT,!TEST_OPT_CONTENTSB);
           strat->P.pCleardenom();
           if (strat->redTailChange)
           {
@@ -4944,7 +4950,7 @@ ideal bbaShift(ideal F, ideal Q,intvec *w,bigintmat *hilb,kStrategy strat)
         strat->P.pNorm();
         if ((TEST_OPT_REDSB)||(TEST_OPT_REDTAIL))
         {
-          strat->P.p = redtailBba(&(strat->P),pos-1,strat, withT);
+          strat->P.p = redtailBba(&(strat->P),pos.index()-1,strat, withT);
           if (strat->redTailChange)
           {
             strat->P.t_p=NULL;
@@ -4983,7 +4989,7 @@ ideal bbaShift(ideal F, ideal Q,intvec *w,bigintmat *hilb,kStrategy strat)
       if ((!TEST_OPT_IDLIFT) || (pGetComp(strat->P.p) <= strat->syzComp))
       {
         enterT(strat->P, strat);
-        enterpairsShift(strat->P.p,strat->S.size()-1,strat->P.ecart,pos,strat, strat->T.size()-1);
+        enterpairsShift(strat->P.p,strat->S.size()-1,strat->P.ecart,pos.index(),strat, strat->T.size()-1);
         // posInS only depends on the leading term
         strat->enterS(strat->P, strat, strat->T.size()-1, -1);
         if (!strat->rightGB)
@@ -5003,9 +5009,9 @@ ideal bbaShift(ideal F, ideal Q,intvec *w,bigintmat *hilb,kStrategy strat)
           // we are called AFTER enterS, i.e. if we change P
           // we have to add it also to S/T
           // and add pairs
-          int pos=strat->S.find_pos(strat,strat->P.p,strat->P.ecart,strat->S.size()-1);
+          auto pos=strat->S.find_pos(strat->P.p,strat->P.ecart);
           enterT(strat->P, strat);
-          enterpairsShift(strat->P.p,strat->S.size()-1,strat->P.ecart,pos,strat, strat->T.size()-1);
+          enterpairsShift(strat->P.p,strat->S.size()-1,strat->P.ecart,pos.index(),strat, strat->T.size()-1);
           strat->enterS(strat->P, strat, strat->T.size()-1, -1);
           if (!strat->rightGB)
             enterTShift(strat->P,strat);

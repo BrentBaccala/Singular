@@ -500,14 +500,16 @@ public:
   const_iterator const_iterator_at(int i) const { return const_iterator(this, i); }
 
   // Binary search for sorted insertion position (replaces free posInS).
-  // length is the upper bound on the search range (indices [0..length]);
-  // pass size()-1 to search the whole set, or a smaller value to restrict.
-  // Returns the int position the element would occupy if inserted (one
-  // past the last element if larger than everything).
-  int find_pos(kStrategy strat, const poly p, int ecart_p, int length);
+  // Scans the whole of S. Returns an iterator to the position the
+  // element would occupy if inserted (end() if larger than everything).
+  iterator find_pos(const poly p, int ecart_p);
+
+  // Bounded form: restricts the search to [0..end_bound). Only used
+  // internally by find_divisor_search_bound.
+  iterator find_pos(const poly p, int ecart_p, iterator end_bound);
 
   // Binary search for monfirst insertion position (replaces free posInSMonFirst).
-  int find_pos_monfirst(kStrategy strat, const poly p, int length);
+  iterator find_pos_monfirst(const poly p);
 
   // Encapsulates the kFindDivisibleByInS search-range narrowing.
   // For monomial-ordered (non-Ring, non-component, non-lex) S, returns an
@@ -515,7 +517,7 @@ public:
   // can divide p, restricted to indices [0..max_ind]. Returns max_ind for
   // rings or other cases where narrowing is not safe; the caller must
   // still check divisibility against each element up to the bound.
-  int find_divisor_search_bound(poly p, int max_ind, kStrategy strat);
+  iterator find_divisor_search_bound(poly p, iterator max, kStrategy strat);
 
 private:
   SOrderMode order_;
@@ -1205,11 +1207,6 @@ sBasisSet::iterator enterSBbaShift (LObject &p, kStrategy strat, int atR = -1, i
 sBasisSet::iterator enterSSba (LObject &p, kStrategy strat, int atR = -1, int atS = -1);
 void initEcartPairBba (LObject* Lp,poly f,poly g,int ecartF,int ecartG);
 void initEcartPairMora (LObject* Lp,poly f,poly g,int ecartF,int ecartG);
-// Backward-compat free wrapper for kthread.cc (which is intentionally
-// not modified by this refactor). New code should call
-// strat->S.find_pos(strat, p, ecart_p, length) directly.
-int posInS (const kStrategy strat, const int length, const poly p,
-            const int ecart_p);
 int posInIdealMonFirst (const ideal F, const poly p,int start = 0,int end = -1);
 int posInT0 (const BlockArray<TObject> &set,const int length,LObject &p);
 int posInT1 (const BlockArray<TObject> &set,const int length,LObject &p);

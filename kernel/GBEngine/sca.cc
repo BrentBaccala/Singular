@@ -28,9 +28,9 @@ void addLObject(LObject& h, kStrategy& strat)
   h.sev=0; // pGetShortExpVector(h.p);
 
   // add h into S and L
-  int pos=strat->S.find_pos(strat, h.p, h.ecart, strat->S.size()-1);
+  auto pos=strat->S.find_pos(h.p, h.ecart);
 
-  if ( (pos < strat->S.size()) && (p_ComparePolys(h.p, strat->S.iterator_at(pos)->p, currRing)) )
+  if ( (pos != strat->S.end()) && (p_ComparePolys(h.p, pos->p, currRing)) )
   {
     if (TEST_OPT_PROT)
       PrintS("d\n");
@@ -48,7 +48,7 @@ void addLObject(LObject& h, kStrategy& strat)
 
     if ((strat->syzComp==0)||(!strat->homog))
     {
-      h.p = redtailBba(h.p,pos-1,strat);
+      h.p = redtailBba(h.p,pos.index()-1,strat);
 
       if (TEST_OPT_INTSTRATEGY)
       {
@@ -79,9 +79,9 @@ void addLObject(LObject& h, kStrategy& strat)
 
     enterpairs(h.p, strat->S.size()-1, h.ecart, 0, strat);
 
-    pos=0;
+    pos = strat->S.begin();
 
-    if (strat->S.size()-1!=-1) pos = strat->S.find_pos(strat, h.p, h.ecart, strat->S.size()-1);
+    if (!strat->S.empty()) pos = strat->S.find_pos(h.p, h.ecart);
     strat->enterS(h, strat, -1, -1);
 //    enterT(h, strat); // ?!
 
@@ -612,7 +612,7 @@ ideal k_sca_bba (const ideal F, const ideal Q, const intvec */*w*/, const bigint
       // get the polynomial (canonicalize bucket, make sure P.p is set)
       strat->P.GetP(strat->lmBin);
 
-      int pos = strat->S.find_pos(strat,strat->P.p,strat->P.ecart,strat->S.size()-1);
+      auto pos = strat->S.find_pos(strat->P.p,strat->P.ecart);
 
       // reduce the tail and normalize poly
       if (TEST_OPT_INTSTRATEGY)
@@ -620,7 +620,7 @@ ideal k_sca_bba (const ideal F, const ideal Q, const intvec */*w*/, const bigint
         strat->P.pCleardenom();
         if ((TEST_OPT_REDSB)||(TEST_OPT_REDTAIL))
         {
-          strat->P.p = redtailBba(&(strat->P),pos-1,strat, withT); // !!!
+          strat->P.p = redtailBba(&(strat->P),pos.index()-1,strat, withT); // !!!
           strat->P.pCleardenom();
         }
       }
@@ -628,7 +628,7 @@ ideal k_sca_bba (const ideal F, const ideal Q, const intvec */*w*/, const bigint
       {
         strat->P.pNorm();
         if ((TEST_OPT_REDSB)||(TEST_OPT_REDTAIL))
-          strat->P.p = redtailBba(&(strat->P),pos-1,strat, withT);
+          strat->P.p = redtailBba(&(strat->P),pos.index()-1,strat, withT);
       }
       strat->P.is_normalized=nIsOne(pGetCoeff(strat->P.p));
 
@@ -665,7 +665,7 @@ ideal k_sca_bba (const ideal F, const ideal Q, const intvec */*w*/, const bigint
       }
 
       // L
-      enterpairs(strat->P.p,strat->S.size()-1,strat->P.ecart,pos,strat, strat->T.size()-1);
+      enterpairs(strat->P.p,strat->S.size()-1,strat->P.ecart,pos.index(),strat, strat->T.size()-1);
 
       // posInS only depends on the leading term
       strat->enterS(strat->P, strat, strat->T.size()-1, -1);
@@ -728,7 +728,7 @@ ideal k_sca_bba (const ideal F, const ideal Q, const intvec */*w*/, const bigint
         if (red_result != 1) continue;
 
 
-        int pos = strat->S.find_pos(strat,h.p,h.ecart,strat->S.size()-1);
+        auto pos = strat->S.find_pos(h.p,h.ecart);
 
         // reduce the tail and normalize poly
         if (TEST_OPT_INTSTRATEGY)
@@ -736,7 +736,7 @@ ideal k_sca_bba (const ideal F, const ideal Q, const intvec */*w*/, const bigint
           h.pCleardenom();
           if ((TEST_OPT_REDSB)||(TEST_OPT_REDTAIL))
           {
-            h.p = redtailBba(&(h),pos-1,strat, withT); // !!!
+            h.p = redtailBba(&(h),pos.index()-1,strat, withT); // !!!
             h.pCleardenom();
           }
         }
@@ -744,7 +744,7 @@ ideal k_sca_bba (const ideal F, const ideal Q, const intvec */*w*/, const bigint
         {
           h.pNorm();
           if ((TEST_OPT_REDSB)||(TEST_OPT_REDTAIL))
-            h.p = redtailBba(&(h),pos-1,strat, withT);
+            h.p = redtailBba(&(h),pos.index()-1,strat, withT);
         }
 
 #ifdef KDEBUG
