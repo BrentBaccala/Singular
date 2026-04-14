@@ -4485,20 +4485,17 @@ void enterExtendedSpolySig(poly h,poly hSig,kStrategy strat)
 
 void clearSbatch (poly h,int k,int pos,kStrategy strat)
 {
-  int j = pos;
   if ( (!strat->fromT)
   && ((strat->syzComp==0)
     ||(pGetComp(h)<=strat->syzComp)
   ))
   {
     // Print("start clearS k=%d, pos=%d, sl=%d\n",k,pos,strat->S.size()-1);
+    // Caller contract: k == strat->S.size()-1 on entry; iterator range is safe.
+    assume(k == strat->S.size() - 1);
     unsigned long h_sev = pGetShortExpVector(h);
-    loop
-    {
-      if (j > k) break;
-      clearS(h,h_sev, &j,&k,strat);
-      j++;
-    }
+    for (auto it = strat->S.iterator_at(pos); it != strat->S.end(); ++it)
+      strat->S.clear_if_divisible(h, h_sev, it, strat);
     // Print("end clearS sl=%d\n",strat->S.size()-1);
   }
 }
@@ -4539,21 +4536,17 @@ void superenterpairsSig (poly h,poly hSig,int hFrom,int k,int ecart,int pos,kStr
 */
 void enterpairs (poly h,int k,int ecart,int pos,kStrategy strat, int atR)
 {
-  int j=pos;
-
   assume (!rField_is_Ring(currRing));
   initenterpairs(h,k,ecart,0,strat, atR);
   if ( (!strat->fromT)
   && ((strat->syzComp==0)
     ||(pGetComp(h)<=strat->syzComp)))
   {
+    // Caller contract: k == strat->S.size()-1 on entry.
+    assume(k == strat->S.size() - 1);
     unsigned long h_sev = pGetShortExpVector(h);
-    loop
-    {
-      if (j > k) break;
-      clearS(h,h_sev, &j,&k,strat);
-      j++;
-    }
+    for (auto it = strat->S.iterator_at(pos); it != strat->S.end(); ++it)
+      strat->S.clear_if_divisible(h, h_sev, it, strat);
   }
 }
 
@@ -4565,20 +4558,17 @@ void enterpairs (poly h,int k,int ecart,int pos,kStrategy strat, int atR)
 */
 void enterpairsSig (poly h,poly hSig,int hFrom,int k,int ecart,int pos,kStrategy strat, int atR)
 {
-  int j=pos;
   assume (!rField_is_Ring(currRing));
   initenterpairsSig(h,hSig,hFrom,k,ecart,0,strat, atR);
   if ( (!strat->fromT)
   && ((strat->syzComp==0)
     ||(pGetComp(h)<=strat->syzComp)))
   {
+    // Caller contract: k == strat->S.size()-1 on entry.
+    assume(k == strat->S.size() - 1);
     unsigned long h_sev = pGetShortExpVector(h);
-    loop
-    {
-      if (j > k) break;
-      clearS(h,h_sev, &j,&k,strat);
-      j++;
-    }
+    for (auto it = strat->S.iterator_at(pos); it != strat->S.end(); ++it)
+      strat->S.clear_if_divisible(h, h_sev, it, strat);
   }
 }
 
@@ -4588,7 +4578,6 @@ void enterpairsSig (poly h,poly hSig,int hFrom,int k,int ecart,int pos,kStrategy
 */
 void enterpairsSpecial (poly h,int k,int ecart,int pos,kStrategy strat, int atR = -1)
 {
-  int j;
   const int iCompH = pGetComp(h);
 
   if (rField_is_Ring(currRing))
@@ -4644,14 +4633,11 @@ void enterpairsSpecial (poly h,int k,int ecart,int pos,kStrategy strat, int atR 
 */
 //   #endif // ??? Why was the following cancellation disabled for non-commutative rings?
   {
-    j=pos;
-    loop
-    {
-      unsigned long h_sev = pGetShortExpVector(h);
-      if (j > k) break;
-      clearS(h,h_sev,&j,&k,strat);
-      j++;
-    }
+    // Caller contract: k == strat->S.size()-1 on entry.
+    assume(k == strat->S.size() - 1);
+    unsigned long h_sev = pGetShortExpVector(h);
+    for (auto it = strat->S.iterator_at(pos); it != strat->S.end(); ++it)
+      strat->S.clear_if_divisible(h, h_sev, it, strat);
   }
 }
 
@@ -12302,7 +12288,6 @@ void enterpairsShift (poly h,int k,int ecart,int pos,kStrategy strat, int atR)
 {
   /* h is strat->P.p, that is LObject with LM in currRing and Tail in tailRing */
   /* Q: what is exactly the strat->fromT ? A: a local case trick; don't need it yet*/
-  int j=pos;
 
   /* if (!(rField_is_Domain(currRing))) enterExtendedSpoly(h, strat); */ // TODO: enterExtendedSpoly not for LP yet
   initenterpairsShift(h,k,ecart,0,strat, atR);
@@ -12310,14 +12295,14 @@ void enterpairsShift (poly h,int k,int ecart,int pos,kStrategy strat, int atR)
   && ((strat->syzComp==0)
     ||(pGetComp(h)<=strat->syzComp)))
   {
+    // Caller contract: k == strat->S.size()-1 on entry.
+    assume(k == strat->S.size() - 1);
     unsigned long h_sev = pGetShortExpVector(h);
-    loop
+    for (auto it = strat->S.iterator_at(pos); it != strat->S.end(); ++it)
     {
-      if (j > k) break;
       // TODO this currently doesn't clear all possible elements because of commutative division
-      if (!(strat->rightGB && strat->hasFromQ && strat->S.iterator_at(j)->fromQ))
-        clearS(h,h_sev, &j,&k,strat);
-      j++;
+      if (strat->rightGB && strat->hasFromQ && it->fromQ) continue;
+      strat->S.clear_if_divisible(h, h_sev, it, strat);
     }
   }
 }
