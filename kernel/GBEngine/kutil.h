@@ -501,6 +501,44 @@ public:
   iterator iterator_at(int i) { return iterator(this, i); }
   const_iterator const_iterator_at(int i) const { return const_iterator(this, i); }
 
+  // Raw position-indexed access, WITHOUT skip-deleted semantics. Returns
+  // an iterator sitting at raw slot i — including tombstoned slots. This
+  // is the escape hatch for code that MUST walk the underlying storage
+  // (compaction, re-ordering, any bulk rewrite that treats S as an array
+  // rather than a logical sequence). Ordinary logical iteration should
+  // use begin()/end() / find_pos() / s_2_t(), etc.
+  //
+  // See the "Iterator invalidation contract" block above the sBasisSet
+  // class for the distinction between logical iteration (skip-deleted)
+  // and raw walks. raw_at bypasses that contract by design.
+  iterator raw_at(int i) { return iterator(this, i); }
+  const_iterator const_raw_at(int i) const { return const_iterator(this, i); }
+
+  // --- Reverse iteration ---
+  // Thin wrappers using the forward iterator's operator-- . Note: the
+  // forward iterator's skip_deleted_backward stops at pos_ > 0, so if
+  // slot 0 is tombstoned a reverse walk will observe it (same contract
+  // as raw_at). Intended for callers that don't have tombstones in S
+  // (e.g. ring-coefficient post-compaction paths).
+  class reverse_iterator {
+    iterator it_;  // points one past the current element (like std::reverse_iterator)
+  public:
+    reverse_iterator() {}
+    explicit reverse_iterator(iterator it) : it_(it) {}
+    SElement& operator*() const { iterator tmp = it_; --tmp; return *tmp; }
+    SElement* operator->() const { iterator tmp = it_; --tmp; return &*tmp; }
+    reverse_iterator& operator++() { --it_; return *this; }
+    reverse_iterator operator++(int) { reverse_iterator tmp = *this; --it_; return tmp; }
+    bool operator==(const reverse_iterator& o) const { return it_ == o.it_; }
+    bool operator!=(const reverse_iterator& o) const { return it_ != o.it_; }
+    // Access to the base iterator (one past current element).
+    iterator base() const { return it_; }
+    // Raw index of the element this reverse iterator points at.
+    int index() const { iterator tmp = it_; --tmp; return tmp.index(); }
+  };
+  reverse_iterator rbegin() { return reverse_iterator(iterator(this, count)); }
+  reverse_iterator rend()   { return reverse_iterator(iterator(this, 0)); }
+
   // Binary search for sorted insertion position (replaces free posInS).
   // Scans the whole of S. Returns an iterator to the position the
   // element would occupy if inserted (end() if larger than everything).

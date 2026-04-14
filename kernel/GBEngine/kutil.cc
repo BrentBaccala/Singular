@@ -9424,24 +9424,26 @@ void exitSba (kStrategy strat)
 */
 void updateResult(ideal Q, kStrategy strat)
 {
-  int l;
   if (strat->ak>0)
   {
-    for (l=strat->S.size()-1;l>=0;l--)
+    // Walk S in reverse raw-position order. These loops run before
+    // final compaction; slots may have sit->p==NULL from earlier
+    // pDelete in this same routine (semantic NULL, not tombstone).
+    for (auto rit = strat->S.rbegin(); rit != strat->S.rend(); ++rit)
     {
-      auto sit = strat->S.iterator_at(l);
-      if ((sit->p!=NULL) && (pGetComp(sit->p)==0))
+      auto& se = *rit;
+      if ((se.p!=NULL) && (pGetComp(se.p)==0))
       {
-        pDelete(&sit->p); // and set it to NULL
+        pDelete(&se.p); // and set it to NULL
                       }
     }
     int q;
     poly p;
     if(!rField_is_Ring(currRing))
     {
-      for (l=strat->S.size()-1;l>=0;l--)
+      for (auto rit = strat->S.rbegin(); rit != strat->S.rend(); ++rit)
       {
-        auto sit = strat->S.iterator_at(l);
+        auto sit = rit.base(); --sit;
         if ((sit->p!=NULL)
         //&& (strat->syzComp>0)
         //&& (pGetComp(strat->S[l].p)<=strat->syzComp)
@@ -9470,9 +9472,9 @@ void updateResult(ideal Q, kStrategy strat)
     }
     else
     {
-      for (l=strat->S.size()-1;l>=0;l--)
+      for (auto rit = strat->S.rbegin(); rit != strat->S.rend(); ++rit)
       {
-        auto sit = strat->S.iterator_at(l);
+        auto sit = rit.base(); --sit;
         if ((sit->p!=NULL)
         //&& (strat->syzComp>0)
         //&& (pGetComp(strat->S[l].p)<=strat->syzComp)
@@ -9510,9 +9512,9 @@ void updateResult(ideal Q, kStrategy strat)
     BOOLEAN reduction_found=FALSE;
     if (!rField_is_Ring(currRing))
     {
-      for (l=strat->S.size()-1;l>=0;l--)
+      for (auto rit = strat->S.rbegin(); rit != strat->S.rend(); ++rit)
       {
-        auto sit = strat->S.iterator_at(l);
+        auto sit = rit.base(); --sit;
         if (sit->p!=NULL)
         {
           for(q=IDELEMS(Q)-1; q>=0;q--)
@@ -9539,9 +9541,9 @@ void updateResult(ideal Q, kStrategy strat)
     //Also need divisibility of the leading coefficients
     else
     {
-      for (l=strat->S.size()-1;l>=0;l--)
+      for (auto rit = strat->S.rbegin(); rit != strat->S.rend(); ++rit)
       {
-        auto sit = strat->S.iterator_at(l);
+        auto sit = rit.base(); --sit;
         if (sit->p!=NULL)
         {
           for(q=IDELEMS(Q)-1; q>=0;q--)
@@ -9572,15 +9574,15 @@ void updateResult(ideal Q, kStrategy strat)
     {
       if(rField_is_Ring(currRing))
       {
-        for (l=strat->S.size()-1;l>=0;l--)
+        for (auto rit_l = strat->S.rbegin(); rit_l != strat->S.rend(); ++rit_l)
         {
-          auto sit_l = strat->S.iterator_at(l);
+          auto sit_l = rit_l.base(); --sit_l;
           if (sit_l->p!=NULL)
           {
-            for(q=strat->S.size()-1;q>=0;q--)
+            for (auto rit_q = strat->S.rbegin(); rit_q != strat->S.rend(); ++rit_q)
             {
-              auto sit_q = strat->S.iterator_at(q);
-              if ((l!=q)
+              auto sit_q = rit_q.base(); --sit_q;
+              if ((sit_l.index() != sit_q.index())
               && (sit_q->p!=NULL)
               &&(pLmDivisibleBy(sit_l->p,sit_q->p))
               &&(n_DivBy(sit_q->p->coef, sit_l->p->coef, currRing->cf))
@@ -9606,15 +9608,15 @@ void updateResult(ideal Q, kStrategy strat)
       }
       else
       {
-        for (l=strat->S.size()-1;l>=0;l--)
+        for (auto rit_l = strat->S.rbegin(); rit_l != strat->S.rend(); ++rit_l)
         {
-          auto sit_l = strat->S.iterator_at(l);
+          auto sit_l = rit_l.base(); --sit_l;
           if (sit_l->p!=NULL)
           {
-            for(q=strat->S.size()-1;q>=0;q--)
+            for (auto rit_q = strat->S.rbegin(); rit_q != strat->S.rend(); ++rit_q)
             {
-              auto sit_q = strat->S.iterator_at(q);
-              if ((l!=q)
+              auto sit_q = rit_q.base(); --sit_q;
+              if ((sit_l.index() != sit_q.index())
               && (sit_q->p!=NULL)
               &&(pLmDivisibleBy(sit_l->p,sit_q->p))
               )
@@ -9641,22 +9643,21 @@ void updateResult(ideal Q, kStrategy strat)
   // Compact S: remove NULL gaps left by pDelete, matching old idSkipZeroes behavior.
   // This matters because bba continues using S after updateResult returns.
   // Two-cursor shift (std::remove_if idiom). The write and read cursors
-  // walk raw positions, including deleted/NULL slots, so iterator_at() with
-  // int indices is the natural spelling here. This deliberately bypasses
-  // the iterator API's skip-deleted semantics — see the iterator invalidation
-  // contract above the sBasisSet class declaration in kutil.h. Compaction
-  // is a bulk rewrite rather than logical iteration, so element-position
-  // semantics don't apply.
+  // walk raw positions, including deleted/NULL slots — use raw_at() to
+  // make this intent explicit. This deliberately bypasses the iterator
+  // API's skip-deleted semantics; see the iterator invalidation contract
+  // above the sBasisSet class declaration in kutil.h. Compaction is a
+  // bulk rewrite rather than logical iteration.
   {
     int j = 0;
     const int n = strat->S.size();
     for (int k = 0; k < n; k++)
     {
-      auto src = strat->S.iterator_at(k);
+      auto src = strat->S.raw_at(k);
       if (src->p != NULL)
       {
         if (j != k)
-          *strat->S.iterator_at(j) = *src;
+          *strat->S.raw_at(j) = *src;
         j++;
       }
     }
@@ -9687,9 +9688,11 @@ void completeReduce (kStrategy strat, BOOLEAN withT)
   {
     Print("(S:%d)",strat->S.size()-1);mflush();
   }
-  for (i=strat->S.size()-1; i>=low; i--)
+  // Reverse walk S in raw-position order; post-compaction, no tombstones.
+  for (auto rit = strat->S.rbegin(); rit != strat->S.rend() && rit.index() >= low; ++rit)
   {
-    auto sit = strat->S.iterator_at(i);
+    i = rit.index();
+    auto sit = rit.base(); --sit;  // forward iterator at the current element
     // Exclusive end iterator for redtailBba:
     //   strat->ak == 0  -> reduce against [0..i-1] inclusive = [begin, sit) exclusive
     //   otherwise       -> reduce against [0..size-1] inclusive = [begin, end()) exclusive
