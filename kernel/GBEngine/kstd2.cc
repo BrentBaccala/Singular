@@ -661,7 +661,7 @@ int kFindDivisibleByInT_ecart(const kStrategy strat, const LObject* L, const int
 }
 
 // same as kFindDivisibleByInT, only with set S
-int kFindDivisibleByInS(const kStrategy strat, int* max_ind, LObject* L)
+sBasisSet::iterator kFindDivisibleByInS(const kStrategy strat, int* max_ind, LObject* L)
 {
   unsigned long not_sev = ~L->sev;
   poly p = L->GetLmCurrRing();
@@ -687,10 +687,10 @@ int kFindDivisibleByInS(const kStrategy strat, int* max_ind, LObject* L)
 #endif
       {
         if(n_DivBy(pGetCoeff(p), pGetCoeff(sit->p), currRing->cf))
-          return sit.index();
+          return sit;
       }
     }
-    return -1;
+    return strat->S.end();
   }
   else
   {
@@ -704,10 +704,10 @@ int kFindDivisibleByInS(const kStrategy strat, int* max_ind, LObject* L)
          p_LmDivisibleBy(sit->p, p, currRing))
 #endif
       {
-        return sit.index();
+        return sit;
       }
     }
-    return -1;
+    return strat->S.end();
   }
 }
 
@@ -1061,12 +1061,13 @@ static int redRing_Z_S (LObject* h,kStrategy strat)
   h->SetShortExpVector();
   int max_ind=strat->S.size()-1;
 
+  auto sit_red = strat->S.end();
   loop
   {
     /* check if a reducer of the lead term exists */
     max_ind=strat->S.size()-1;
-    j = kFindDivisibleByInS(strat,&max_ind, h);
-    if (j < 0)
+    sit_red = kFindDivisibleByInS(strat,&max_ind, h);
+    if (sit_red == strat->S.end())
     {
 #if STDZ_EXCHANGE_DURING_REDUCTION
       /* check if a reducer with the same lead monomial exists */
@@ -1089,8 +1090,8 @@ static int redRing_Z_S (LObject* h,kStrategy strat)
           }
           if(nIsZero(pGetCoeff(h->p))) return 2;
           max_ind=strat->S.size()-1;
-          j = kFindDivisibleByInS(strat, &max_ind, h);
-          if(j < 0)
+          sit_red = kFindDivisibleByInS(strat, &max_ind, h);
+          if(sit_red == strat->S.end())
           {
             if (h->GetLmTailRing() == NULL)
             {
@@ -1142,7 +1143,7 @@ static int redRing_Z_S (LObject* h,kStrategy strat)
     }
     else
     {
-      TObject tj(strat->S.iterator_at(j)->p);
+      TObject tj(sit_red->p);
       ksReducePoly(h, &tj, NULL, NULL, NULL, strat);
     }
     /* printf("\nAfter small red: ");pWrite(h->p); */
@@ -1261,7 +1262,6 @@ static int redRing_S (LObject* h,kStrategy strat)
   if (strat->S.empty()) return 1;
   if (h->IsNull()) return 0; // spoly is zero (can only occur with zero divisors)
 
-  int j = 0;
   int pass = 0;
   // poly zeroPoly = NULL;
 
@@ -1270,11 +1270,12 @@ static int redRing_S (LObject* h,kStrategy strat)
   int max_ind;
 
   h->SetShortExpVector();
+  auto sit = strat->S.end();
   loop
   {
     max_ind=strat->S.size()-1;
-    j = kFindDivisibleByInS(strat, &max_ind, h);
-    if (j < 0)
+    sit = kFindDivisibleByInS(strat, &max_ind, h);
+    if (sit == strat->S.end())
     {
       // over ZZ: cleanup coefficients by complete reduction with monomials
       postReduceByMon(h, strat);
@@ -1285,8 +1286,8 @@ static int redRing_S (LObject* h,kStrategy strat)
       }
       if(nIsZero(pGetCoeff(h->p))) return 2;
       max_ind=strat->S.size()-1;
-      j = kFindDivisibleByInS(strat, &max_ind,h);
-      if(j < 0)
+      sit = kFindDivisibleByInS(strat, &max_ind,h);
+      if(sit == strat->S.end())
       {
         if (h->GetLmTailRing() == NULL)
         {
@@ -1298,7 +1299,7 @@ static int redRing_S (LObject* h,kStrategy strat)
     }
     //printf("\nFound one: ");pWrite(strat->T[j].p);
     //enterT(*h, strat);
-    TObject tj(strat->S.iterator_at(j)->p);
+    TObject tj(sit->p);
     ksReducePoly(h, &tj, NULL, NULL, NULL, strat); // with debug output
     //printf("\nAfter small red: ");pWrite(h->p);
     if (h->GetLmTailRing() == NULL)
@@ -1475,7 +1476,7 @@ int redHomog (LObject* h,kStrategy strat)
 #endif
         {
           int dummy=strat->S.size()-1;
-          if (kFindDivisibleByInS(strat, &dummy, h) < 0)
+          if (kFindDivisibleByInS(strat, &dummy, h) == strat->S.end())
             return 1;
         }
         strat->L.push(*h);
@@ -1682,7 +1683,7 @@ int redSig (LObject* h,kStrategy strat)
         if (! strat->L.would_be_top(*h))
         {
           int dummy=strat->S.size()-1;
-          if (kFindDivisibleByInS(strat, &dummy, h) < 0)
+          if (kFindDivisibleByInS(strat, &dummy, h) == strat->S.end())
           {
             return 1;
           }
@@ -1930,7 +1931,7 @@ int redSigRing (LObject* h,kStrategy strat)
         if (! strat->L.would_be_top(*h))
         {
           int dummy=strat->S.size()-1;
-          if (kFindDivisibleByInS(strat, &dummy, h) < 0)
+          if (kFindDivisibleByInS(strat, &dummy, h) == strat->S.end())
           {
             return 1;
           }
@@ -2226,7 +2227,7 @@ int redLazy (LObject* h,kStrategy strat)
 #endif
         {
           int dummy=strat->S.size()-1;
-          if (kFindDivisibleByInS(strat, &dummy, h) < 0)
+          if (kFindDivisibleByInS(strat, &dummy, h) == strat->S.end())
             return 1;
         }
 #endif
@@ -2425,7 +2426,7 @@ int redHoney (LObject* h, kStrategy strat)
 #endif
         {
           int dummy=strat->S.size()-1;
-          if (kFindDivisibleByInS(strat, &dummy, h) < 0)
+          if (kFindDivisibleByInS(strat, &dummy, h) == strat->S.end())
             return 1;
         }
         strat->L.push(*h);
@@ -2669,7 +2670,6 @@ poly redNFBound (poly h,int &max_ind,int nonorm,kStrategy strat,int bound)
 {
   h = pJet(h,bound);
   if (h==NULL) return NULL;
-  int j;
   max_ind=strat->S.size()-1;
 
   if (0 > strat->S.size()-1)
@@ -2683,16 +2683,17 @@ poly redNFBound (poly h,int &max_ind,int nonorm,kStrategy strat,int bound)
   kbTest(P.bucket);
   BOOLEAN is_ring = rField_is_Ring(currRing);
 
+  auto sit_j = strat->S.end();
   loop
   {
-    j=kFindDivisibleByInS(strat,&max_ind,&P);
-    if (j>=0)
+    sit_j=kFindDivisibleByInS(strat,&max_ind,&P);
+    if (sit_j != strat->S.end())
     {
       if (!is_ring)
       {
-        auto sit_j = strat->S.iterator_at(j);
         int sl=pSize(sit_j->p);
-        int jj=j;
+        int jj=sit_j.index();
+        int j_idx=sit_j.index();
         loop
         {
           int sll;
@@ -2703,14 +2704,15 @@ poly redNFBound (poly h,int &max_ind,int nonorm,kStrategy strat,int bound)
           if (sll<sl)
           {
             #ifdef KDEBUG
-            if (TEST_OPT_DEBUG) Print("better(S%d:%d -> S%d:%d)\n",j,sl,jj,sll);
+            if (TEST_OPT_DEBUG) Print("better(S%d:%d -> S%d:%d)\n",j_idx,sl,jj,sll);
             #endif
             //else if (TEST_OPT_PROT) { PrintS("b"); mflush(); }
-            j=jj;
+            j_idx=jj;
             sit_j = sit_jj;
             sl=sll;
           }
         }
+        (void)j_idx;
         if ((nonorm==0) && (!nIsOne(pGetCoeff(sit_j->p))))
         {
           pNorm(sit_j->p);
@@ -2724,21 +2726,20 @@ poly redNFBound (poly h,int &max_ind,int nonorm,kStrategy strat,int bound)
         PrintS("red:");
         wrp(h);
         PrintS(" with ");
-        wrp(strat->S.iterator_at(j)->p);
+        wrp(sit_j->p);
       }
 #endif
 #ifdef HAVE_PLURAL
       if (rIsPluralRing(currRing))
       {
         number coef;
-        nc_kBucketPolyRed_NF(P.bucket,strat->S.iterator_at(j)->p,&coef,nonorm);
+        nc_kBucketPolyRed_NF(P.bucket,sit_j->p,&coef,nonorm);
         nDelete(&coef);
       }
       else
 #endif
       {
-        auto sit_j2 = strat->S.iterator_at(j);
-        kBucketPolyRedNF(P.bucket,sit_j2->p,pLength(sit_j2->p),strat->kNoether);
+        kBucketPolyRedNF(P.bucket,sit_j->p,pLength(sit_j->p),strat->kNoether);
         P.p = kBucketClear(P.bucket);
         P.p = pJet(P.p,bound);
         if(!P.IsNull())
