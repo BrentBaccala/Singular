@@ -382,10 +382,10 @@ int kFindDivisibleByInT_Z(const kStrategy strat, const LObject* L, const int sta
   }
 }
 
-static int kFindDivisibleByInS_Z(const kStrategy strat, LObject* L)
+static sBasisSet::iterator kFindDivisibleByInS_Z(const kStrategy strat, LObject* L)
 {
   unsigned long not_sev = ~L->sev;
-  int o = -1;
+  auto o = strat->S.end();
 
   number rest, orest, mult;
   L->GetP();
@@ -408,7 +408,7 @@ static int kFindDivisibleByInS_Z(const kStrategy strat, LObject* L)
         mult= n_QuotRem(pGetCoeff(p), pGetCoeff(sit->p), &rest, r->cf);
         if (!n_IsZero(mult, r->cf) && n_Greater(n_EucNorm(orest, r->cf), n_EucNorm(rest, r->cf), r->cf))
         {
-          o = sit.index();
+          o = sit;
           orest = rest;
         }
       }
@@ -417,7 +417,7 @@ static int kFindDivisibleByInS_Z(const kStrategy strat, LObject* L)
   }
   else
   {
-    return -1;
+    return strat->S.end();
   }
 }
 
@@ -1076,8 +1076,8 @@ static int redRing_Z_S (LObject* h,kStrategy strat)
 #endif
         /* check if a reducer of the lead monomial exists, by the above
          * check this is a real divisor of the lead monomial */
-        j = kFindDivisibleByInS_Z(strat, h);
-        if (j < 0)
+        auto jz = kFindDivisibleByInS_Z(strat, h);
+        if (jz == strat->S.end())
         {
           // over ZZ: cleanup coefficients by complete reduction with monomials
           if (rHasLocalOrMixedOrdering(currRing))
@@ -1106,7 +1106,7 @@ static int redRing_Z_S (LObject* h,kStrategy strat)
            * => we try to cut down the lead coefficient at least */
           /* first copy T[j] in order to multiply it with a coefficient later on */
           number mult, rest;
-          auto sit_j = strat->S.iterator_at(j);
+          auto sit_j = jz;
           TObject tj(pCopy(sit_j->p));
           /* compute division with remainder of lc(h) and lc(S[j]) */
           mult = n_QuotRem(pGetCoeff(h->p), pGetCoeff(sit_j->p),
