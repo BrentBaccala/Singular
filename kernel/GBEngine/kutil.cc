@@ -7185,15 +7185,9 @@ void initS (ideal F, ideal Q, kStrategy strat)
         if (h.p!=NULL)
         {
           strat->initEcart(&h);
-          if (strat->S.empty())
-            pos =0;
-          else
-          {
-            pos = strat->S.find_pos(strat,h.p,h.ecart,strat->S.size()-1);
-          }
           h.sev = pGetShortExpVector(h.p);
+          h.fromQ = 1;
           strat->enterS(h, strat, -1, -1);
-          strat->S.iterator_at(pos)->fromQ=1;
         }
       }
     }
@@ -7221,10 +7215,6 @@ void initS (ideal F, ideal Q, kStrategy strat)
           h.pNorm();
         }
         strat->initEcart(&h);
-        if (strat->S.empty())
-          pos =0;
-        else
-          pos = strat->S.find_pos(strat,h.p,h.ecart,strat->S.size()-1);
         h.sev = pGetShortExpVector(h.p);
         strat->enterS(h, strat, -1, -1);
       }
@@ -7232,8 +7222,8 @@ void initS (ideal F, ideal Q, kStrategy strat)
   }
   /*- test, if a unit is in F -*/
   if (((!strat->S.empty()))
-       && n_IsUnit(pGetCoeff(strat->S.iterator_at(0)->p),currRing->cf)
-       && pIsConstant(strat->S.iterator_at(0)->p))
+       && n_IsUnit(pGetCoeff(strat->S.begin()->p),currRing->cf)
+       && pIsConstant(strat->S.begin()->p))
   {
     while ((strat->S.size() > 1)) deleteInS(strat->S.size()-1,strat);
   }
@@ -7278,15 +7268,9 @@ void initSL (ideal F, ideal Q,kStrategy strat)
         if (h.p!=NULL)
         {
           strat->initEcart(&h);
-          if (strat->S.empty())
-            pos =0;
-          else
-          {
-            pos = strat->S.find_pos(strat,h.p,h.ecart,strat->S.size()-1);
-          }
           h.sev = pGetShortExpVector(h.p);
+          h.fromQ = 1;
           strat->enterS(h, strat, -1, -1);
-          strat->S.iterator_at(pos)->fromQ=1;
         }
         if(errorreported) return;
       }
@@ -7381,15 +7365,9 @@ void initSLSba (ideal F, ideal Q,kStrategy strat)
         if (h.p!=NULL)
         {
           strat->initEcart(&h);
-          if (strat->S.empty())
-            pos =0;
-          else
-          {
-            pos = strat->S.find_pos(strat,h.p,h.ecart,strat->S.size()-1);
-          }
           h.sev = pGetShortExpVector(h.p);
+          h.fromQ = 1;
           strat->enterS(h, strat, -1, -1);
-          strat->S.iterator_at(pos)->fromQ=1;
         }
       }
     }
@@ -7682,16 +7660,10 @@ void initSSpecial (ideal F, ideal Q, ideal P,kStrategy strat)
         if (h.p!=NULL)
         {
           strat->initEcart(&h);
-          if (strat->S.empty())
-            pos =0;
-          else
-          {
-            pos = strat->S.find_pos(strat,h.p,h.ecart,strat->S.size()-1);
-          }
           h.sev = pGetShortExpVector(h.p);
+          h.fromQ = 1;
           strat->enterS(h, strat, strat->T.size(), -1);
           enterT(h, strat);
-          strat->S.iterator_at(pos)->fromQ=1;
         }
       }
     }
@@ -7714,10 +7686,6 @@ void initSSpecial (ideal F, ideal Q, ideal P,kStrategy strat)
       if (h.p!=NULL)
       {
         strat->initEcart(&h);
-        if (strat->S.empty())
-          pos =0;
-        else
-          pos = strat->S.find_pos(strat,h.p,h.ecart,strat->S.size()-1);
         h.sev = pGetShortExpVector(h.p);
         strat->enterS(h, strat, strat->T.size(), -1);
         enterT(h,strat);
@@ -7825,16 +7793,10 @@ void initSSpecialSba (ideal F, ideal Q, ideal P,kStrategy strat)
         if (h.p!=NULL)
         {
           strat->initEcart(&h);
-          if (strat->S.empty())
-            pos =0;
-          else
-          {
-            pos = strat->S.find_pos(strat,h.p,h.ecart,strat->S.size()-1);
-          }
           h.sev = pGetShortExpVector(h.p);
+          h.fromQ = 1;
           strat->enterS(h, strat, strat->T.size(), -1);
           enterT(h, strat);
-          strat->S.iterator_at(pos)->fromQ=1;
         }
       }
     }
@@ -7857,10 +7819,6 @@ void initSSpecialSba (ideal F, ideal Q, ideal P,kStrategy strat)
       if (h.p!=NULL)
       {
         strat->initEcart(&h);
-        if (strat->S.empty())
-          pos =0;
-        else
-          pos = strat->S.find_pos(strat,h.p,h.ecart,strat->S.size()-1);
         h.sev = pGetShortExpVector(h.p);
         strat->enterS(h, strat, strat->T.size(), -1);
         enterT(h,strat);

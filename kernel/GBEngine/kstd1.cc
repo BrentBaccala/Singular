@@ -3627,8 +3627,6 @@ ideal kInterRedBba (ideal F, ideal Q, int &need_retry)
       // get the polynomial (canonicalize bucket, make sure P.p is set)
       strat->P.GetP(strat->lmBin);
 
-      int pos=strat->S.find_pos(strat,strat->P.p,strat->P.ecart,strat->S.size()-1);
-
       // reduce the tail and normalize poly
       // in the ring case we cannot expect LC(f) = 1,
       // therefore we call pCleardenom instead of pNorm
@@ -3650,14 +3648,16 @@ ideal kInterRedBba (ideal F, ideal Q, int &need_retry)
       {
         enterT(strat->P, strat);
         // posInS only depends on the leading term
-        strat->enterS(strat->P, strat, strat->T.size()-1, -1);
+        auto inserted = strat->enterS(strat->P, strat, strat->T.size()-1, -1);
+        int pos = inserted.index();
+        ++inserted;
 
         if (pos<strat->S.size()-1)
         {
           need_retry++;
           // move all "larger" elements fromS to L
           // remove them from T
-          auto sit=strat->S.iterator_at(pos+1);
+          auto sit = inserted;
           for(;sit != strat->S.end();++sit)
           {
             LObject h;
@@ -3697,7 +3697,7 @@ ideal kInterRedBba (ideal F, ideal Q, int &need_retry)
           }
           if (strat->hasFromQ)
           {
-            for(auto sit2=strat->S.iterator_at(pos+1);sit2!=strat->S.end();++sit2) sit2->fromQ=0;
+            for(auto sit2=inserted;sit2!=strat->S.end();++sit2) sit2->fromQ=0;
           }
           strat->S.setsize(pos+1);
         }
