@@ -1616,9 +1616,9 @@ static void firstUpdate(kStrategy strat)
 *    and cancels units if possible
 *  - reorders s,L
 */
-void enterSMora (LObject &p, kStrategy strat, int atR, int atS)
+sBasisSet::iterator enterSMora (LObject &p, kStrategy strat, int atR, int atS)
 {
-  enterSBba(p, strat, atR, atS);
+  auto it = enterSBba(p, strat, atR, atS);
   #ifdef KDEBUG
   if (TEST_OPT_DEBUG)
   {
@@ -1634,7 +1634,7 @@ void enterSMora (LObject &p, kStrategy strat, int atR, int atS)
     {
       firstUpdate(strat);
       if (TEST_OPT_FINDET)
-        return;
+        return it;
 
       /*- cuts elements in L above noether and reorders L -*/
       updateLHC(strat);
@@ -1663,6 +1663,7 @@ void enterSMora (LObject &p, kStrategy strat, int atR, int atS)
       strat->L.reorder();
     }
   }
+  return it;
 }
 
 /*2
@@ -1671,12 +1672,13 @@ void enterSMora (LObject &p, kStrategy strat, int atR, int atS)
 *  if TRUE
 *  - computes noether
 */
-void enterSMoraNF (LObject &p, kStrategy strat, int atR, int atS)
+sBasisSet::iterator enterSMoraNF (LObject &p, kStrategy strat, int atR, int atS)
 {
-  enterSBba(p, strat, atR, atS);
+  auto it = enterSBba(p, strat, atR, atS);
   if ((!strat->kAllAxis) || (strat->kNoether!=NULL)) HEckeTest(p.p,strat);
   if (strat->kAllAxis)
     newHEdge(strat);
+  return it;
 }
 
 void initBba(kStrategy strat)

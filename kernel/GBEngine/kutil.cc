@@ -8348,16 +8348,16 @@ ideal skStrategy::getShdl()
 * -puts p to the standardbasis s at position at
 * -saves the result in S
 */
-void enterSBba (LObject &p, kStrategy strat, int atR, int atS)
+sBasisSet::iterator enterSBba (LObject &p, kStrategy strat, int atR, int atS)
 {
-  strat->S.enter_bba(p, strat, atR, atS);
+  return strat->S.enter_bba(p, strat, atR, atS);
 }
 
 /*2
 * sBasisSet::enter_bba — find sorted position and insert a new basis element.
 * Replaces enterSBba for iterator-based usage.
 */
-void sBasisSet::enter_bba(LObject &p, kStrategy strat, int atR, int atS)
+sBasisSet::iterator sBasisSet::enter_bba(LObject &p, kStrategy strat, int atR, int atS)
 {
   strat->news = TRUE;
   ensure_capacity(size() + 1);
@@ -8381,15 +8381,15 @@ void sBasisSet::enter_bba(LObject &p, kStrategy strat, int atR, int atS)
   sobj.s_2_r = (atR >= 0) ? atR : p.i_r;
   sobj.length = 0;
   sobj.wlength = 0;
-  sobj.fromQ = 0;
+  sobj.fromQ = p.fromQ;
 
-  insert_at(pos, sobj);
+  return insert_at(pos, sobj);
 }
 
 #ifdef HAVE_SHIFTBBA
-void enterSBbaShift (LObject &p, kStrategy strat, int atR, int atS)
+sBasisSet::iterator enterSBbaShift (LObject &p, kStrategy strat, int atR, int atS)
 {
-  strat->S.enter_bba(p, strat, atR, atS);
+  auto it = strat->S.enter_bba(p, strat, atR, atS);
 
   int maxPossibleShift = p_mLPmaxPossibleShift(p.p, strat->tailRing);
   for (int i = maxPossibleShift; i > 0; i--)
@@ -8400,6 +8400,7 @@ void enterSBbaShift (LObject &p, kStrategy strat, int atR, int atS)
     strat->initEcart(&qq);
     strat->S.enter_bba(qq, strat, -1);
   }
+  return it;
 }
 #endif
 
@@ -8407,9 +8408,9 @@ void enterSBbaShift (LObject &p, kStrategy strat, int atR, int atS)
 * -puts p to the standardbasis s at position at
 * -saves the result in S
 */
-void enterSSba (LObject &p, kStrategy strat, int atR, int atS)
+sBasisSet::iterator enterSSba (LObject &p, kStrategy strat, int atR, int atS)
 {
-  strat->S.enter_sba(p, strat, atR, atS);
+  auto it = strat->S.enter_sba(p, strat, atR, atS);
 #ifdef DEBUGF5
   int k;
   Print("--- LIST S: %d ---\n",strat->S.size()-1);
@@ -8419,13 +8420,14 @@ void enterSSba (LObject &p, kStrategy strat, int atR, int atS)
   }
   PrintS("--- LIST S END ---\n");
 #endif
+  return it;
 }
 
 /*2
 * sBasisSet::enter_sba — find sorted position and insert for signature-based algorithms.
 * Replaces enterSSba for iterator-based usage.
 */
-void sBasisSet::enter_sba(LObject &p, kStrategy strat, int atR, int atS)
+sBasisSet::iterator sBasisSet::enter_sba(LObject &p, kStrategy strat, int atR, int atS)
 {
   strat->news = TRUE;
   ensure_capacity(size() + 1);
@@ -8449,10 +8451,10 @@ void sBasisSet::enter_sba(LObject &p, kStrategy strat, int atR, int atS)
   sobj.s_2_r = (atR >= 0) ? atR : p.i_r;
   sobj.length = 0;
   sobj.wlength = 0;
-  sobj.fromQ = 0;
+  sobj.fromQ = p.fromQ;
 
   // Original enterSSba inserts FIRST then sets sig/sevSig.
-  insert_at(pos, sobj);
+  auto it = insert_at(pos, sobj);
   elem(pos).sig = p.sig;
   if (p.sig != NULL)
   {
@@ -8472,6 +8474,7 @@ void sBasisSet::enter_sba(LObject &p, kStrategy strat, int atR, int atS)
   }
   PrintS("--- LIST S END ---\n");
 #endif
+  return it;
 }
 
 void replaceInLAndSAndT(LObject &p, int tj, kStrategy strat)

@@ -304,6 +304,8 @@ public:
                       // NOTE: If prod_crit = TRUE then the corresponding pair is
                       // detected by Buchberger's Product Criterion and can be
                       // deleted
+  int fromQ = 0;      // from quotient ideal; copied into SElement.fromQ by
+                      // sBasisSet::enter_bba / enter_sba.
 
   // initialization
   KINLINE void Init(ring tailRing = currRing);
@@ -932,11 +934,13 @@ public:
 
   // Insert a new basis element from an LObject (replaces enterSBba).
   // Builds an SElement, inserts at the position determined by ordering mode.
-  void enter_bba(LObject &p, kStrategy strat, int atR = -1, int atS = -1);
+  // Returns an iterator to the just-inserted element.
+  iterator enter_bba(LObject &p, kStrategy strat, int atR = -1, int atS = -1);
 
   // Insert for signature-based algorithms (replaces enterSSba).
   // Also copies sig and sevSig fields.
-  void enter_sba(LObject &p, kStrategy strat, int atR = -1, int atS = -1);
+  // Returns an iterator to the just-inserted element.
+  iterator enter_sba(LObject &p, kStrategy strat, int atR = -1, int atS = -1);
 
   // Delete element at iterator and update related structures.
   // In non-lazy mode, shifts elements down (like old deleteInS).
@@ -1022,7 +1026,7 @@ public:
   int (*posInT)(const BlockArray<TObject> &T,const int tl,LObject &h) = NULL;
   int (*compareL) (const LObject &lhs, const LObject &rhs, const kStrategy strat) = NULL;
   int (*compareLOld) (const LObject &lhs, const LObject &rhs, const kStrategy strat) = NULL;
-  void (*enterS)(LObject &h, kStrategy strat, int atR /*= -1*/, int atS /*= -1*/) = NULL;
+  sBasisSet::iterator (*enterS)(LObject &h, kStrategy strat, int atR /*= -1*/, int atS /*= -1*/) = NULL;
   void (*initEcartPair)(LObject * h, poly f, poly g, int ecartF, int ecartG) = NULL;
   void (*enterOnePair) (const SElement &si,poly p,int ecart, int isFromQ,kStrategy strat, int atR /*= -1*/) = NULL;
   void (*chainCrit) (poly p,int ecart,kStrategy strat) = NULL;
@@ -1168,9 +1172,9 @@ void deleteHC(poly *p, int *e, int *l, kStrategy strat);
 void deleteHC(LObject* L, kStrategy strat, BOOLEAN fromNext = FALSE);
 void deleteInS (int i,kStrategy strat);
 void cleanT (kStrategy strat);
-void enterSBba (LObject &p, kStrategy strat, int atR = -1, int atS = -1);
-void enterSBbaShift (LObject &p, kStrategy strat, int atR = -1, int atS = -1);
-void enterSSba (LObject &p, kStrategy strat, int atR = -1, int atS = -1);
+sBasisSet::iterator enterSBba (LObject &p, kStrategy strat, int atR = -1, int atS = -1);
+sBasisSet::iterator enterSBbaShift (LObject &p, kStrategy strat, int atR = -1, int atS = -1);
+sBasisSet::iterator enterSSba (LObject &p, kStrategy strat, int atR = -1, int atS = -1);
 void initEcartPairBba (LObject* Lp,poly f,poly g,int ecartF,int ecartG);
 void initEcartPairMora (LObject* Lp,poly f,poly g,int ecartF,int ecartG);
 // Backward-compat free wrapper for kthread.cc (which is intentionally
@@ -1380,8 +1384,8 @@ BOOLEAN kTest_S(kStrategy strat);
  ***************************************************************/
 int redFirst (LObject* h,kStrategy strat);
 int redEcart (LObject* h,kStrategy strat);
-void enterSMora (LObject &p, kStrategy strat, int atR = -1, int atS = -1);
-void enterSMoraNF (LObject &p, kStrategy strat, int atR = -1, int atS = -1);
+sBasisSet::iterator enterSMora (LObject &p, kStrategy strat, int atR = -1, int atS = -1);
+sBasisSet::iterator enterSMoraNF (LObject &p, kStrategy strat, int atR = -1, int atS = -1);
 
 
 /***************************************************************
