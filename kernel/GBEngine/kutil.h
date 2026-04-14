@@ -459,12 +459,14 @@ public:
   // Insert a new basis element from an LObject (replaces enterSBba).
   // Builds an SElement, inserts at the position determined by ordering mode.
   // Returns an iterator to the just-inserted element.
-  iterator enter_bba(LObject &p, kStrategy strat, int atR = -1, int atS = -1);
+  // atS: end() means "compute position via find_pos internally" (was int atS = -1).
+  iterator enter_bba(LObject &p, kStrategy strat, int atR, iterator atS);
 
   // Insert for signature-based algorithms (replaces enterSSba).
   // Also copies sig and sevSig fields.
   // Returns an iterator to the just-inserted element.
-  iterator enter_sba(LObject &p, kStrategy strat, int atR = -1, int atS = -1);
+  // atS: end() means "compute position via find_pos internally" (was int atS = -1).
+  iterator enter_sba(LObject &p, kStrategy strat, int atR, iterator atS);
 
   // Delete element at iterator and update related structures.
   // In non-lazy mode, shifts elements down (like old deleteInS).
@@ -1053,7 +1055,12 @@ public:
   int (*posInT)(const BlockArray<TObject> &T,const int tl,LObject &h) = NULL;
   int (*compareL) (const LObject &lhs, const LObject &rhs, const kStrategy strat) = NULL;
   int (*compareLOld) (const LObject &lhs, const LObject &rhs, const kStrategy strat) = NULL;
-  sBasisSet::iterator (*enterS)(LObject &h, kStrategy strat, int atR /*= -1*/, int atS /*= -1*/) = NULL;
+  // atS: iterator to the position in S where h should be inserted.
+  //   Pass strat->S.end() to mean "compute position via find_pos internally"
+  //   (previously encoded as int atS = -1).
+  //   Other iterator values pin the insertion position explicitly
+  //   (previously encoded as int atS >= 0).
+  sBasisSet::iterator (*enterS)(LObject &h, kStrategy strat, int atR /*= -1*/, sBasisSet::iterator atS) = NULL;
   void (*initEcartPair)(LObject * h, poly f, poly g, int ecartF, int ecartG) = NULL;
   void (*enterOnePair) (const SElement &si,poly p,int ecart, int isFromQ,kStrategy strat, int atR /*= -1*/) = NULL;
   void (*chainCrit) (poly p,int ecart,kStrategy strat) = NULL;
@@ -1202,9 +1209,9 @@ void deleteHC(poly *p, int *e, int *l, kStrategy strat);
 void deleteHC(LObject* L, kStrategy strat, BOOLEAN fromNext = FALSE);
 void deleteInS (int i,kStrategy strat);
 void cleanT (kStrategy strat);
-sBasisSet::iterator enterSBba (LObject &p, kStrategy strat, int atR = -1, int atS = -1);
-sBasisSet::iterator enterSBbaShift (LObject &p, kStrategy strat, int atR = -1, int atS = -1);
-sBasisSet::iterator enterSSba (LObject &p, kStrategy strat, int atR = -1, int atS = -1);
+sBasisSet::iterator enterSBba (LObject &p, kStrategy strat, int atR, sBasisSet::iterator atS);
+sBasisSet::iterator enterSBbaShift (LObject &p, kStrategy strat, int atR, sBasisSet::iterator atS);
+sBasisSet::iterator enterSSba (LObject &p, kStrategy strat, int atR, sBasisSet::iterator atS);
 void initEcartPairBba (LObject* Lp,poly f,poly g,int ecartF,int ecartG);
 void initEcartPairMora (LObject* Lp,poly f,poly g,int ecartF,int ecartG);
 int posInIdealMonFirst (const ideal F, const poly p,int start = 0,int end = -1);
@@ -1232,7 +1239,14 @@ int posInT_pLength(const BlockArray<TObject> &set,const int length,LObject &p);
 
 
 int posInSyz (const kStrategy strat, const poly sig);
-KINLINE poly redtailBba (poly p,int end_pos,kStrategy strat,BOOLEAN normalize=FALSE);
+// redtailBba overloads: the `end` iterator is an *exclusive* upper bound
+// on the range of strat->S considered for reduction (STL-style:
+// reduce against [strat->S.begin(), end)). Previous int end_pos was
+// *inclusive* — translation for callers: old `pos-1` (inclusive) becomes
+// new `pos` (exclusive iterator); old `strat->S.size()-1` becomes
+// `strat->S.end()`; old raw `max_ind` (inclusive int) becomes
+// `strat->S.iterator_at(max_ind + 1)`.
+KINLINE poly redtailBba (poly p,sBasisSet::const_iterator end,kStrategy strat,BOOLEAN normalize=FALSE);
 KINLINE poly redtailBbaBound (poly p,int end_pos,kStrategy strat,int bound,BOOLEAN normalize=FALSE);
 KINLINE poly redtailBba_Ring (poly p,int end_pos,kStrategy strat);
 KINLINE poly redtailBba_Z (poly p,int end_pos,kStrategy strat);
@@ -1240,13 +1254,13 @@ poly redtailBba_NF (poly p, kStrategy strat );
 poly redtailBba_Ring (LObject* L, int end_pos, kStrategy strat );
 poly redtailBba_Z (LObject* L, int end_pos, kStrategy strat );
 void redtailBbaAlsoLC_Z (LObject* L, int end_pos, kStrategy strat );
-poly redtailBba (LObject *L, int end_pos,kStrategy strat,
+poly redtailBba (LObject *L, sBasisSet::const_iterator end,kStrategy strat,
                  BOOLEAN withT = FALSE,BOOLEAN normalize=FALSE);
 poly redtailBbaBound (LObject *L, int end_pos,kStrategy strat,int bound,
                  BOOLEAN withT = FALSE,BOOLEAN normalize=FALSE);
 poly redtailSba (LObject *L, int end_pos,kStrategy strat,
                  BOOLEAN withT = FALSE,BOOLEAN normalize=FALSE);
-poly redtailBba (TObject *T, int end_pos,kStrategy strat);
+poly redtailBba (TObject *T, sBasisSet::const_iterator end,kStrategy strat);
 poly redtail (poly p,int end_pos,kStrategy strat);
 poly redtail (LObject *L,int end_pos,kStrategy strat);
 poly redNF (poly h,int & max_ind,int nonorm,kStrategy strat);
@@ -1409,8 +1423,8 @@ BOOLEAN kTest_S(kStrategy strat);
  ***************************************************************/
 int redFirst (LObject* h,kStrategy strat);
 int redEcart (LObject* h,kStrategy strat);
-sBasisSet::iterator enterSMora (LObject &p, kStrategy strat, int atR = -1, int atS = -1);
-sBasisSet::iterator enterSMoraNF (LObject &p, kStrategy strat, int atR = -1, int atS = -1);
+sBasisSet::iterator enterSMora (LObject &p, kStrategy strat, int atR, sBasisSet::iterator atS);
+sBasisSet::iterator enterSMoraNF (LObject &p, kStrategy strat, int atR, sBasisSet::iterator atS);
 
 
 /***************************************************************

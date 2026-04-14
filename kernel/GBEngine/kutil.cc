@@ -1733,7 +1733,7 @@ static BOOLEAN enterOneStrongPoly (const SElement &si,poly p,int /*ecart*/, int 
     {
       enterT(h, strat,-1);
       //auto pos = strat->S.find_pos(h.p,h.ecart);
-      //strat->enterS(h, strat, strat->T.size()-1, -1);
+      //strat->enterS(h, strat, strat->T.size()-1, strat->S.end());
     }
   }
   return TRUE;
@@ -1922,9 +1922,9 @@ static BOOLEAN enterOneStrongPolySig (const SElement &si_elem,poly p,poly sig,in
       }
       else
       {
-        strat->enterS(strat->P, strat, strat->T.size(), strat->S.size());
+        strat->enterS(strat->P, strat, strat->T.size(), strat->S.end());
         #if 1
-        strat->enterS(h, strat, strat->T.size()-1, 0);
+        strat->enterS(h, strat, strat->T.size()-1, strat->S.begin());
         #endif
         return FALSE;
       }
@@ -1949,10 +1949,10 @@ static BOOLEAN enterOneStrongPolySig (const SElement &si_elem,poly p,poly sig,in
       }
       else
       {
-        strat->enterS(strat->P, strat, strat->T.size(), strat->S.size());
+        strat->enterS(strat->P, strat, strat->T.size(), strat->S.end());
         // 0 - add just the original poly causing the sigdrop, 1 - add also this
         #if 1
-        strat->enterS(h, strat, strat->T.size(), 0);
+        strat->enterS(h, strat, strat->T.size(), strat->S.begin());
         #endif
         return FALSE;
       }
@@ -1962,8 +1962,8 @@ static BOOLEAN enterOneStrongPolySig (const SElement &si_elem,poly p,poly sig,in
   {
     strat->sigdrop = TRUE;
     //Enter this element to S
-    strat->enterS(strat->P, strat, strat->T.size(), strat->S.size());
-    strat->enterS(h, strat, strat->T.size(), strat->S.size());
+    strat->enterS(strat->P, strat, strat->T.size(), strat->S.end());
+    strat->enterS(h, strat, strat->T.size(), strat->S.end());
   }
   #if 1
   h.p1 = p;h.p2 = si_elem.p;
@@ -2896,9 +2896,9 @@ static void enterOnePairSigRing (const SElement &si, poly p, poly pSig, int, int
       }
       else
       {
-        strat->enterS(strat->P, strat, strat->T.size(), strat->S.size());
+        strat->enterS(strat->P, strat, strat->T.size(), strat->S.end());
         #if 1
-        strat->enterS(Lp, strat, strat->T.size()-1, 0);
+        strat->enterS(Lp, strat, strat->T.size()-1, strat->S.begin());
         #endif
         return;
       }
@@ -3143,10 +3143,10 @@ static void enterOnePairSigRing (const SElement &si, poly p, poly pSig, int, int
       }
       else
       {
-        strat->enterS(strat->P, strat, strat->T.size(), strat->S.size());
+        strat->enterS(strat->P, strat, strat->T.size(), strat->S.end());
         // 0 - add just the original poly causing the sigdrop, 1 - add also this
         #if 1
-        strat->enterS(Lp, strat, strat->T.size(), 0);
+        strat->enterS(Lp, strat, strat->T.size(), strat->S.begin());
         #endif
         return;
       }
@@ -4452,9 +4452,9 @@ void enterExtendedSpolySig(poly h,poly hSig,kStrategy strat)
         }
         else
         {
-          strat->enterS(strat->P, strat, strat->T.size(), strat->S.size());
+          strat->enterS(strat->P, strat, strat->T.size(), strat->S.end());
           #if 1
-          strat->enterS(Lp, strat, strat->T.size()-1, 0);
+          strat->enterS(Lp, strat, strat->T.size()-1, strat->S.begin());
           #endif
         }
         nDelete(&zero);
@@ -6479,8 +6479,15 @@ poly redtail (poly p, int end_pos, kStrategy strat)
   return redtail(&L, end_pos, strat);
 }
 
-poly redtailBba (LObject* L, int end_pos, kStrategy strat, BOOLEAN withT, BOOLEAN normalize)
+// `end` is the exclusive upper-bound iterator: reduction considers
+// S-elements in [strat->S.begin(), end). Previously `int end_pos` was
+// inclusive ([0..end_pos]); callers' old `pos-1` (inclusive int) becomes
+// new `pos` (exclusive iterator). Internally we still need an inclusive
+// int for kFindDivisibleByInS_T (not yet migrated).
+poly redtailBba (LObject* L, sBasisSet::const_iterator end, kStrategy strat, BOOLEAN withT, BOOLEAN normalize)
 {
+  const int end_pos = (end == strat->S.cend()) ? strat->S.size() - 1
+                                                : end.index() - 1;
   strat->redTailChange=FALSE;
   if (strat->noTailReduction) return L->GetLmCurrRing();
   poly h, p;
@@ -7191,7 +7198,7 @@ void initS (ideal F, ideal Q, kStrategy strat)
           strat->initEcart(&h);
           h.sev = pGetShortExpVector(h.p);
           h.fromQ = 1;
-          strat->enterS(h, strat, -1, -1);
+          strat->enterS(h, strat, -1, strat->S.end());
         }
       }
     }
@@ -7220,7 +7227,7 @@ void initS (ideal F, ideal Q, kStrategy strat)
         }
         strat->initEcart(&h);
         h.sev = pGetShortExpVector(h.p);
-        strat->enterS(h, strat, -1, -1);
+        strat->enterS(h, strat, -1, strat->S.end());
       }
     }
   }
@@ -7274,7 +7281,7 @@ void initSL (ideal F, ideal Q,kStrategy strat)
           strat->initEcart(&h);
           h.sev = pGetShortExpVector(h.p);
           h.fromQ = 1;
-          strat->enterS(h, strat, -1, -1);
+          strat->enterS(h, strat, -1, strat->S.end());
         }
         if(errorreported) return;
       }
@@ -7371,7 +7378,7 @@ void initSLSba (ideal F, ideal Q,kStrategy strat)
           strat->initEcart(&h);
           h.sev = pGetShortExpVector(h.p);
           h.fromQ = 1;
-          strat->enterS(h, strat, -1, -1);
+          strat->enterS(h, strat, -1, strat->S.end());
         }
       }
     }
@@ -7681,7 +7688,7 @@ void initSSpecial (ideal F, ideal Q, ideal P,kStrategy strat)
           strat->initEcart(&h);
           h.sev = pGetShortExpVector(h.p);
           h.fromQ = 1;
-          strat->enterS(h, strat, strat->T.size(), -1);
+          strat->enterS(h, strat, strat->T.size(), strat->S.end());
           enterT(h, strat);
         }
       }
@@ -7700,13 +7707,13 @@ void initSSpecial (ideal F, ideal Q, ideal P,kStrategy strat)
       }
       else if (TEST_OPT_REDTAIL || TEST_OPT_REDSB)
       {
-        h.p=redtailBba(h.p,strat->S.size()-1,strat);
+        h.p=redtailBba(h.p,strat->S.end(),strat);
       }
       if (h.p!=NULL)
       {
         strat->initEcart(&h);
         h.sev = pGetShortExpVector(h.p);
-        strat->enterS(h, strat, strat->T.size(), -1);
+        strat->enterS(h, strat, strat->T.size(), strat->S.end());
         enterT(h,strat);
       }
     }
@@ -7732,7 +7739,7 @@ void initSSpecial (ideal F, ideal Q, ideal P,kStrategy strat)
           h.p=redBba(h.p,strat->S.size()-1,strat);
           if ((h.p!=NULL)&&(TEST_OPT_REDTAIL || TEST_OPT_REDSB))
           {
-            h.p=redtailBba(h.p,strat->S.size()-1,strat);
+            h.p=redtailBba(h.p,strat->S.end(),strat);
           }
         }
         else
@@ -7755,7 +7762,7 @@ void initSSpecial (ideal F, ideal Q, ideal P,kStrategy strat)
           h.SetpFDeg();
           auto pos_it = strat->S.find_pos(h.p,h.ecart);
           enterpairsSpecial(h.p,strat->S.size()-1,h.ecart,pos_it.index(),strat,strat->T.size());
-          strat->enterS(h, strat, strat->T.size(), -1);
+          strat->enterS(h, strat, strat->T.size(), strat->S.end());
           enterT(h,strat);
         }
       }
@@ -7763,7 +7770,7 @@ void initSSpecial (ideal F, ideal Q, ideal P,kStrategy strat)
       {
         h.sev = pGetShortExpVector(h.p);
         strat->initEcart(&h);
-        strat->enterS(h, strat, strat->T.size(), -1);
+        strat->enterS(h, strat, strat->T.size(), strat->S.end());
         enterT(h,strat);
       }
     }
@@ -7814,7 +7821,7 @@ void initSSpecialSba (ideal F, ideal Q, ideal P,kStrategy strat)
           strat->initEcart(&h);
           h.sev = pGetShortExpVector(h.p);
           h.fromQ = 1;
-          strat->enterS(h, strat, strat->T.size(), -1);
+          strat->enterS(h, strat, strat->T.size(), strat->S.end());
           enterT(h, strat);
         }
       }
@@ -7833,13 +7840,13 @@ void initSSpecialSba (ideal F, ideal Q, ideal P,kStrategy strat)
       }
       else if (TEST_OPT_REDTAIL || TEST_OPT_REDSB)
       {
-        h.p=redtailBba(h.p,strat->S.size()-1,strat);
+        h.p=redtailBba(h.p,strat->S.end(),strat);
       }
       if (h.p!=NULL)
       {
         strat->initEcart(&h);
         h.sev = pGetShortExpVector(h.p);
-        strat->enterS(h, strat, strat->T.size(), -1);
+        strat->enterS(h, strat, strat->T.size(), strat->S.end());
         enterT(h,strat);
       }
     }
@@ -7865,7 +7872,7 @@ void initSSpecialSba (ideal F, ideal Q, ideal P,kStrategy strat)
           h.p=redBba(h.p,strat->S.size()-1,strat);
           if ((h.p!=NULL)&&(TEST_OPT_REDTAIL || TEST_OPT_REDSB))
           {
-            h.p=redtailBba(h.p,strat->S.size()-1,strat);
+            h.p=redtailBba(h.p,strat->S.end(),strat);
           }
         }
         else
@@ -7888,7 +7895,7 @@ void initSSpecialSba (ideal F, ideal Q, ideal P,kStrategy strat)
           h.SetpFDeg();
           auto pos_it = strat->S.find_pos(h.p,h.ecart);
           enterpairsSpecial(h.p,strat->S.size()-1,h.ecart,pos_it.index(),strat,strat->T.size());
-          strat->enterS(h, strat, strat->T.size(), -1);
+          strat->enterS(h, strat, strat->T.size(), strat->S.end());
           enterT(h,strat);
         }
       }
@@ -7896,7 +7903,7 @@ void initSSpecialSba (ideal F, ideal Q, ideal P,kStrategy strat)
       {
         h.sev = pGetShortExpVector(h.p);
         strat->initEcart(&h);
-        strat->enterS(h, strat, strat->T.size(), -1);
+        strat->enterS(h, strat, strat->T.size(), strat->S.end());
         enterT(h,strat);
       }
     }
@@ -8175,7 +8182,7 @@ void updateS(BOOLEAN toT,kStrategy strat)
       {
         if ((!strat->hasFromQ) || (sit->fromQ==0))
         {
-          h.p = redtailBba(sit->p,sit.index()-1,strat);
+          h.p = redtailBba(sit->p,sit,strat);
           if (TEST_OPT_INTSTRATEGY)
           {
             h.pCleardenom();// also does remove Content
@@ -8325,7 +8332,7 @@ ideal skStrategy::getShdl()
 * -puts p to the standardbasis s at position at
 * -saves the result in S
 */
-sBasisSet::iterator enterSBba (LObject &p, kStrategy strat, int atR, int atS)
+sBasisSet::iterator enterSBba (LObject &p, kStrategy strat, int atR, sBasisSet::iterator atS)
 {
   return strat->S.enter_bba(p, strat, atR, atS);
 }
@@ -8333,15 +8340,17 @@ sBasisSet::iterator enterSBba (LObject &p, kStrategy strat, int atR, int atS)
 /*2
 * sBasisSet::enter_bba — find sorted position and insert a new basis element.
 * Replaces enterSBba for iterator-based usage.
+* atS == end() means "compute position via find_pos internally"
+* (was int atS == -1). Otherwise atS pins the insertion position.
 */
-sBasisSet::iterator sBasisSet::enter_bba(LObject &p, kStrategy strat, int atR, int atS)
+sBasisSet::iterator sBasisSet::enter_bba(LObject &p, kStrategy strat, int atR, iterator atS)
 {
   strat->news = TRUE;
   ensure_capacity(size() + 1);
 
   int pos;
-  if (atS >= 0)
-    pos = atS;
+  if (atS != end())
+    pos = atS.index();
   else if (order_ == SORDER_APPEND)
     pos = size();
   else
@@ -8364,7 +8373,7 @@ sBasisSet::iterator sBasisSet::enter_bba(LObject &p, kStrategy strat, int atR, i
 }
 
 #ifdef HAVE_SHIFTBBA
-sBasisSet::iterator enterSBbaShift (LObject &p, kStrategy strat, int atR, int atS)
+sBasisSet::iterator enterSBbaShift (LObject &p, kStrategy strat, int atR, sBasisSet::iterator atS)
 {
   auto it = strat->S.enter_bba(p, strat, atR, atS);
 
@@ -8375,7 +8384,7 @@ sBasisSet::iterator enterSBbaShift (LObject &p, kStrategy strat, int atR, int at
     p_mLPshift(qq.p, i, strat->tailRing);
     qq.shift = i;
     strat->initEcart(&qq);
-    strat->S.enter_bba(qq, strat, -1);
+    strat->S.enter_bba(qq, strat, -1, strat->S.end());
   }
   return it;
 }
@@ -8385,7 +8394,7 @@ sBasisSet::iterator enterSBbaShift (LObject &p, kStrategy strat, int atR, int at
 * -puts p to the standardbasis s at position at
 * -saves the result in S
 */
-sBasisSet::iterator enterSSba (LObject &p, kStrategy strat, int atR, int atS)
+sBasisSet::iterator enterSSba (LObject &p, kStrategy strat, int atR, sBasisSet::iterator atS)
 {
   auto it = strat->S.enter_sba(p, strat, atR, atS);
 #ifdef DEBUGF5
@@ -8403,14 +8412,14 @@ sBasisSet::iterator enterSSba (LObject &p, kStrategy strat, int atR, int atS)
 * sBasisSet::enter_sba — find sorted position and insert for signature-based algorithms.
 * Replaces enterSSba for iterator-based usage.
 */
-sBasisSet::iterator sBasisSet::enter_sba(LObject &p, kStrategy strat, int atR, int atS)
+sBasisSet::iterator sBasisSet::enter_sba(LObject &p, kStrategy strat, int atR, iterator atS)
 {
   strat->news = TRUE;
   ensure_capacity(size() + 1);
 
   int pos;
-  if (atS >= 0)
-    pos = atS;
+  if (atS != end())
+    pos = atS.index();
   else if (order_ == SORDER_APPEND)
     pos = size();
   else
@@ -8465,11 +8474,11 @@ void replaceInLAndSAndT(LObject &p, int tj, kStrategy strat)
     {
 #ifdef HAVE_SHIFTBBA
       if (rIsLPRing(currRing))
-        p.p = redtailBba(&p,strat->T.size()-1,strat, TRUE,!TEST_OPT_CONTENTSB);
+        p.p = redtailBba(&p,strat->S.end(),strat, TRUE,!TEST_OPT_CONTENTSB);
       else
 #endif
       {
-        p.p = redtailBba(&p,strat->S.size()-1,strat, FALSE,!TEST_OPT_CONTENTSB);
+        p.p = redtailBba(&p,strat->S.end(),strat, FALSE,!TEST_OPT_CONTENTSB);
       }
       p.pCleardenom();
       if (strat->redTailChange)
@@ -8532,7 +8541,7 @@ void replaceInLAndSAndT(LObject &p, int tj, kStrategy strat)
     superenterpairs(p.p, strat->S.size()-1, p.ecart, pos.index(), strat, strat->T.size()-1);
   }
   /* enter p to S set */
-  strat->enterS(p, strat, strat->T.size()-1, -1);
+  strat->enterS(p, strat, strat->T.size()-1, strat->S.end());
 
 #ifdef HAVE_SHIFTBBA
   /* do this after enterS so that the index in R (which is strat->T.size()-1) is correct */
@@ -9677,9 +9686,12 @@ void completeReduce (kStrategy strat, BOOLEAN withT)
   for (i=strat->S.size()-1; i>=low; i--)
   {
     auto sit = strat->S.iterator_at(i);
-    int end_pos=strat->S.size()-1;
+    // Exclusive end iterator for redtailBba:
+    //   strat->ak == 0  -> reduce against [0..i-1] inclusive = [begin, sit) exclusive
+    //   otherwise       -> reduce against [0..size-1] inclusive = [begin, end()) exclusive
+    sBasisSet::const_iterator end_it = strat->S.end();
     if ((strat->hasFromQ) && (sit->fromQ)) continue; // do not reduce Q_i
-    if (strat->ak==0) end_pos=i-1;
+    if (strat->ak==0) end_it = sit;
     TObject* T_j = strat->S.s_2_t(sit, strat);
     if ((T_j != NULL)&&(T_j->p==sit->p))
     {
@@ -9694,7 +9706,7 @@ void completeReduce (kStrategy strat, BOOLEAN withT)
       #endif
       if (rHasGlobalOrdering(currRing))
       {
-        sit->p = redtailBba(&L, end_pos, strat, withT,FALSE /*no normalize*/);
+        sit->p = redtailBba(&L, end_it, strat, withT,FALSE /*no normalize*/);
       }
       else
       {
@@ -9733,7 +9745,7 @@ void completeReduce (kStrategy strat, BOOLEAN withT)
       #endif
       if (rHasGlobalOrdering(currRing))
       {
-        sit->p = redtailBba(sit->p, end_pos, strat, withT);
+        sit->p = redtailBba(sit->p, end_it, strat, withT);
       }
       else
       {

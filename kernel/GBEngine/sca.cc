@@ -48,7 +48,7 @@ void addLObject(LObject& h, kStrategy& strat)
 
     if ((strat->syzComp==0)||(!strat->homog))
     {
-      h.p = redtailBba(h.p,pos.index()-1,strat);
+      h.p = redtailBba(h.p, pos,strat);
 
       if (TEST_OPT_INTSTRATEGY)
       {
@@ -82,7 +82,7 @@ void addLObject(LObject& h, kStrategy& strat)
     pos = strat->S.begin();
 
     if (!strat->S.empty()) pos = strat->S.find_pos(h.p, h.ecart);
-    strat->enterS(h, strat, -1, -1);
+    strat->enterS(h, strat, -1, strat->S.end());
 //    enterT(h, strat); // ?!
 
     kDeleteLcm(&h);
@@ -620,7 +620,7 @@ ideal k_sca_bba (const ideal F, const ideal Q, const intvec */*w*/, const bigint
         strat->P.pCleardenom();
         if ((TEST_OPT_REDSB)||(TEST_OPT_REDTAIL))
         {
-          strat->P.p = redtailBba(&(strat->P),pos.index()-1,strat, withT); // !!!
+          strat->P.p = redtailBba(&(strat->P), pos,strat, withT); // !!!
           strat->P.pCleardenom();
         }
       }
@@ -628,7 +628,7 @@ ideal k_sca_bba (const ideal F, const ideal Q, const intvec */*w*/, const bigint
       {
         strat->P.pNorm();
         if ((TEST_OPT_REDSB)||(TEST_OPT_REDTAIL))
-          strat->P.p = redtailBba(&(strat->P),pos.index()-1,strat, withT);
+          strat->P.p = redtailBba(&(strat->P), pos,strat, withT);
       }
       strat->P.is_normalized=nIsOne(pGetCoeff(strat->P.p));
 
@@ -668,7 +668,7 @@ ideal k_sca_bba (const ideal F, const ideal Q, const intvec */*w*/, const bigint
       enterpairs(strat->P.p,strat->S.size()-1,strat->P.ecart,pos.index(),strat, strat->T.size()-1);
 
       // posInS only depends on the leading term
-      strat->enterS(strat->P, strat, strat->T.size()-1, -1);
+      strat->enterS(strat->P, strat, strat->T.size()-1, strat->S.end());
 
 //       if (hilb!=NULL) khCheck(Q,w,hilb,hilbeledeg,hilbcount,strat);
 
@@ -736,7 +736,7 @@ ideal k_sca_bba (const ideal F, const ideal Q, const intvec */*w*/, const bigint
           h.pCleardenom();
           if ((TEST_OPT_REDSB)||(TEST_OPT_REDTAIL))
           {
-            h.p = redtailBba(&(h),pos.index()-1,strat, withT); // !!!
+            h.p = redtailBba(&(h), pos,strat, withT); // !!!
             h.pCleardenom();
           }
         }
@@ -744,7 +744,7 @@ ideal k_sca_bba (const ideal F, const ideal Q, const intvec */*w*/, const bigint
         {
           h.pNorm();
           if ((TEST_OPT_REDSB)||(TEST_OPT_REDTAIL))
-            h.p = redtailBba(&(h),pos.index()-1,strat, withT);
+            h.p = redtailBba(&(h), pos,strat, withT);
         }
 
 #ifdef KDEBUG
@@ -1071,7 +1071,7 @@ ideal k_sca_mora(const ideal F, const ideal Q, const intvec */*w*/, const bigint
       // build new pairs
       enterpairs(strat->P.p,strat->S.size()-1,strat->P.ecart,0,strat, strat->T.size()-1);
       // put in S
-      strat->enterS(strat->P, strat, strat->T.size()-1, -1);
+      strat->enterS(strat->P, strat, strat->T.size()-1, strat->S.end());
 
 
       // clear strat->P

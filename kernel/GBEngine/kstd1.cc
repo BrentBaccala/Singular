@@ -1616,7 +1616,7 @@ static void firstUpdate(kStrategy strat)
 *    and cancels units if possible
 *  - reorders s,L
 */
-sBasisSet::iterator enterSMora (LObject &p, kStrategy strat, int atR, int atS)
+sBasisSet::iterator enterSMora (LObject &p, kStrategy strat, int atR, sBasisSet::iterator atS)
 {
   auto it = enterSBba(p, strat, atR, atS);
   #ifdef KDEBUG
@@ -1672,7 +1672,7 @@ sBasisSet::iterator enterSMora (LObject &p, kStrategy strat, int atR, int atS)
 *  if TRUE
 *  - computes noether
 */
-sBasisSet::iterator enterSMoraNF (LObject &p, kStrategy strat, int atR, int atS)
+sBasisSet::iterator enterSMoraNF (LObject &p, kStrategy strat, int atR, sBasisSet::iterator atS)
 {
   auto it = enterSBba(p, strat, atR, atS);
   if ((!strat->kAllAxis) || (strat->kNoether!=NULL)) HEckeTest(p.p,strat);
@@ -2039,7 +2039,7 @@ ideal mora (ideal F, ideal Q,intvec *w,bigintmat *hilb,kStrategy strat)
       else
         enterpairs(strat->P.p,strat->S.size()-1,strat->P.ecart,0,strat, strat->T.size()-1);
       // put in S
-      strat->enterS(strat->P, strat, strat->T.size()-1, -1);
+      strat->enterS(strat->P, strat, strat->T.size()-1, strat->S.end());
       // apply hilbert criterion
       if (hilb!=NULL)
       {
@@ -3648,7 +3648,7 @@ ideal kInterRedBba (ideal F, ideal Q, int &need_retry)
       {
         enterT(strat->P, strat);
         // posInS only depends on the leading term
-        auto inserted = strat->enterS(strat->P, strat, strat->T.size()-1, -1);
+        auto inserted = strat->enterS(strat->P, strat, strat->T.size()-1, strat->S.end());
         int pos = inserted.index();
         ++inserted;
 

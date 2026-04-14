@@ -959,7 +959,7 @@ add_to_reductors (slimgb_alg * c, poly h, int len, int ecart,
   }
   wlen_type pq = pQuality (h, c, len);
   i = simple_posInS (c->strat, h, len, pq);
-  c->strat->enterS (P, c->strat, c->strat->T.size()-1, -1);
+  c->strat->enterS (P, c->strat, c->strat->T.size()-1, c->strat->S.end());
   // enter_bba in SORDER_APPEND mode put it at the end. Move it to position i
   // (inline shift since move_forward_in_S is defined later as static).
   {

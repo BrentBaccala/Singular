@@ -875,7 +875,8 @@ static void process_survivor_lobject(SweepContext *ctx, LObject *P, int thread_i
 
   if (TEST_OPT_PROT) PrintS("s");
 
-  int pos = strat->S.find_pos(P->p, P->ecart).index();
+  auto pos_it = strat->S.find_pos(P->p, P->ecart);
+  int pos = pos_it.index();
 
   strat->redTailChange = FALSE;
 
@@ -890,7 +891,7 @@ static void process_survivor_lobject(SweepContext *ctx, LObject *P, int thread_i
 #ifdef KTHREAD_INSTRUMENT
       long rt0 = KT_STATS(ctx) ? kt_now_ns() : 0;
 #endif
-      P->p = redtailBba(P, pos - 1, strat, withT,
+      P->p = redtailBba(P, pos_it, strat, withT,
                         !TEST_OPT_CONTENTSB);
 #ifdef KTHREAD_INSTRUMENT
       if (KT_STATS(ctx)) redtail_accum += kt_now_ns() - rt0;
@@ -907,7 +908,7 @@ static void process_survivor_lobject(SweepContext *ctx, LObject *P, int thread_i
 #ifdef KTHREAD_INSTRUMENT
       long rt0 = KT_STATS(ctx) ? kt_now_ns() : 0;
 #endif
-      P->p = redtailBba(P, pos - 1, strat, withT);
+      P->p = redtailBba(P, pos_it, strat, withT);
 #ifdef KTHREAD_INSTRUMENT
       if (KT_STATS(ctx)) redtail_accum += kt_now_ns() - rt0;
 #endif
@@ -936,7 +937,7 @@ static void process_survivor_lobject(SweepContext *ctx, LObject *P, int thread_i
     if (KT_STATS(ctx)) enterpairs_accum += kt_now_ns() - ep0;
     long es0 = KT_STATS(ctx) ? kt_now_ns() : 0;
 #endif
-    strat->enterS(*P, strat, strat->T.size()-1, -1);
+    strat->enterS(*P, strat, strat->T.size()-1, strat->S.end());
 #ifdef KTHREAD_INSTRUMENT
     if (KT_STATS(ctx)) enterS_accum += kt_now_ns() - es0;
 #endif

@@ -1794,7 +1794,7 @@ int redSigRing (LObject* h,kStrategy strat)
           }
           else
           {
-            //strat->enterS(*h, strat, strat->T.size()-1, -1);
+            //strat->enterS(*h, strat, strat->T.size()-1, strat->S.end());
             return 0;
           }
         }
@@ -2972,7 +2972,7 @@ ideal bba (ideal F, ideal Q,intvec *w,bigintmat *hilb,kStrategy strat)
         strat->P.pCleardenom();
         if ((TEST_OPT_REDSB)||(TEST_OPT_REDTAIL))
         {
-          strat->P.p = redtailBba(&(strat->P),pos.index()-1,strat, withT,!TEST_OPT_CONTENTSB);
+          strat->P.p = redtailBba(&(strat->P), pos,strat, withT,!TEST_OPT_CONTENTSB);
           strat->P.pCleardenom();
           if (strat->redTailChange) { strat->P.t_p=NULL; }
         }
@@ -2982,7 +2982,7 @@ ideal bba (ideal F, ideal Q,intvec *w,bigintmat *hilb,kStrategy strat)
         strat->P.pNorm();
         if ((TEST_OPT_REDSB)||(TEST_OPT_REDTAIL))
         {
-          strat->P.p = redtailBba(&(strat->P),pos.index()-1,strat, withT);
+          strat->P.p = redtailBba(&(strat->P), pos,strat, withT);
           if (strat->redTailChange) { strat->P.t_p=NULL; }
         }
       }
@@ -3022,7 +3022,7 @@ ideal bba (ideal F, ideal Q,intvec *w,bigintmat *hilb,kStrategy strat)
         else
           enterpairs(strat->P.p,strat->S.size()-1,strat->P.ecart,pos.index(),strat, strat->T.size()-1);
         // posInS only depends on the leading term
-        strat->enterS(strat->P, strat, strat->T.size()-1, -1);
+        strat->enterS(strat->P, strat, strat->T.size()-1, strat->S.end());
 #if 0
         int pl=pLength(strat->P.p);
         if (pl==1)
@@ -3056,7 +3056,7 @@ ideal bba (ideal F, ideal Q,intvec *w,bigintmat *hilb,kStrategy strat)
             superenterpairs(strat->P.p,strat->S.size()-1,strat->P.ecart,pos.index(),strat, strat->T.size()-1);
           else
             enterpairs(strat->P.p,strat->S.size()-1,strat->P.ecart,pos.index(),strat, strat->T.size()-1);
-          strat->enterS(strat->P, strat, strat->T.size()-1, -1);
+          strat->enterS(strat->P, strat, strat->T.size()-1, strat->S.end());
         }
       }
     }
@@ -3379,7 +3379,7 @@ ideal sba (ideal F0, ideal Q,intvec *w,bigintmat *hilb,kStrategy strat)
       auto Lp = strat->L.top();
       strat->L.pop();
       enterT(Lp,strat);
-      strat->enterS(Lp, strat, strat->T.size()-1, -1);
+      strat->enterS(Lp, strat, strat->T.size()-1, strat->S.end());
     }
     strat->sbaEnterS = -1;
   }
@@ -3558,7 +3558,7 @@ ideal sba (ideal F0, ideal Q,intvec *w,bigintmat *hilb,kStrategy strat)
       }
       else
       {
-        strat->enterS(strat->P, strat, strat->T.size()-1, -1);
+        strat->enterS(strat->P, strat, strat->T.size()-1, strat->S.end());
         if (TEST_OPT_PROT)
           PrintS("-");
         break;
@@ -3656,7 +3656,7 @@ ideal sba (ideal F0, ideal Q,intvec *w,bigintmat *hilb,kStrategy strat)
       // Best case scenario: remains the leading term
       if(rField_is_Ring(currRing) && strat->sigdrop)
       {
-        strat->enterS(strat->P, strat, strat->T.size()-1, -1);
+        strat->enterS(strat->P, strat, strat->T.size()-1, strat->S.end());
         break;
       }
 #endif
@@ -3675,7 +3675,7 @@ ideal sba (ideal F0, ideal Q,intvec *w,bigintmat *hilb,kStrategy strat)
         }
         else
         {
-          strat->enterS(strat->P, strat, strat->T.size()-1, -1);
+          strat->enterS(strat->P, strat, strat->T.size()-1, strat->S.end());
           break;
         }
       }
@@ -3745,7 +3745,7 @@ ideal sba (ideal F0, ideal Q,intvec *w,bigintmat *hilb,kStrategy strat)
         break;
       if(rField_is_Ring(currRing))
         strat->P.sevSig = p_GetShortExpVector(strat->P.sig,currRing);
-      strat->enterS(strat->P, strat, strat->T.size()-1, strat->S.size());
+      strat->enterS(strat->P, strat, strat->T.size()-1, strat->S.end());
       if(strat->sbaOrder != 1)
       {
         BOOLEAN overwrite = FALSE;
@@ -4061,7 +4061,7 @@ ideal sba (ideal F0, ideal Q,intvec *w,bigintmat *hilb,kStrategy strat)
     for (auto it=strat->L.begin(); it != strat->L.end() && it->p1 == NULL && it->p2 == NULL; it++)
     {
       //printf("\nAdded k = %i\n",k);
-      strat->enterS(*it, strat, strat->T.size()-1, -1);
+      strat->enterS(*it, strat, strat->T.size()-1, strat->S.end());
       //printf("\nThis elements was added from L on pos %i\n",strat->S.size()-1);pWrite(strat->S[strat->S.size()-1].p);pWrite(strat->S[strat->S.size()-1].sig);
     }
   }
@@ -4224,7 +4224,7 @@ poly kNF2 (ideal F,ideal Q,poly q,kStrategy strat, int lazyReduce)
     else
     {
       si_opt_1 &= ~Sy_bit(OPT_INTSTRATEGY);
-      p = redtailBba(p,max_ind,strat,(lazyReduce & KSTD_NF_NONORM)==0);
+      p = redtailBba(p,strat->S.iterator_at(max_ind+1),strat,(lazyReduce & KSTD_NF_NONORM)==0);
     }
   }
   /*- release temp data------------------------------- -*/
@@ -4290,7 +4290,7 @@ poly kNF2Bound (ideal F,ideal Q,poly q,int bound,kStrategy strat, int lazyReduce
     {
       si_opt_1 &= ~Sy_bit(OPT_INTSTRATEGY);
       p = redtailBbaBound(p,max_ind,strat,bound,(lazyReduce & KSTD_NF_NONORM)==0);
-      //p = redtailBba(p,max_ind,strat,(lazyReduce & KSTD_NF_NONORM)==0);
+      //p = redtailBba(p,strat->S.iterator_at(max_ind+1),strat,(lazyReduce & KSTD_NF_NONORM)==0);
     }
   }
   /*- release temp data------------------------------- -*/
@@ -4362,7 +4362,7 @@ ideal kNF2 (ideal F,ideal Q,ideal q,kStrategy strat, int lazyReduce)
         else
         {
           si_opt_1 &= ~Sy_bit(OPT_INTSTRATEGY);
-          p = redtailBba(p,max_ind,strat,(lazyReduce & KSTD_NF_NONORM)==0);
+          p = redtailBba(p,strat->S.iterator_at(max_ind+1),strat,(lazyReduce & KSTD_NF_NONORM)==0);
         }
       }
       res->m[i]=p;
@@ -4628,7 +4628,7 @@ void f5c (kStrategy strat, int& olddeg, int& minimcnt, int& hilbeledeg,
         strat->P.pCleardenom();
         if ((TEST_OPT_REDSB)||(TEST_OPT_REDTAIL))
         {
-          strat->P.p = redtailBba(&(strat->P),pos.index()-1,strat, withT);
+          strat->P.p = redtailBba(&(strat->P), pos,strat, withT);
           strat->P.pCleardenom();
         }
       }
@@ -4636,7 +4636,7 @@ void f5c (kStrategy strat, int& olddeg, int& minimcnt, int& hilbeledeg,
       {
         strat->P.pNorm();
         if ((TEST_OPT_REDSB)||(TEST_OPT_REDTAIL))
-          strat->P.p = redtailBba(&(strat->P),pos.index()-1,strat, withT);
+          strat->P.p = redtailBba(&(strat->P), pos,strat, withT);
       }
 #endif
 #ifdef KDEBUG
@@ -4670,7 +4670,7 @@ void f5c (kStrategy strat, int& olddeg, int& minimcnt, int& hilbeledeg,
       {
         enterT(strat->P, strat);
         // posInS only depends on the leading term
-        strat->enterS(strat->P, strat, strat->T.size()-1, -1);
+        strat->enterS(strat->P, strat, strat->T.size()-1, strat->S.end());
 //#if 1
 #ifdef DEBUGF5
         PrintS("ELEMENT ADDED TO GCURR DURING INTERRED: ");
@@ -4936,7 +4936,7 @@ ideal bbaShift(ideal F, ideal Q,intvec *w,bigintmat *hilb,kStrategy strat)
         strat->P.pCleardenom();
         if ((TEST_OPT_REDSB)||(TEST_OPT_REDTAIL))
         {
-          strat->P.p = redtailBba(&(strat->P),pos.index()-1,strat, withT,!TEST_OPT_CONTENTSB);
+          strat->P.p = redtailBba(&(strat->P), pos,strat, withT,!TEST_OPT_CONTENTSB);
           strat->P.pCleardenom();
           if (strat->redTailChange)
           {
@@ -4950,7 +4950,7 @@ ideal bbaShift(ideal F, ideal Q,intvec *w,bigintmat *hilb,kStrategy strat)
         strat->P.pNorm();
         if ((TEST_OPT_REDSB)||(TEST_OPT_REDTAIL))
         {
-          strat->P.p = redtailBba(&(strat->P),pos.index()-1,strat, withT);
+          strat->P.p = redtailBba(&(strat->P), pos,strat, withT);
           if (strat->redTailChange)
           {
             strat->P.t_p=NULL;
@@ -4991,7 +4991,7 @@ ideal bbaShift(ideal F, ideal Q,intvec *w,bigintmat *hilb,kStrategy strat)
         enterT(strat->P, strat);
         enterpairsShift(strat->P.p,strat->S.size()-1,strat->P.ecart,pos.index(),strat, strat->T.size()-1);
         // posInS only depends on the leading term
-        strat->enterS(strat->P, strat, strat->T.size()-1, -1);
+        strat->enterS(strat->P, strat, strat->T.size()-1, strat->S.end());
         if (!strat->rightGB)
           enterTShift(strat->P, strat);
       }
@@ -5012,7 +5012,7 @@ ideal bbaShift(ideal F, ideal Q,intvec *w,bigintmat *hilb,kStrategy strat)
           auto pos=strat->S.find_pos(strat->P.p,strat->P.ecart);
           enterT(strat->P, strat);
           enterpairsShift(strat->P.p,strat->S.size()-1,strat->P.ecart,pos.index(),strat, strat->T.size()-1);
-          strat->enterS(strat->P, strat, strat->T.size()-1, -1);
+          strat->enterS(strat->P, strat, strat->T.size()-1, strat->S.end());
           if (!strat->rightGB)
             enterTShift(strat->P,strat);
         }
