@@ -1309,7 +1309,7 @@ poly redtailSba (LObject *L, int end_pos,kStrategy strat,
 poly redtailBba (TObject *T, sBasisSet::const_iterator end,kStrategy strat);
 poly redtail (poly p,int end_pos,kStrategy strat);
 poly redtail (LObject *L,int end_pos,kStrategy strat);
-poly redNF (poly h,int & max_ind,int nonorm,kStrategy strat);
+poly redNF (poly h,int nonorm,kStrategy strat);
 int redNF0 (LObject *P,kStrategy strat);
 poly redNFTail (poly h,const int sl,kStrategy strat);
 int redHoney (LObject* h, kStrategy strat);
@@ -1408,9 +1408,9 @@ int kFindSameLMInT_Z(const kStrategy strat, const LObject* L, const int start=0)
 int kTestDivisibleByT0_Z(const kStrategy strat, const LObject* L);
 /// return strat->S.end() if no divisor is found;
 /// iterator to first divisor in S, otherwise
-sBasisSet::iterator kFindDivisibleByInS(const kStrategy strat, int *max_ind, LObject* L);
+sBasisSet::iterator kFindDivisibleByInS(const kStrategy strat, LObject* L);
 
-int kFindNextDivisibleByInS(const kStrategy strat, int start,int max_ind, LObject* L);
+sBasisSet::iterator kFindNextDivisibleByInS(const kStrategy strat, sBasisSet::iterator start, LObject* L);
 TObject* kFindDivisibleByInS_T(kStrategy strat, sBasisSet::const_iterator end, LObject* L, TObject *T, long ecart = LONG_MAX);
 
 /***************************************************************

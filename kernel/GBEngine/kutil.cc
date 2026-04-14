@@ -6931,13 +6931,12 @@ poly redtailBba_NF (poly p, kStrategy strat )
   if ((p==NULL) || (pNext(p)==NULL))
     return p;
 
-  int max_ind;
   poly h=p;
   p=pNext(p);
   pNext(h)=NULL;
   while(p!=NULL)
   {
-    p=redNF(p,max_ind,1,strat);
+    p=redNF(p,1,strat);
     if (p!=NULL)
     {
       poly hh=p;

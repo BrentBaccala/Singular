@@ -345,8 +345,7 @@ int redEcart (LObject* h,kStrategy strat)
       assume(h->FDeg == h->pFDeg());
       if (! strat->L.would_be_top(*h))
       {
-        int dummy=strat->S.size()-1;
-        if (kFindDivisibleByInS(strat, &dummy, h) == strat->S.end())
+        if (kFindDivisibleByInS(strat, h) == strat->S.end())
         {
           if (strat->honey && !strat->compareLDependsOnLength)
             h->SetLength(strat->length_pLength);
@@ -540,8 +539,7 @@ int redRiloc (LObject* h,kStrategy strat)
       assume(h->FDeg == h->pFDeg());
       if (! strat->L.would_be_top(*h))
       {
-        int dummy=strat->S.size()-1;
-        if (kFindDivisibleByInS(strat, &dummy, h) == strat->S.end())
+        if (kFindDivisibleByInS(strat, h) == strat->S.end())
         {
           if (strat->honey && !strat->compareLDependsOnLength)
             h->SetLength(strat->length_pLength);
@@ -778,8 +776,7 @@ int redRiloc_Z (LObject* h,kStrategy strat)
             assume(h->FDeg == h->pFDeg());
             if (! strat->L.would_be_top(*h))
             {
-                int dummy=strat->S.size()-1;
-                if (kFindDivisibleByInS(strat, &dummy, h) == strat->S.end())
+                if (kFindDivisibleByInS(strat, h) == strat->S.end())
                 {
                     if (strat->honey && !strat->compareLDependsOnLength)
                         h->SetLength(strat->length_pLength);
@@ -953,8 +950,7 @@ int redFirst (LObject* h,kStrategy strat)
           h->SetLength(strat->length_pLength);
         if (! strat->L.would_be_top(*h))
         {
-          int dummy=strat->S.size()-1;
-          if (kFindDivisibleByInS(strat,&dummy, h) == strat->S.end())
+          if (kFindDivisibleByInS(strat, h) == strat->S.end())
             return 1;
           strat->L.push(*h);
 #ifdef KDEBUG

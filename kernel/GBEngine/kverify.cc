@@ -108,9 +108,8 @@ BOOLEAN kVerify1(ideal F, ideal Q)
       }
       else
       {
-        int sl=strat->S.size()-1;
         strat->P.GetP();
-        poly p=redNF(strat->P.p,sl,TRUE,strat);
+        poly p=redNF(strat->P.p,TRUE,strat);
         if (p==NULL) red_result=0;
         #ifdef KDEBUG
         else
@@ -267,9 +266,8 @@ BOOLEAN kVerify2(ideal F, ideal Q)
       else
       {
         /* reduction */
-        int sl=strat->S.size()-1;
         P.GetP();
-        poly p=redNF(P.p,sl,TRUE,strat);
+        poly p=redNF(P.p,TRUE,strat);
         if (p==NULL) red_result=0;
         #ifdef KDEBUG
         else
