@@ -1623,7 +1623,7 @@ static inline BOOLEAN kExistsInL1(const poly p, const kStrategy strat)
 
 void enterTShift(LObject p, kStrategy strat, int atT = -1);
 
-BOOLEAN enterOnePairShift (poly q, poly p, int ecart, int isFromQ, kStrategy strat, int atR, int ecartq, int qisFromQ, int shiftcount, int ifromS);
+BOOLEAN enterOnePairShift (poly q, poly p, int ecart, int isFromQ, kStrategy strat, int atR, int ecartq, int qisFromQ, int shiftcount, sBasisSet::const_iterator ifromS);
 
 void enterpairsShift (poly h,int k,int ecart,int pos,kStrategy strat, int atR);
 
