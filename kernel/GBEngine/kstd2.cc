@@ -3425,7 +3425,10 @@ ideal sba (ideal F0, ideal Q,intvec *w,bigintmat *hilb,kStrategy strat)
     if(rField_is_Ring(currRing))
       strat->sbaEnterS = pGetComp(strat->P.sig) - 1;
     /* reduction of the element chosen from L */
-    if (!strat->rewCrit2(strat->P.sig, ~strat->P.sevSig, strat->P.GetLmCurrRing(), strat, strat->P.checked+1))
+    // +1 collapsed: Lp.checked iterator already points "one past last
+    // checked" (captured as cend() at pair-creation time, becomes the
+    // first newly-appended element after subsequent enter_bba calls).
+    if (!strat->rewCrit2(strat->P.sig, ~strat->P.sevSig, strat->P.GetLmCurrRing(), strat, strat->P.checked))
     {
       //#if 1
 #ifdef DEBUGF5

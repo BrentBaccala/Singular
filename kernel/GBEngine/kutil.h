@@ -165,6 +165,378 @@ typedef denominator_list_s *denominator_list;
 struct denominator_list_s{number n; denominator_list next;};
 EXTERN_VAR denominator_list DENOMINATOR_LIST;
 
+// SElement: one element of the S set (standard basis).
+struct SElement {
+  poly p;              // the polynomial
+  int ecart;           // ecart
+  unsigned long sev;   // short exponent vector
+  int s_2_r;           // index into R array
+  int length;          // number of terms (replaces lenS)
+  wlen_type wlength;   // weighted length (replaces lenSw)
+  int fromQ;           // from quotient ideal
+  poly sig;            // signature (sba only)
+  unsigned long sevSig;// short exponent vector of signature (sba only)
+  bool deleted;              // lazy-delete flag for parallel phase
+  mutable bool pairtest;     // transient: true if spoly(this, h)==0 during enterOnePair
+
+  SElement() : p(NULL), ecart(0), sev(0), s_2_r(0), length(0), wlength(0),
+               fromQ(0), sig(NULL), sevSig(0), deleted(false), pairtest(false) {}
+};
+
+/**
+ * @class sBasisSet
+ * @brief The S-set (standard basis) for Groebner basis computation.
+ *
+ * Inherits privately from BlockArray<SElement> — all element access is
+ * through iterators, not integer indices.
+ *
+ * Ordering modes control insert() and erase() behavior:
+ *   SORDER_STANDARD:  sorted by leading monomial + ecart (posInS).
+ *                     insert() finds position via binary search, shifts.
+ *                     erase() shifts elements down.
+ *   SORDER_MONFIRST:  monomials first, then by degree (posInSMonFirst).
+ *                     Used by sba() over rings.
+ *   SORDER_APPEND:    append at end, no sorting (parallel phase).
+ *                     erase() sets deleted flag (no shifting).
+ *
+ * --- Iterator invalidation contract ------------------------------------
+ *
+ * Iterators are position-based handles {sBasisSet*, int pos_}. Because
+ * the underlying BlockArray is append-only for storage blocks and never
+ * reallocates existing blocks, iterators remain valid across BlockArray
+ * directory reallocation — their held integer index stays correct in
+ * the absence of set-level mutations listed below.
+ *
+ * Mutation operations have the following effects on outstanding iterators:
+ *
+ * 1. Append (enter_bba / push_back at end / insert() when order_ ==
+ *    SORDER_APPEND): does NOT invalidate any existing iterator. An
+ *    iterator previously captured at end() now validly refers to the
+ *    first appended element. This intentionally diverges from STL
+ *    vector::end() semantics, and is relied upon by the parallel
+ *    survivor-drain path (e.g. sLObject::checked, to land in Stage B).
+ *
+ * 2. Insert-in-middle (enter_bba / insert() in sorted mode at a
+ *    find_pos-computed position): invalidates all iterators at
+ *    positions >= the insert position. Iterators at positions < insert
+ *    remain valid.
+ *
+ * 3. Non-lazy erase (erase_and_next in SORDER_STANDARD / SORDER_MONFIRST,
+ *    or erase() when not in APPEND mode): shifts elements down.
+ *    Invalidates all iterators at positions > the erased position.
+ *    The iterator AT the erased position is returned by erase_and_next
+ *    repointed at whatever element slid into the vacated slot (or end()
+ *    if the erased element was last).
+ *
+ * 4. Lazy erase (erase() in SORDER_APPEND mode): sets the deleted
+ *    tombstone flag on the element. Invalidates only the iterator at
+ *    the tombstoned position — it becomes a "tombstone iterator" whose
+ *    operator++ will skip forward past all consecutive tombstones and
+ *    land on the next live element.
+ *
+ * 5. Reorder (reorder()): invalidates ALL outstanding iterators. Callers
+ *    must drop every stored iterator before calling reorder().
+ *
+ * 6. Responsibility is on callers. There is no runtime enforcement of
+ *    these rules; violations are undefined behaviour (in practice: a
+ *    stale iterator refers to a different logical element than the one
+ *    the caller captured).
+ */
+enum SOrderMode { SORDER_STANDARD, SORDER_MONFIRST, SORDER_APPEND };
+
+class sBasisSet : private BlockArray<SElement> {
+public:
+  // --- Iterator (skips deleted entries) ---
+  class iterator {
+    sBasisSet* set_;
+    int pos_;
+    friend class sBasisSet;
+
+    void skip_deleted_forward() {
+      while (pos_ < set_->count && set_->elem(pos_).deleted) pos_++;
+    }
+    void skip_deleted_backward() {
+      while (pos_ > 0 && set_->elem(pos_).deleted) pos_--;
+    }
+
+    iterator(sBasisSet* s, int pos) : set_(s), pos_(pos) { }
+
+  public:
+    iterator() : set_(NULL), pos_(0) {}
+
+    SElement& operator*() const { return set_->elem(pos_); }
+    SElement* operator->() const { return &set_->elem(pos_); }
+
+    // Raw index — available for internal use (e.g., pairtest migration).
+    // Prefer iterator-based APIs in new code.
+    int index() const { return pos_; }
+
+    iterator& operator++() {
+      pos_++;
+      skip_deleted_forward();
+      return *this;
+    }
+    iterator operator++(int) {
+      iterator tmp = *this;
+      ++(*this);
+      return tmp;
+    }
+    iterator& operator--() {
+      pos_--;
+      skip_deleted_backward();
+      return *this;
+    }
+    iterator operator--(int) {
+      iterator tmp = *this;
+      --(*this);
+      return tmp;
+    }
+
+    bool operator==(const iterator& other) const { return pos_ == other.pos_; }
+    bool operator!=(const iterator& other) const { return pos_ != other.pos_; }
+  };
+
+  class const_iterator {
+    const sBasisSet* set_;
+    int pos_;
+    friend class sBasisSet;
+
+    void skip_deleted_forward() {
+      while (pos_ < set_->count && set_->elem(pos_).deleted) pos_++;
+    }
+
+    const_iterator(const sBasisSet* s, int pos) : set_(s), pos_(pos) { }
+
+  public:
+    const_iterator() : set_(NULL), pos_(0) {}
+    const_iterator(const iterator& it) : set_(it.set_), pos_(it.pos_) {}
+
+    const SElement& operator*() const { return set_->elem(pos_); }
+    const SElement* operator->() const { return &set_->elem(pos_); }
+    int index() const { return pos_; }
+
+    const_iterator& operator++() {
+      pos_++;
+      skip_deleted_forward();
+      return *this;
+    }
+    const_iterator operator++(int) {
+      const_iterator tmp = *this;
+      ++(*this);
+      return tmp;
+    }
+
+    bool operator==(const const_iterator& other) const { return pos_ == other.pos_; }
+    bool operator!=(const const_iterator& other) const { return pos_ != other.pos_; }
+  };
+
+  // --- Construction / mode ---
+  sBasisSet() : order_(SORDER_STANDARD), live_count_(0), pairtest_any_(false) {
+    pthread_mutex_init(&mutex_, NULL);
+  }
+  ~sBasisSet() {
+    pthread_mutex_destroy(&mutex_);
+  }
+  // Non-copyable / non-movable to keep mutex identity stable.
+  sBasisSet(const sBasisSet&) = delete;
+  sBasisSet& operator=(const sBasisSet&) = delete;
+
+  // --- Parallel locking ---
+  // Used by the parallel survivor-drain path to serialize iteration
+  // and mutation of S across drain workers. The serial code paths
+  // (THREADS=1, bba(), sba(), slimgb(), etc.) never acquire this
+  // lock; they are single-threaded so there is no contention.
+  // See ~/project/docs/parallel-bba-thread-safety-report.md for rationale.
+  void lock() { pthread_mutex_lock(&mutex_); }
+  void unlock() { pthread_mutex_unlock(&mutex_); }
+  pthread_mutex_t* raw_mutex() { return &mutex_; }
+
+  SOrderMode order() const { return order_; }
+  void set_order(SOrderMode m) { order_ = m; }
+  bool is_append_mode() const { return order_ == SORDER_APPEND; }
+
+  // --- Iterators ---
+  iterator begin() {
+    iterator it(this, 0);
+    it.skip_deleted_forward();
+    return it;
+  }
+  iterator end() { return iterator(this, count); }
+
+  const_iterator begin() const {
+    const_iterator it(this, 0);
+    it.skip_deleted_forward();
+    return it;
+  }
+  const_iterator end() const { return const_iterator(this, count); }
+
+  // cbegin/cend: explicit const_iterator access even when *this is non-const.
+  // Useful for capturing a stable "end at snapshot time" iterator
+  // (sLObject::checked) from a mutable strat->S.
+  const_iterator cbegin() const {
+    const_iterator it(this, 0);
+    it.skip_deleted_forward();
+    return it;
+  }
+  const_iterator cend() const { return const_iterator(this, count); }
+
+  // --- Size ---
+  int size() const { return live_count_; }
+  bool empty() const { return live_count_ == 0; }
+
+  // --- Insert ---
+  // Inserts val at the position determined by the current ordering mode.
+  // SORDER_STANDARD/SORDER_MONFIRST: sorted insert (needs strat for comparison).
+  // SORDER_APPEND: append at end.
+  // Implemented in kutil.cc.
+  iterator insert(const SElement& val, kStrategy strat);
+
+  // Append at end regardless of mode (used during initialization).
+  iterator push_back(const SElement& val) {
+    BlockArray<SElement>::push_back(val);
+    live_count_++;
+    return iterator(this, count - 1);
+  }
+
+  // --- Erase ---
+  // SORDER_APPEND: set deleted flag (no shifting).
+  // Other modes: shift elements down.
+  void erase(iterator it) {
+    if (order_ == SORDER_APPEND) {
+      elem(it.pos_).deleted = true;
+    } else {
+      BlockArray<SElement>::erase(it.pos_);
+    }
+    live_count_--;
+  }
+
+  // --- Capacity / storage ---
+  using BlockArray<SElement>::ensure_capacity;
+  using BlockArray<SElement>::capacity;
+  using BlockArray<SElement>::free_all;
+
+  // Set element count directly (used during initialization).
+  void setsize(int n) {
+    BlockArray<SElement>::setsize(n);
+    live_count_ = n;
+  }
+
+  // --- Pairtest ---
+  // Clear all pairtest flags and the sentinel.
+  void clear_pairtest() {
+    for (int i = 0; i < count; i++) elem(i).pairtest = false;
+    pairtest_any_ = false;
+  }
+  // Set the sentinel (some zero spoly was found).
+  void set_pairtest_any() { pairtest_any_ = true; }
+  bool has_pairtest() const { return pairtest_any_; }
+
+  // Compact: remove deleted entries, pack remaining entries contiguously.
+  // Only meaningful after lazy mode. Resets to non-lazy mode.
+  void compact() {
+    int dst = 0;
+    for (int src = 0; src < count; src++) {
+      if (!elem(src).deleted) {
+        if (dst != src)
+          elem(dst) = elem(src);
+        dst++;
+      }
+    }
+    count = dst;
+    live_count_ = dst;
+    order_ = SORDER_STANDARD;
+  }
+
+  // --- Stable pointer access (valid as long as element exists) ---
+  SElement* addr(iterator it) {
+    return BlockArray<SElement>::addr(it.pos_);
+  }
+
+  // --- Member methods (use private elem() for random access) ---
+  // Implementations in kutil.cc since they need skStrategy, which is
+  // defined after this class.
+
+  // Insert a new basis element from an LObject (replaces enterSBba).
+  // Builds an SElement, inserts at the position determined by ordering mode.
+  // Returns an iterator to the just-inserted element.
+  iterator enter_bba(LObject &p, kStrategy strat, int atR = -1, int atS = -1);
+
+  // Insert for signature-based algorithms (replaces enterSSba).
+  // Also copies sig and sevSig fields.
+  // Returns an iterator to the just-inserted element.
+  iterator enter_sba(LObject &p, kStrategy strat, int atR = -1, int atS = -1);
+
+  // Delete element at iterator and update related structures.
+  // In non-lazy mode, shifts elements down (like old deleteInS).
+  // Returns next valid iterator after the erased position.
+  iterator erase_and_next(iterator it);
+
+  // Reorder S after inter-reduction may have changed leading monomials.
+  // (replaces reorderS)
+  void reorder(int *suc, kStrategy strat);
+
+  // S-to-T lookups (replace skStrategy::S_2_T / s_2_t).
+  // Return the TObject corresponding to the S element at the iterator.
+  TObject* S_2_T(const_iterator it, kStrategy strat);
+  TObject* s_2_t(const_iterator it, kStrategy strat);
+
+  // clearS: if p divides *at, delete *at and adjust the iterator.
+  // (replaces the clearS inline in kInline.h)
+  void clear_if_divisible(poly p, unsigned long p_sev,
+                          iterator &at, kStrategy strat);
+
+  // For tgb.cc: binary search variant with different comparison.
+  iterator simple_find_pos(kStrategy strat, poly p);
+
+  // For tgb.cc: move an element from one position to another,
+  // shifting intervening elements. old_it and new_it provide the
+  // element positions.
+  void move_elem(iterator old_it, iterator new_it);
+
+  // Construct an iterator at a raw index (no skip).
+  // Transitional: used by code migrating from int-based to iterator-based API.
+  // In lazy mode, the element at index i may be deleted — caller must check.
+  iterator iterator_at(int i) { return iterator(this, i); }
+  const_iterator const_iterator_at(int i) const { return const_iterator(this, i); }
+
+  // Binary search for sorted insertion position (replaces free posInS).
+  // length is the upper bound on the search range (indices [0..length]);
+  // pass size()-1 to search the whole set, or a smaller value to restrict.
+  // Returns the int position the element would occupy if inserted (one
+  // past the last element if larger than everything).
+  int find_pos(kStrategy strat, const poly p, int ecart_p, int length);
+
+  // Binary search for monfirst insertion position (replaces free posInSMonFirst).
+  int find_pos_monfirst(kStrategy strat, const poly p, int length);
+
+  // Encapsulates the kFindDivisibleByInS search-range narrowing.
+  // For monomial-ordered (non-Ring, non-component, non-lex) S, returns an
+  // upper bound on the index of any element of S whose leading monomial
+  // can divide p, restricted to indices [0..max_ind]. Returns max_ind for
+  // rings or other cases where narrowing is not safe; the caller must
+  // still check divisibility against each element up to the bound.
+  int find_divisor_search_bound(poly p, int max_ind, kStrategy strat);
+
+private:
+  SOrderMode order_;
+  int live_count_;
+  bool pairtest_any_;  // sentinel: true if any SElement.pairtest was set
+  pthread_mutex_t mutex_;  // parallel drain path serialization
+
+  // Internal: insert at a specific position (for reorder, etc.)
+  iterator insert_at(int pos, const SElement& val) {
+    BlockArray<SElement>::insert(pos, val);
+    live_count_++;
+    return iterator(this, pos);
+  }
+
+  // Internal raw element access (used by iterators and member functions)
+  SElement& elem(int i) { return (*static_cast<BlockArray<SElement>*>(this))[i]; }
+  const SElement& elem(int i) const { return (*static_cast<const BlockArray<SElement>*>(this))[i]; }
+
+  friend class skStrategy;
+};
+
 class sTObject
 {
 public:
@@ -295,11 +667,25 @@ public:
   unsigned seq;       // the sequence number of the LSet when this LObject was inserted
                       // used to determine LSet ordering for equal LObjects
   size_t flat_index;      // index in writable_set's flat array for unordered iteration
-  unsigned checked; // this is the index of S up to which
-                      // the corresponding LObject was already checked in
-                      // critical pair creation => when entering the
-                      // reduction process it is enough to start a second
-                      // rewritten criterion check from checked+1 onwards
+  // Iterator pointing "one past the last S element against which this
+  // pair was already checked" at creation time.  When the pair is later
+  // pulled from L for reduction, rewCrit2 resumes scanning from this
+  // iterator forward, skipping S elements already considered.
+  //
+  // Storing an iterator (rather than a raw unsigned S-size snapshot)
+  // makes this value robust against S mutations that preserve prior
+  // positions (appends at the end, lazy-mode tombstone erase).  In
+  // particular, an iterator captured at S.end() remains valid across
+  // later enter_bba() appends — it sticks to the captured position and
+  // subsequent appends become the "new" range the resume-scan walks.
+  // See sBasisSet's iterator invalidation contract above.
+  //
+  // Correctness depends on the lazy-mode append-only invariant: S
+  // slots are never reused for new logical elements, only tombstoned.
+  // sLObject is memset-zeroed in Init(); the resulting null iterator
+  // (set_=NULL, pos_=0) is safe as long as it is never dereferenced
+  // before being assigned a real value (non-SBA paths never read it).
+  sBasisSet::const_iterator checked;
   BOOLEAN prod_crit;
                       // NOTE: If prod_crit = TRUE then the corresponding pair is
                       // detected by Buchberger's Product Criterion and can be
@@ -651,367 +1037,6 @@ public:
   unordered_iterator erase(unordered_iterator it);
 };
 
-// SElement: one element of the S set (standard basis).
-struct SElement {
-  poly p;              // the polynomial
-  int ecart;           // ecart
-  unsigned long sev;   // short exponent vector
-  int s_2_r;           // index into R array
-  int length;          // number of terms (replaces lenS)
-  wlen_type wlength;   // weighted length (replaces lenSw)
-  int fromQ;           // from quotient ideal
-  poly sig;            // signature (sba only)
-  unsigned long sevSig;// short exponent vector of signature (sba only)
-  bool deleted;              // lazy-delete flag for parallel phase
-  mutable bool pairtest;     // transient: true if spoly(this, h)==0 during enterOnePair
-
-  SElement() : p(NULL), ecart(0), sev(0), s_2_r(0), length(0), wlength(0),
-               fromQ(0), sig(NULL), sevSig(0), deleted(false), pairtest(false) {}
-};
-
-/**
- * @class sBasisSet
- * @brief The S-set (standard basis) for Groebner basis computation.
- *
- * Inherits privately from BlockArray<SElement> — all element access is
- * through iterators, not integer indices.
- *
- * Ordering modes control insert() and erase() behavior:
- *   SORDER_STANDARD:  sorted by leading monomial + ecart (posInS).
- *                     insert() finds position via binary search, shifts.
- *                     erase() shifts elements down.
- *   SORDER_MONFIRST:  monomials first, then by degree (posInSMonFirst).
- *                     Used by sba() over rings.
- *   SORDER_APPEND:    append at end, no sorting (parallel phase).
- *                     erase() sets deleted flag (no shifting).
- *
- * --- Iterator invalidation contract ------------------------------------
- *
- * Iterators are position-based handles {sBasisSet*, int pos_}. Because
- * the underlying BlockArray is append-only for storage blocks and never
- * reallocates existing blocks, iterators remain valid across BlockArray
- * directory reallocation — their held integer index stays correct in
- * the absence of set-level mutations listed below.
- *
- * Mutation operations have the following effects on outstanding iterators:
- *
- * 1. Append (enter_bba / push_back at end / insert() when order_ ==
- *    SORDER_APPEND): does NOT invalidate any existing iterator. An
- *    iterator previously captured at end() now validly refers to the
- *    first appended element. This intentionally diverges from STL
- *    vector::end() semantics, and is relied upon by the parallel
- *    survivor-drain path (e.g. sLObject::checked, to land in Stage B).
- *
- * 2. Insert-in-middle (enter_bba / insert() in sorted mode at a
- *    find_pos-computed position): invalidates all iterators at
- *    positions >= the insert position. Iterators at positions < insert
- *    remain valid.
- *
- * 3. Non-lazy erase (erase_and_next in SORDER_STANDARD / SORDER_MONFIRST,
- *    or erase() when not in APPEND mode): shifts elements down.
- *    Invalidates all iterators at positions > the erased position.
- *    The iterator AT the erased position is returned by erase_and_next
- *    repointed at whatever element slid into the vacated slot (or end()
- *    if the erased element was last).
- *
- * 4. Lazy erase (erase() in SORDER_APPEND mode): sets the deleted
- *    tombstone flag on the element. Invalidates only the iterator at
- *    the tombstoned position — it becomes a "tombstone iterator" whose
- *    operator++ will skip forward past all consecutive tombstones and
- *    land on the next live element.
- *
- * 5. Reorder (reorder()): invalidates ALL outstanding iterators. Callers
- *    must drop every stored iterator before calling reorder().
- *
- * 6. Responsibility is on callers. There is no runtime enforcement of
- *    these rules; violations are undefined behaviour (in practice: a
- *    stale iterator refers to a different logical element than the one
- *    the caller captured).
- */
-enum SOrderMode { SORDER_STANDARD, SORDER_MONFIRST, SORDER_APPEND };
-
-class sBasisSet : private BlockArray<SElement> {
-public:
-  // --- Iterator (skips deleted entries) ---
-  class iterator {
-    sBasisSet* set_;
-    int pos_;
-    friend class sBasisSet;
-
-    void skip_deleted_forward() {
-      while (pos_ < set_->count && set_->elem(pos_).deleted) pos_++;
-    }
-    void skip_deleted_backward() {
-      while (pos_ > 0 && set_->elem(pos_).deleted) pos_--;
-    }
-
-    iterator(sBasisSet* s, int pos) : set_(s), pos_(pos) { }
-
-  public:
-    iterator() : set_(NULL), pos_(0) {}
-
-    SElement& operator*() const { return set_->elem(pos_); }
-    SElement* operator->() const { return &set_->elem(pos_); }
-
-    // Raw index — available for internal use (e.g., pairtest migration).
-    // Prefer iterator-based APIs in new code.
-    int index() const { return pos_; }
-
-    iterator& operator++() {
-      pos_++;
-      skip_deleted_forward();
-      return *this;
-    }
-    iterator operator++(int) {
-      iterator tmp = *this;
-      ++(*this);
-      return tmp;
-    }
-    iterator& operator--() {
-      pos_--;
-      skip_deleted_backward();
-      return *this;
-    }
-    iterator operator--(int) {
-      iterator tmp = *this;
-      --(*this);
-      return tmp;
-    }
-
-    bool operator==(const iterator& other) const { return pos_ == other.pos_; }
-    bool operator!=(const iterator& other) const { return pos_ != other.pos_; }
-  };
-
-  class const_iterator {
-    const sBasisSet* set_;
-    int pos_;
-    friend class sBasisSet;
-
-    void skip_deleted_forward() {
-      while (pos_ < set_->count && set_->elem(pos_).deleted) pos_++;
-    }
-
-    const_iterator(const sBasisSet* s, int pos) : set_(s), pos_(pos) { }
-
-  public:
-    const_iterator() : set_(NULL), pos_(0) {}
-    const_iterator(const iterator& it) : set_(it.set_), pos_(it.pos_) {}
-
-    const SElement& operator*() const { return set_->elem(pos_); }
-    const SElement* operator->() const { return &set_->elem(pos_); }
-    int index() const { return pos_; }
-
-    const_iterator& operator++() {
-      pos_++;
-      skip_deleted_forward();
-      return *this;
-    }
-    const_iterator operator++(int) {
-      const_iterator tmp = *this;
-      ++(*this);
-      return tmp;
-    }
-
-    bool operator==(const const_iterator& other) const { return pos_ == other.pos_; }
-    bool operator!=(const const_iterator& other) const { return pos_ != other.pos_; }
-  };
-
-  // --- Construction / mode ---
-  sBasisSet() : order_(SORDER_STANDARD), live_count_(0), pairtest_any_(false) {
-    pthread_mutex_init(&mutex_, NULL);
-  }
-  ~sBasisSet() {
-    pthread_mutex_destroy(&mutex_);
-  }
-  // Non-copyable / non-movable to keep mutex identity stable.
-  sBasisSet(const sBasisSet&) = delete;
-  sBasisSet& operator=(const sBasisSet&) = delete;
-
-  // --- Parallel locking ---
-  // Used by the parallel survivor-drain path to serialize iteration
-  // and mutation of S across drain workers. The serial code paths
-  // (THREADS=1, bba(), sba(), slimgb(), etc.) never acquire this
-  // lock; they are single-threaded so there is no contention.
-  // See ~/project/docs/parallel-bba-thread-safety-report.md for rationale.
-  void lock() { pthread_mutex_lock(&mutex_); }
-  void unlock() { pthread_mutex_unlock(&mutex_); }
-  pthread_mutex_t* raw_mutex() { return &mutex_; }
-
-  SOrderMode order() const { return order_; }
-  void set_order(SOrderMode m) { order_ = m; }
-  bool is_append_mode() const { return order_ == SORDER_APPEND; }
-
-  // --- Iterators ---
-  iterator begin() {
-    iterator it(this, 0);
-    it.skip_deleted_forward();
-    return it;
-  }
-  iterator end() { return iterator(this, count); }
-
-  const_iterator begin() const {
-    const_iterator it(this, 0);
-    it.skip_deleted_forward();
-    return it;
-  }
-  const_iterator end() const { return const_iterator(this, count); }
-
-  // --- Size ---
-  int size() const { return live_count_; }
-  bool empty() const { return live_count_ == 0; }
-
-  // --- Insert ---
-  // Inserts val at the position determined by the current ordering mode.
-  // SORDER_STANDARD/SORDER_MONFIRST: sorted insert (needs strat for comparison).
-  // SORDER_APPEND: append at end.
-  // Implemented in kutil.cc.
-  iterator insert(const SElement& val, kStrategy strat);
-
-  // Append at end regardless of mode (used during initialization).
-  iterator push_back(const SElement& val) {
-    BlockArray<SElement>::push_back(val);
-    live_count_++;
-    return iterator(this, count - 1);
-  }
-
-  // --- Erase ---
-  // SORDER_APPEND: set deleted flag (no shifting).
-  // Other modes: shift elements down.
-  void erase(iterator it) {
-    if (order_ == SORDER_APPEND) {
-      elem(it.pos_).deleted = true;
-    } else {
-      BlockArray<SElement>::erase(it.pos_);
-    }
-    live_count_--;
-  }
-
-  // --- Capacity / storage ---
-  using BlockArray<SElement>::ensure_capacity;
-  using BlockArray<SElement>::capacity;
-  using BlockArray<SElement>::free_all;
-
-  // Set element count directly (used during initialization).
-  void setsize(int n) {
-    BlockArray<SElement>::setsize(n);
-    live_count_ = n;
-  }
-
-  // --- Pairtest ---
-  // Clear all pairtest flags and the sentinel.
-  void clear_pairtest() {
-    for (int i = 0; i < count; i++) elem(i).pairtest = false;
-    pairtest_any_ = false;
-  }
-  // Set the sentinel (some zero spoly was found).
-  void set_pairtest_any() { pairtest_any_ = true; }
-  bool has_pairtest() const { return pairtest_any_; }
-
-  // Compact: remove deleted entries, pack remaining entries contiguously.
-  // Only meaningful after lazy mode. Resets to non-lazy mode.
-  void compact() {
-    int dst = 0;
-    for (int src = 0; src < count; src++) {
-      if (!elem(src).deleted) {
-        if (dst != src)
-          elem(dst) = elem(src);
-        dst++;
-      }
-    }
-    count = dst;
-    live_count_ = dst;
-    order_ = SORDER_STANDARD;
-  }
-
-  // --- Stable pointer access (valid as long as element exists) ---
-  SElement* addr(iterator it) {
-    return BlockArray<SElement>::addr(it.pos_);
-  }
-
-  // --- Member methods (use private elem() for random access) ---
-  // Implementations in kutil.cc since they need skStrategy, which is
-  // defined after this class.
-
-  // Insert a new basis element from an LObject (replaces enterSBba).
-  // Builds an SElement, inserts at the position determined by ordering mode.
-  // Returns an iterator to the just-inserted element.
-  iterator enter_bba(LObject &p, kStrategy strat, int atR = -1, int atS = -1);
-
-  // Insert for signature-based algorithms (replaces enterSSba).
-  // Also copies sig and sevSig fields.
-  // Returns an iterator to the just-inserted element.
-  iterator enter_sba(LObject &p, kStrategy strat, int atR = -1, int atS = -1);
-
-  // Delete element at iterator and update related structures.
-  // In non-lazy mode, shifts elements down (like old deleteInS).
-  // Returns next valid iterator after the erased position.
-  iterator erase_and_next(iterator it);
-
-  // Reorder S after inter-reduction may have changed leading monomials.
-  // (replaces reorderS)
-  void reorder(int *suc, kStrategy strat);
-
-  // S-to-T lookups (replace skStrategy::S_2_T / s_2_t).
-  // Return the TObject corresponding to the S element at the iterator.
-  TObject* S_2_T(const_iterator it, kStrategy strat);
-  TObject* s_2_t(const_iterator it, kStrategy strat);
-
-  // clearS: if p divides *at, delete *at and adjust the iterator.
-  // (replaces the clearS inline in kInline.h)
-  void clear_if_divisible(poly p, unsigned long p_sev,
-                          iterator &at, kStrategy strat);
-
-  // For tgb.cc: binary search variant with different comparison.
-  iterator simple_find_pos(kStrategy strat, poly p);
-
-  // For tgb.cc: move an element from one position to another,
-  // shifting intervening elements. old_it and new_it provide the
-  // element positions.
-  void move_elem(iterator old_it, iterator new_it);
-
-  // Construct an iterator at a raw index (no skip).
-  // Transitional: used by code migrating from int-based to iterator-based API.
-  // In lazy mode, the element at index i may be deleted — caller must check.
-  iterator iterator_at(int i) { return iterator(this, i); }
-  const_iterator const_iterator_at(int i) const { return const_iterator(this, i); }
-
-  // Binary search for sorted insertion position (replaces free posInS).
-  // length is the upper bound on the search range (indices [0..length]);
-  // pass size()-1 to search the whole set, or a smaller value to restrict.
-  // Returns the int position the element would occupy if inserted (one
-  // past the last element if larger than everything).
-  int find_pos(kStrategy strat, const poly p, int ecart_p, int length);
-
-  // Binary search for monfirst insertion position (replaces free posInSMonFirst).
-  int find_pos_monfirst(kStrategy strat, const poly p, int length);
-
-  // Encapsulates the kFindDivisibleByInS search-range narrowing.
-  // For monomial-ordered (non-Ring, non-component, non-lex) S, returns an
-  // upper bound on the index of any element of S whose leading monomial
-  // can divide p, restricted to indices [0..max_ind]. Returns max_ind for
-  // rings or other cases where narrowing is not safe; the caller must
-  // still check divisibility against each element up to the bound.
-  int find_divisor_search_bound(poly p, int max_ind, kStrategy strat);
-
-private:
-  SOrderMode order_;
-  int live_count_;
-  bool pairtest_any_;  // sentinel: true if any SElement.pairtest was set
-  pthread_mutex_t mutex_;  // parallel drain path serialization
-
-  // Internal: insert at a specific position (for reorder, etc.)
-  iterator insert_at(int pos, const SElement& val) {
-    BlockArray<SElement>::insert(pos, val);
-    live_count_++;
-    return iterator(this, pos);
-  }
-
-  // Internal raw element access (used by iterators and member functions)
-  SElement& elem(int i) { return (*static_cast<BlockArray<SElement>*>(this))[i]; }
-  const SElement& elem(int i) const { return (*static_cast<const BlockArray<SElement>*>(this))[i]; }
-
-  friend class skStrategy;
-};
 
 class skStrategy
 #ifdef HAVE_OMALLOC
@@ -1031,9 +1056,16 @@ public:
   void (*enterOnePair) (const SElement &si,poly p,int ecart, int isFromQ,kStrategy strat, int atR /*= -1*/) = NULL;
   void (*chainCrit) (poly p,int ecart,kStrategy strat) = NULL;
   BOOLEAN (*syzCrit) (poly sig, unsigned long not_sevSig, kStrategy strat) = NULL;
-  BOOLEAN (*rewCrit1) (poly sig, unsigned long not_sevSig, poly lm, kStrategy strat, int start /*= 0*/) = NULL;
-  BOOLEAN (*rewCrit2) (poly sig, unsigned long not_sevSig, poly lm, kStrategy strat, int start /*= 0*/) = NULL;
-  BOOLEAN (*rewCrit3) (poly sig, unsigned long not_sevSig, poly lm, kStrategy strat, int start /*= 0*/) = NULL;
+  // rewCrit{1,2,3}: rewritten-criterion scans of strat->S for SBA/F5.
+  // start is an iterator pointing at the first element to check
+  // (inclusive).  Callers pass strat->S.cbegin() for a full scan, or a
+  // captured iterator (e.g. sLObject::checked) for a resume-from-snapshot
+  // scan.  Converted from `int start` in Stage B of the sBasisSet
+  // iterator migration so that stored snapshots (Lp.checked) survive
+  // S appends without stale-index bugs under lazy-mode deletion.
+  BOOLEAN (*rewCrit1) (poly sig, unsigned long not_sevSig, poly lm, kStrategy strat, sBasisSet::const_iterator start) = NULL;
+  BOOLEAN (*rewCrit2) (poly sig, unsigned long not_sevSig, poly lm, kStrategy strat, sBasisSet::const_iterator start) = NULL;
+  BOOLEAN (*rewCrit3) (poly sig, unsigned long not_sevSig, poly lm, kStrategy strat, sBasisSet::const_iterator start) = NULL;
   pFDegProc pOrigFDeg = NULL;
   pLDegProc pOrigLDeg = NULL;
   pFDegProc pOrigFDeg_TailRing = NULL;
@@ -1300,10 +1332,10 @@ BOOLEAN homogTest(polyset F, int Fmax);
 BOOLEAN newHEdge(kStrategy strat);
 BOOLEAN syzCriterion(poly sig, unsigned long not_sevSig, kStrategy strat);
 BOOLEAN syzCriterionInc(poly sig, unsigned long not_sevSig, kStrategy strat);
-KINLINE BOOLEAN arriRewDummy(poly sig, unsigned long not_sevSig, poly lm, kStrategy strat, int start);
-BOOLEAN arriRewCriterion(poly sig, unsigned long not_sevSig, poly lm, kStrategy strat, int start);
-BOOLEAN arriRewCriterionPre(poly sig, unsigned long not_sevSig, poly lm, kStrategy strat, int start);
-BOOLEAN faugereRewCriterion(poly sig, unsigned long not_sevSig, poly lm, kStrategy strat, int start);
+KINLINE BOOLEAN arriRewDummy(poly sig, unsigned long not_sevSig, poly lm, kStrategy strat, sBasisSet::const_iterator start);
+BOOLEAN arriRewCriterion(poly sig, unsigned long not_sevSig, poly lm, kStrategy strat, sBasisSet::const_iterator start);
+BOOLEAN arriRewCriterionPre(poly sig, unsigned long not_sevSig, poly lm, kStrategy strat, sBasisSet::const_iterator start);
+BOOLEAN faugereRewCriterion(poly sig, unsigned long not_sevSig, poly lm, kStrategy strat, sBasisSet::const_iterator start);
 BOOLEAN findMinLMPair(poly sig, unsigned long not_sevSig, kStrategy strat, int start);
 
 /// returns index of p in TSet, or -1 if not found

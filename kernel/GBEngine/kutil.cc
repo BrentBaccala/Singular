@@ -2548,7 +2548,7 @@ static void enterOnePairSig (const SElement &si, int si_idx, poly p, poly pSig, 
   pWrite(pSigMult);
   pWrite(sSigMult);
   PrintS("----------------\n");
-  Lp.checked  = 0;
+  Lp.checked  = strat->S.cbegin();
 #endif
   int sigCmp = p_LmCmp(pSigMult,sSigMult,currRing);
 //#if 1
@@ -2576,7 +2576,7 @@ static void enterOnePairSig (const SElement &si, int si_idx, poly p, poly pSig, 
   // NOTE: Arri's Rewritten Criterion is tested below, we need Lp.p for it!
   if  ( strat->syzCrit(pSigMult,pSigMultNegSev,strat) ||
         strat->syzCrit(sSigMult,sSigMultNegSev,strat)
-        || strat->rewCrit1(sSigMult,sSigMultNegSev,Lp.lcm,strat,si_idx+1)
+        || strat->rewCrit1(sSigMult,sSigMultNegSev,Lp.lcm,strat,strat->S.const_iterator_at(si_idx+1))
       )
   {
     pDelete(&pSigMult);
@@ -2671,7 +2671,7 @@ static void enterOnePairSig (const SElement &si, int si_idx, poly p, poly pSig, 
   else
   {
     // testing by rewCrit3 = Arris Rewritten Criterion (for F5 nothing happens!)
-    if (strat->rewCrit3(Lp.sig,~Lp.sevSig,Lp.p,strat,strat->S.size()))
+    if (strat->rewCrit3(Lp.sig,~Lp.sevSig,Lp.p,strat,strat->S.cend()))
     {
       pLmFree(Lp.lcm);
       pDelete(&Lp.sig);
@@ -2685,7 +2685,12 @@ static void enterOnePairSig (const SElement &si, int si_idx, poly p, poly pSig, 
     //       moreover, this improves rewCriterion,
     //       i.e. strat->checked > strat->from if and only if the 2nd generator
     //       gives the bigger signature.
-    Lp.checked = strat->S.size();
+    // Capture an iterator at end() — the next enter_bba (which happens
+    // immediately after this pair creation) will append at this position
+    // and the iterator will correctly point at that newly-appended
+    // element at resume time. See sBasisSet iterator-invalidation
+    // contract (rule 1: append does not invalidate prior iterators).
+    Lp.checked = strat->S.cend();
     // at this point it is clear that the pair will be added to L, since it has
     // passed all tests up to now
 
@@ -2835,7 +2840,7 @@ static void enterOnePairSigRing (const SElement &si, poly p, poly pSig, int, int
   pWrite(pSigMult);
   pWrite(sSigMult);
   Print("----------------\n");
-  Lp.checked  = 0;
+  Lp.checked  = strat->S.cbegin();
 #endif
   int sigCmp;
   if(pSigMult != NULL && sSigMult != NULL)
@@ -3049,7 +3054,7 @@ static void enterOnePairSigRing (const SElement &si, poly p, poly pSig, int, int
   else
   {
     // testing by rewCrit3 = Arris Rewritten Criterion (for F5 nothing happens!)
-    if (strat->rewCrit3(Lp.sig,~Lp.sevSig,Lp.p,strat,strat->S.size()))
+    if (strat->rewCrit3(Lp.sig,~Lp.sevSig,Lp.p,strat,strat->S.cend()))
     {
       pLmFree(Lp.lcm);
       pDelete(&Lp.sig);
@@ -3063,7 +3068,12 @@ static void enterOnePairSigRing (const SElement &si, poly p, poly pSig, int, int
     //       moreover, this improves rewCriterion,
     //       i.e. strat->checked > strat->from if and only if the 2nd generator
     //       gives the bigger signature.
-    Lp.checked = strat->S.size();
+    // Capture an iterator at end() — the next enter_bba (which happens
+    // immediately after this pair creation) will append at this position
+    // and the iterator will correctly point at that newly-appended
+    // element at resume time. See sBasisSet iterator-invalidation
+    // contract (rule 1: append does not invalidate prior iterators).
+    Lp.checked = strat->S.cend();
     // at this point it is clear that the pair will be added to L, since it has
     // passed all tests up to now
 
@@ -6087,7 +6097,7 @@ BOOLEAN syzCriterionInc(poly sig, unsigned long not_sevSig, kStrategy strat)
 /*
  * REWRITTEN CRITERION for signature-based standard basis algorithms
  */
-BOOLEAN faugereRewCriterion(poly sig, unsigned long not_sevSig, poly /*lm*/, kStrategy strat, int start=0)
+BOOLEAN faugereRewCriterion(poly sig, unsigned long not_sevSig, poly /*lm*/, kStrategy strat, sBasisSet::const_iterator start)
 {
   //printf("Faugere Rewritten Criterion\n");
   if(rField_is_Ring(currRing))
@@ -6097,9 +6107,11 @@ BOOLEAN faugereRewCriterion(poly sig, unsigned long not_sevSig, poly /*lm*/, kSt
   PrintS("rewritten criterion checks:  ");
   pWrite(sig);
 #endif
-  for(int k = strat->S.size()-1; k>=start; k--)
+  // Scan from start forward (previously backward from S.size()-1 to
+  // start; direction is irrelevant for correctness since we return
+  // TRUE on any match).
+  for (auto sit_k = start; sit_k != strat->S.cend(); ++sit_k)
   {
-    auto sit_k = strat->S.iterator_at(k);
 //#if 1
 #ifdef DEBUGF5
     PrintS("checking with:  ");
@@ -6115,7 +6127,6 @@ BOOLEAN faugereRewCriterion(poly sig, unsigned long not_sevSig, poly /*lm*/, kSt
       strat->nrrewcrit++;
       return TRUE;
     }
-    //k--;
   }
 #ifdef DEBUGF5
   PrintS("ALL ELEMENTS OF S\n----------------------------------------\n");
@@ -6147,15 +6158,19 @@ BOOLEAN faugereRewCriterion(poly sig, unsigned long not_sevSig, poly /*lm*/, kSt
 //        leading monomials are smaller than the leading monomial of the
 //        critical pair. In this situation we can discard the critical pair
 //        completely.
-BOOLEAN arriRewCriterion(poly /*sig*/, unsigned long /*not_sevSig*/, poly /*lm*/, kStrategy strat, int start=0)
+BOOLEAN arriRewCriterion(poly /*sig*/, unsigned long /*not_sevSig*/, poly /*lm*/, kStrategy strat, sBasisSet::const_iterator start)
 {
   if(rField_is_Ring(currRing))
     return FALSE;
   poly p1 = pOne();
   poly p2 = pOne();
-  for (int ii=strat->S.size()-1; ii>start; ii--)
+  // Old loop was `ii > start` (strict), i.e. skipped the element at
+  // `start` itself.  With the iterator API the "+1 collapse" means
+  // callers now pass the iterator AT the first element to check, so
+  // we use `!=` (inclusive).  rewCrit2's sole caller collapsed its +1;
+  // rewCrit3 callers still pass S.cend() (no change in scan range).
+  for (auto sit_ii = start; sit_ii != strat->S.cend(); ++sit_ii)
   {
-    auto sit_ii = strat->S.iterator_at(ii);
     if (p_LmShortDivisibleBy(sit_ii->sig, sit_ii->sevSig, strat->P.sig, ~strat->P.sevSig, currRing))
     {
       p_ExpVectorSum(p1,strat->P.sig,sit_ii->p,currRing);
@@ -6173,7 +6188,7 @@ BOOLEAN arriRewCriterion(poly /*sig*/, unsigned long /*not_sevSig*/, poly /*lm*/
   return FALSE;
 }
 
-BOOLEAN arriRewCriterionPre(poly sig, unsigned long not_sevSig, poly lm, kStrategy strat, int /*start=0*/)
+BOOLEAN arriRewCriterionPre(poly sig, unsigned long not_sevSig, poly lm, kStrategy strat, sBasisSet::const_iterator /*start*/)
 {
   //Over Rings, there are still some changes to do: considering coeffs
   if(rField_is_Ring(currRing))
@@ -7401,6 +7416,12 @@ void initSLSba (ideal F, ideal Q,kStrategy strat)
           }
           strat->initEcart(&h);
           h.sev = pGetShortExpVector(h.p);
+          // Initial L entries have no prior rewCrit2 scan history, so
+          // resume-scan starts from the beginning of S.  Without this
+          // explicit init, h.checked would be the null iterator from
+          // sLObject::Init()'s memset, segfaulting in rewCrit2 at the
+          // first iteration of the main sba() loop.
+          h.checked = strat->S.cbegin();
           strat->L.push(h);
         }
       }
