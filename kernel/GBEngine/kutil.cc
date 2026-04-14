@@ -9894,13 +9894,13 @@ BOOLEAN kCheckSpolyCreation(LObject *L, kStrategy strat, poly &m1, poly &m2)
  * gcd-poly = m1 * R[atR] + m2 * S[atS]
  *
  ***************************************************************/
-BOOLEAN kCheckStrongCreation(int atR, poly m1, int atS, poly m2, kStrategy strat)
+BOOLEAN kCheckStrongCreation(int atR, poly m1, sBasisSet::const_iterator atS, poly m2, kStrategy strat)
 {
-  assume(strat->S.iterator_at(atS)->s_2_r >= -1 && strat->S.iterator_at(atS)->s_2_r < strat->T.size());
+  assume(atS->s_2_r >= -1 && atS->s_2_r < strat->T.size());
   //assume(strat->tailRing != currRing);
 
   poly p1_max = (strat->R[atR])->max_exp;
-  poly p2_max = (strat->R[strat->S.iterator_at(atS)->s_2_r])->max_exp;
+  poly p2_max = (strat->R[atS->s_2_r])->max_exp;
 
   if (((p1_max != NULL) && !p_LmExpVectorAddIsOk(m1, p1_max, strat->tailRing)) ||
       ((p2_max != NULL) && !p_LmExpVectorAddIsOk(m2, p2_max, strat->tailRing)))

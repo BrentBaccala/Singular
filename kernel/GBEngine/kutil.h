@@ -1568,7 +1568,7 @@ BOOLEAN kCheckSpolyCreation(LObject* L, kStrategy strat, poly &m1, poly &m2);
 // return TRUE if gcdpoly creation of R[atR] and S[atS] does not violate
 //             exponent bound of strat->tailRing
 //      FALSE, otherwise
-BOOLEAN kCheckStrongCreation(int atR, poly m1, int atS, poly m2, kStrategy strat);
+BOOLEAN kCheckStrongCreation(int atR, poly m1, sBasisSet::const_iterator atS, poly m2, kStrategy strat);
 poly preIntegerCheck(ideal F, ideal Q);
 void postReduceByMon(LObject* h, kStrategy strat);
 void postReduceByMonSig(LObject* h, kStrategy strat);
