@@ -1365,7 +1365,7 @@ int kTestDivisibleByT0_Z(const kStrategy strat, const LObject* L);
 sBasisSet::iterator kFindDivisibleByInS(const kStrategy strat, int *max_ind, LObject* L);
 
 int kFindNextDivisibleByInS(const kStrategy strat, int start,int max_ind, LObject* L);
-TObject* kFindDivisibleByInS_T(kStrategy strat, int end_pos, LObject* L, TObject *T, long ecart = LONG_MAX);
+TObject* kFindDivisibleByInS_T(kStrategy strat, sBasisSet::const_iterator end, LObject* L, TObject *T, long ecart = LONG_MAX);
 
 /***************************************************************
  *

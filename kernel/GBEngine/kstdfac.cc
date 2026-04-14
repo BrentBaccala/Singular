@@ -296,7 +296,7 @@ static void completeReduceFac (kStrategy strat, ideal_list FL)
       continue;
     }
 
-    deleteInS(si,strat);
+    strat->S.erase(sit);
 
     for(i=IDELEMS(fac)-1;i>=0;i--)
     {

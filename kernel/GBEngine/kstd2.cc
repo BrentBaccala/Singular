@@ -1996,7 +1996,7 @@ poly redtailSba (LObject* L, int pos, kStrategy strat, BOOLEAN withT, BOOLEAN no
       }
       else
       {
-        With = kFindDivisibleByInS_T(strat, pos, &Ln, &With_s);
+        With = kFindDivisibleByInS_T(strat, strat->S.const_iterator_at(pos + 1), &Ln, &With_s);
         if (With == NULL) break;
       }
       cnt--;
@@ -5035,10 +5035,10 @@ ideal bbaShift(ideal F, ideal Q,intvec *w,bigintmat *hilb,kStrategy strat)
   {
     if(!rField_is_Ring(currRing))
     {
-      for (int k = 0; k < strat->S.size(); ++k)
+      for (auto sit_k = strat->S.begin(); sit_k != strat->S.end(); )
       {
-        auto sit_k = strat->S.iterator_at(k);
-        if ((strat->hasFromQ) && (sit_k->fromQ)) continue; // do not reduce Q_k
+        if ((strat->hasFromQ) && (sit_k->fromQ)) { ++sit_k; continue; } // do not reduce Q_k
+        bool erased = false;
         for (int j = 0; j < strat->T.size(); ++j)
         {
           if (strat->T[j].p!=NULL)
@@ -5050,13 +5050,14 @@ ideal bbaShift(ideal F, ideal Q,intvec *w,bigintmat *hilb,kStrategy strat)
             {
               if (pLmCmp(strat->T[j].p, sit_k->p) != 0)
               { // check whether LM is different
-                deleteInS(k, strat);
-                --k;
+                sit_k = strat->S.erase_and_next(sit_k);
+                erased = true;
                 break;
               }
             }
           }
         }
+        if (!erased) ++sit_k;
       }
     }
   }

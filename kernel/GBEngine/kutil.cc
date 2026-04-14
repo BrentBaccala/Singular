@@ -6247,7 +6247,7 @@ BOOLEAN arriRewCriterionPre(poly sig, unsigned long not_sevSig, poly lm, kStrate
  * Tail reductions
  *
  ***************************************************************/
-TObject* kFindDivisibleByInS_T(kStrategy strat, int end_pos, LObject* L, TObject *T, long ecart)
+TObject* kFindDivisibleByInS_T(kStrategy strat, sBasisSet::const_iterator end, LObject* L, TObject *T, long ecart)
 {
   const unsigned long not_sev = ~L->sev;
   poly p;
@@ -6256,9 +6256,9 @@ TObject* kFindDivisibleByInS_T(kStrategy strat, int end_pos, LObject* L, TObject
 
   assume(~not_sev == p_GetShortExpVector(p, r));
 
-  // Walk S as iterator; end_pos is an inclusive last index on raw positions.
+  // Walk S as iterator; `end` is the exclusive upper-bound iterator.
   auto at_end = [&](sBasisSet::iterator it) {
-    return it == strat->S.end() || it.index() > end_pos;
+    return it == strat->S.end() || it.index() >= end.index();
   };
 
   if (r == currRing)
@@ -6436,9 +6436,9 @@ poly redtail (LObject* L, int end_pos, kStrategy strat)
       Ln.Set(hn, strat->tailRing);
       Ln.sev = p_GetShortExpVector(hn, strat->tailRing);
       if (strat->kAllAxis)
-        With = kFindDivisibleByInS_T(strat, end_pos, &Ln, &With_s);
+        With = kFindDivisibleByInS_T(strat, strat->S.const_iterator_at(end_pos + 1), &Ln, &With_s);
       else
-        With = kFindDivisibleByInS_T(strat, end_pos, &Ln, &With_s, e);
+        With = kFindDivisibleByInS_T(strat, strat->S.const_iterator_at(end_pos + 1), &Ln, &With_s, e);
       if (With == NULL) break;
       With->length=0;
       With->pLength=0;
@@ -6539,7 +6539,7 @@ poly redtailBba (LObject* L, sBasisSet::const_iterator end, kStrategy strat, BOO
       }
       else
       {
-        With = kFindDivisibleByInS_T(strat, end_pos, &Ln, &With_s);
+        With = kFindDivisibleByInS_T(strat, strat->S.const_iterator_at(end_pos + 1), &Ln, &With_s);
         if (With == NULL) break;
         assume(With->GetpLength()==pLength(With->p != __null ? With->p : With->t_p));
       }
@@ -6647,7 +6647,7 @@ poly redtailBbaBound (LObject* L, int end_pos, kStrategy strat, int bound, BOOLE
       }
       else
       {
-        With = kFindDivisibleByInS_T(strat, end_pos, &Ln, &With_s);
+        With = kFindDivisibleByInS_T(strat, strat->S.const_iterator_at(end_pos + 1), &Ln, &With_s);
         if (With == NULL) break;
       }
       cnt--;
@@ -6872,7 +6872,7 @@ poly redtailBba_Z (LObject* L, int end_pos, kStrategy strat )
     loop
     {
       Ln.SetShortExpVector();
-      With = kFindDivisibleByInS_T(strat, end_pos, &Ln, &With_s);
+      With = kFindDivisibleByInS_T(strat, strat->S.const_iterator_at(end_pos + 1), &Ln, &With_s);
       if (With == NULL) break;
       cnt--;
       if (cnt==0)
@@ -6979,7 +6979,7 @@ poly redtailBba_Ring (LObject* L, int end_pos, kStrategy strat )
     {
       Ln.SetShortExpVector();
       With_s.Init(currRing);
-      With = kFindDivisibleByInS_T(strat, end_pos, &Ln, &With_s);
+      With = kFindDivisibleByInS_T(strat, strat->S.const_iterator_at(end_pos + 1), &Ln, &With_s);
       if (With == NULL) break;
       cnt--;
       if (cnt==0)
@@ -8139,7 +8139,7 @@ void updateS(BOOLEAN toT,kStrategy strat)
           pLmDelete(&redSi);
           if (sit->p==NULL)
           {
-            deleteInS(i,strat);
+            strat->S.erase(sit);
             i--;
           }
           else if (change)
@@ -8226,7 +8226,7 @@ void updateS(BOOLEAN toT,kStrategy strat)
           sit->p = redMora(sit->p,i-1,strat);
           if (sit->p==NULL)
           {
-            deleteInS(i,strat);
+            strat->S.erase(sit);
             i--;
           }
           else if (pCmp(sit->p,redSi)!=0)
@@ -8509,7 +8509,7 @@ void replaceInLAndSAndT(LObject &p, int tj, kStrategy strat)
    * is until now only in T and not in S */
   if (sit_match != strat->S.end())
   {
-    deleteInS(sit_match.index(), strat);
+    strat->S.erase(sit_match);
   }
 
   auto pos = strat->S.find_pos(p.p, p.ecart);
@@ -9642,7 +9642,11 @@ void updateResult(ideal Q, kStrategy strat)
   // This matters because bba continues using S after updateResult returns.
   // Two-cursor shift (std::remove_if idiom). The write and read cursors
   // walk raw positions, including deleted/NULL slots, so iterator_at() with
-  // int indices is the natural spelling here.
+  // int indices is the natural spelling here. This deliberately bypasses
+  // the iterator API's skip-deleted semantics — see the iterator invalidation
+  // contract above the sBasisSet class declaration in kutil.h. Compaction
+  // is a bulk rewrite rather than logical iteration, so element-position
+  // semantics don't apply.
   {
     int j = 0;
     const int n = strat->S.size();
@@ -12420,7 +12424,7 @@ poly redtailBbaShift (LObject* L, int pos, kStrategy strat, BOOLEAN withT, BOOLE
       }
       else
       {
-        With = kFindDivisibleByInS_T(strat, pos, &Ln, &With_s);
+        With = kFindDivisibleByInS_T(strat, strat->S.const_iterator_at(pos + 1), &Ln, &With_s);
         if (With == NULL) break;
       }
       if (normalize && (!TEST_OPT_INTSTRATEGY) && (!nIsOne(pGetCoeff(With->p))))
