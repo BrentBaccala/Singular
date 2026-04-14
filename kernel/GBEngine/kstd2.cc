@@ -3874,7 +3874,7 @@ ideal sba (ideal F0, ideal Q,intvec *w,bigintmat *hilb,kStrategy strat)
 #if DEBUGF50
     printf("---------------------------\n");
     Print(" %d. ELEMENT ADDED TO GCURR:\n",strat->S.size());
-    { auto sit_last = strat->S.iterator_at(strat->S.size()-1);
+    { auto sit_last = strat->S.end(); --sit_last;
     PrintS("LEAD POLY:  "); pWrite(pHead(sit_last->p));
     PrintS("SIGNATURE:  "); pWrite(sit_last->sig); }
 #endif
@@ -4671,7 +4671,7 @@ void f5c (kStrategy strat, int& olddeg, int& minimcnt, int& hilbeledeg,
 //#if 1
 #ifdef DEBUGF5
         PrintS("ELEMENT ADDED TO GCURR DURING INTERRED: ");
-        { auto sit_last = strat->S.iterator_at(strat->S.size()-1);
+        { auto sit_last = strat->S.end(); --sit_last;
         pWrite(pHead(sit_last->p));
         pWrite(sit_last->sig); }
 #endif

@@ -7463,9 +7463,12 @@ void initSLSba (ideal F, ideal Q,kStrategy strat)
 
 void initSyzRules (kStrategy strat)
 {
-  if( strat->S.iterator_at(0)->p )
+  if( strat->S.begin()->p )
   {
-    if( strat->S.iterator_at(1)->p && !rField_is_Ring(currRing))
+    // Note: size() >= 2 is not explicitly checked here, matching the
+    // pre-migration behaviour (iterator_at(1) was also unchecked).
+    auto second = strat->S.begin(); ++second;
+    if( second->p && !rField_is_Ring(currRing))
     {
       omFreeSize(strat->syzIdx,(strat->syzidxmax)*sizeof(int));
       omFreeSize(strat->sevSyz,(strat->syzmax)*sizeof(unsigned long));
