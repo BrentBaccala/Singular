@@ -501,6 +501,14 @@ public:
   iterator iterator_at(int i) { return iterator(this, i); }
   const_iterator const_iterator_at(int i) const { return const_iterator(this, i); }
 
+  // Escape hatch for subsystems (slimgb/tgb) that manage S via int
+  // indices internally and do not use SORDER_APPEND lazy deletion. These
+  // calls are semantically equivalent to iterator_at(int) but document
+  // that the caller has audited the site as lazy-mode-unaffected. Only
+  // call in contexts where no tombstoned slots exist in S.
+  iterator unsafe_iterator_at_int(int i) { return iterator(this, i); }
+  const_iterator unsafe_const_iterator_at_int(int i) const { return const_iterator(this, i); }
+
   // Raw position-indexed access, WITHOUT skip-deleted semantics. Returns
   // an iterator sitting at raw slot i — including tombstoned slots. This
   // is the escape hatch for code that MUST walk the underlying storage
