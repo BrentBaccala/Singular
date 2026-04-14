@@ -1639,7 +1639,10 @@ int redSig (LObject* h,kStrategy strat)
     PrintS("--------------------------------\n");
     printf("INDEX OF REDUCER T: %d\n",ii);
 #endif
-    sigSafe = ksReducePolySig(h, &(strat->T[ii]), strat->S.iterator_at(ii)->s_2_r, NULL, NULL, strat);
+    // NOTE: the idx parameter is unused inside ksReducePolySig; pass T[ii].i_r
+    // (the R-index of the reducer) for documentation rather than relying on
+    // the old T-index == S-index coincidence.
+    sigSafe = ksReducePolySig(h, &(strat->T[ii]), strat->T[ii].i_r, NULL, NULL, strat);
 #if SBA_PRINT_REDUCTION_STEPS
     if (sigSafe != 3)
       sba_reduction_steps++;
@@ -1862,7 +1865,8 @@ int redSigRing (LObject* h,kStrategy strat)
     Print("--------------------------------\n");
     printf("INDEX OF REDUCER T: %d\n",ii);
 #endif
-    sigSafe = ksReducePolySigRing(h, &(strat->T[ii]), strat->S.iterator_at(ii)->s_2_r, NULL, NULL, strat);
+    // NOTE: idx parameter is unused; pass T[ii].i_r for documentation.
+    sigSafe = ksReducePolySigRing(h, &(strat->T[ii]), strat->T[ii].i_r, NULL, NULL, strat);
     if(h->p == NULL && h->sig == NULL)
     {
       //Trivial case catch
@@ -4702,16 +4706,17 @@ void f5c (kStrategy strat, int& olddeg, int& minimcnt, int& hilbeledeg,
 #endif /* KDEBUG */
   }
   int cc = 0;
+  auto sit_cc = strat->S.begin();
   while (cc<strat->T.size())
   {
     strat->T[cc].sig        = pOne();
     p_SetComp(strat->T[cc].sig,cc+1,currRing);
     strat->T[cc].sevSig     = pGetShortExpVector(strat->T[cc].sig);
-    { auto sit_cc = strat->S.iterator_at(cc);
     sit_cc->sig          = strat->T[cc].sig;
-    sit_cc->sevSig       = strat->T[cc].sevSig; }
+    sit_cc->sevSig       = strat->T[cc].sevSig;
     strat->T[cc].is_sigsafe = TRUE;
     cc++;
+    ++sit_cc;
   }
   strat->max_lower_index = strat->T.size()-1;
   // set current signature index of upcoming iteration step
@@ -4723,9 +4728,6 @@ void f5c (kStrategy strat, int& olddeg, int& minimcnt, int& hilbeledeg,
     p_SetComp(Lp.sig,cc+1,currRing);
     cc++;
   }
-  // Note: this loop body never executes (cc starts at size())
-  for (cc=strat->S.size(); cc<strat->S.size(); ++cc)
-    strat->S.iterator_at(cc)->p  = NULL;
   #if 0
   printf("\nAfter f5c sorting\n");
   for(auto sit=strat->S.begin();sit!=strat->S.end();++sit)
@@ -4736,13 +4738,16 @@ void f5c (kStrategy strat, int& olddeg, int& minimcnt, int& hilbeledeg,
 #if DEBUGF5
   PrintS("------------------- STRAT S ---------------------\n");
   cc = 0;
-  while (cc<strat->T.size())
   {
-    { auto sit_cc = strat->S.iterator_at(cc);
-    pWrite(pHead(sit_cc->p));
-    pWrite(sit_cc->sig); }
-    printf("- - - - - -\n");
-    cc++;
+    auto sit_cc = strat->S.begin();
+    while (cc<strat->T.size())
+    {
+      pWrite(pHead(sit_cc->p));
+      pWrite(sit_cc->sig);
+      printf("- - - - - -\n");
+      cc++;
+      ++sit_cc;
+    }
   }
   PrintS("-------------------------------------------------\n");
   PrintS("------------------- STRAT T ---------------------\n");

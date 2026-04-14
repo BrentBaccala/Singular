@@ -2490,9 +2490,9 @@ static void enterOnePairLift (const SElement &si,poly p,int ecart, int isFromQ,k
 */
 
 #ifdef DEBUGF5
-static void enterOnePairSig (const SElement &si, int si_idx, poly p, poly pSig, int from, int ecart, int isFromQ, kStrategy strat, int atR = -1)
+static void enterOnePairSig (const SElement &si, sBasisSet::const_iterator si_it, poly p, poly pSig, int from, int ecart, int isFromQ, kStrategy strat, int atR = -1)
 #else
-static void enterOnePairSig (const SElement &si, int si_idx, poly p, poly pSig, int, int ecart, int isFromQ, kStrategy strat, int atR = -1)
+static void enterOnePairSig (const SElement &si, sBasisSet::const_iterator si_it, poly p, poly pSig, int, int ecart, int isFromQ, kStrategy strat, int atR = -1)
 #endif
 {
 
@@ -2574,9 +2574,10 @@ static void enterOnePairSig (const SElement &si, int si_idx, poly p, poly pSig, 
   // testing by syzCrit = F5 Criterion
   // testing by rewCrit1 = Rewritten Criterion
   // NOTE: Arri's Rewritten Criterion is tested below, we need Lp.p for it!
+  auto si_next = si_it; ++si_next;
   if  ( strat->syzCrit(pSigMult,pSigMultNegSev,strat) ||
         strat->syzCrit(sSigMult,sSigMultNegSev,strat)
-        || strat->rewCrit1(sSigMult,sSigMultNegSev,Lp.lcm,strat,strat->S.const_iterator_at(si_idx+1))
+        || strat->rewCrit1(sSigMult,sSigMultNegSev,Lp.lcm,strat,si_next)
       )
   {
     pDelete(&pSigMult);
@@ -3978,7 +3979,7 @@ void initenterpairsSig (poly h,poly hSig,int hFrom,int k,int ecart,int isFromQ,k
           if (!sjt->fromQ)
           {
             new_pair=TRUE;
-            enterOnePairSig(*sjt,sjt.index(),h,hSig,hFrom,ecart,isFromQ,strat, atR);
+            enterOnePairSig(*sjt,sjt,h,hSig,hFrom,ecart,isFromQ,strat, atR);
           //Print("j:%d, L.size():%d\n",j,(int)strat->L.size());
           }
         }
@@ -3988,7 +3989,7 @@ void initenterpairsSig (poly h,poly hSig,int hFrom,int k,int ecart,int isFromQ,k
         new_pair=TRUE;
         for (auto sjt = strat->S.begin(); sjt != strat->S.end(); ++sjt)
         {
-          enterOnePairSig(*sjt,sjt.index(),h,hSig,hFrom,ecart,isFromQ,strat, atR);
+          enterOnePairSig(*sjt,sjt,h,hSig,hFrom,ecart,isFromQ,strat, atR);
           //Print("j:%d, L.size():%d\n",j,(int)strat->L.size());
         }
       }
@@ -4001,7 +4002,7 @@ void initenterpairsSig (poly h,poly hSig,int hFrom,int k,int ecart,int isFromQ,k
         || (pGetComp(sjt->p)==0))
         {
           new_pair=TRUE;
-          enterOnePairSig(*sjt,sjt.index(),h,hSig,hFrom,ecart,isFromQ,strat, atR);
+          enterOnePairSig(*sjt,sjt,h,hSig,hFrom,ecart,isFromQ,strat, atR);
         //Print("j:%d, Ll:%d\n",j,strat->Ll);
         }
       }
@@ -6222,9 +6223,8 @@ BOOLEAN arriRewCriterionPre(poly sig, unsigned long not_sevSig, poly lm, kStrate
   }
   poly p1 = pOne();
   poly p2 = pOne();
-  for (int ii=strat->S.size()-1; ii>-1; ii--)
+  for (auto sit_ii = strat->S.begin(); sit_ii != strat->S.end(); ++sit_ii)
   {
-    auto sit_ii = strat->S.iterator_at(ii);
     if (p_LmShortDivisibleBy(sit_ii->sig, sit_ii->sevSig, sig, not_sevSig, currRing))
     {
       p_ExpVectorSum(p1,sig,sit_ii->p,currRing);
@@ -7990,22 +7990,22 @@ void cancelunit1 (LObject* p,int *suc, int index,kStrategy strat )
 * procedure used in updateS
 * must not be used for elements of Q or elements of an ideal !
 */
-static poly redQ (poly h, int j, kStrategy strat)
+static poly redQ (poly h, int /*j*/, kStrategy strat)
 {
-  int start;
   unsigned long not_sev = ~ pGetShortExpVector(h);
-  while ((j < strat->S.size()) && (pGetComp(strat->S.iterator_at(j)->p)!=0)) j++;
-  start=j;
-  while (j < strat->S.size())
+  auto sit = strat->S.begin();
+  while (sit != strat->S.end() && pGetComp(sit->p) != 0) ++sit;
+  auto start = sit;
+  while (sit != strat->S.end())
   {
-    if (pLmShortDivisibleBy(strat->S.iterator_at(j)->p,strat->S.iterator_at(j)->sev, h, not_sev))
+    if (pLmShortDivisibleBy(sit->p, sit->sev, h, not_sev))
     {
-      h = ksOldSpolyRed(strat->S.iterator_at(j)->p,h,strat->kNoetherTail());
+      h = ksOldSpolyRed(sit->p, h, strat->kNoetherTail());
       if (h==NULL) return NULL;
-      j = start;
+      sit = start;
       not_sev = ~ pGetShortExpVector(h);
     }
-    else j++;
+    else ++sit;
   }
   return h;
 }
@@ -11828,7 +11828,7 @@ BOOLEAN enterOnePairShift (poly q, poly p, int ecart, int isFromQ, kStrategy str
     // TODO: currently ifromS is only > 0 if called from enterOnePairWithShifts
     if (ifromS != strat->S.end() && ifromS.index() > 0)
     {
-      strat->S.iterator_at(ifromS.index())->pairtest = true; strat->S.set_pairtest_any();/*- hint for spoly(S^[i],p)=0 -*/
+      ifromS->pairtest = true; strat->S.set_pairtest_any();/*- hint for spoly(S^[i],p)=0 -*/
     }
       //if (TEST_OPT_DEBUG){Print("!");} // option teach
     /* END _ TEMPORARILY DISABLED FOR SHIFTS */
