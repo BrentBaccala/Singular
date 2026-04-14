@@ -35,17 +35,8 @@
 
 
 
-// S_2_T and s_2_t are now sBasisSet methods (strat->S.S_2_T / s_2_t).
-// Delegate from skStrategy for backward compatibility.
-KINLINE TObject* skStrategy::S_2_T(int i)
-{
-  return S.S_2_T(S.iterator_at(i), this);
-}
-
-KINLINE TObject* skStrategy::s_2_t(int i)
-{
-  return S.s_2_t(S.iterator_at(i), this);
-}
+// S_2_T and s_2_t are sBasisSet methods (strat->S.S_2_T / s_2_t).
+// The int-based skStrategy wrappers were retired during Stage C/B4.
 
 KINLINE poly skStrategy::kNoetherTail()
 {

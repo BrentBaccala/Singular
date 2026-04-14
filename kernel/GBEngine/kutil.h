@@ -1172,11 +1172,7 @@ public:
   skStrategy();
   ~skStrategy();
 
-  // return TObject corresponding to S[i]: assume that it exists
-  // i.e. no error checking is done
-  KINLINE TObject* S_2_T(int i);
-  // like S_2_T, except that NULL is returned if it can not be found
-  KINLINE TObject* s_2_t(int i);
+  // S-to-T lookup is now sBasisSet::S_2_T / s_2_t — call via strat->S.
 };
 
 int compareL0 (const LObject &lhs, const LObject &rhs, const kStrategy strat);
