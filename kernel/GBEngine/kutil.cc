@@ -4671,7 +4671,7 @@ void sBasisSet::reorder(int *suc, kStrategy strat)
   for (; i < size(); i++)
   {
     // Search within the first i elements for the new position of elem(i).
-    at = find_pos(elem(i).p, elem(i).ecart, iterator_at(i)).index();
+    at = find_pos(elem(i).p, elem(i).ecart, iterator(this, i)).index();
     if (at != i)
     {
       if (new_suc > at) new_suc = at;
@@ -4724,7 +4724,7 @@ sBasisSet::iterator sBasisSet::find_pos(const poly p, int ecart_p, iterator end_
 
     if ((oo<o)
     || ((o==oo) && (pLmCmp(elem(length).p,p)!= cmp_int)))
-      return iterator_at(length+1);
+      return iterator(this, length+1);
 
     loop
     {
@@ -4732,9 +4732,9 @@ sBasisSet::iterator sBasisSet::find_pos(const poly p, int ecart_p, iterator end_
       {
         if ((p_Deg(elem(an).p,currRing)>=o) && (pLmCmp(elem(an).p,p) == cmp_int))
         {
-          return iterator_at(an);
+          return iterator(this, an);
         }
-        return iterator_at(en);
+        return iterator(this, en);
       }
       i=(an+en) / 2;
       if ((p_Deg(elem(i).p,currRing)>=o) && (pLmCmp(elem(i).p,p) == cmp_int)) en=i;
@@ -4746,17 +4746,17 @@ sBasisSet::iterator sBasisSet::find_pos(const poly p, int ecart_p, iterator end_
     if (rField_is_Ring(currRing))
     {
       if (pLmCmp(elem(length).p,p)== -cmp_int)
-        return iterator_at(length+1);
+        return iterator(this, length+1);
       int cmp;
       loop
       {
         if (an >= en-1)
         {
           cmp = pLmCmp(elem(an).p,p);
-          if (cmp == cmp_int)  return iterator_at(an);
-          if (cmp == -cmp_int) return iterator_at(en);
-          if (n_DivBy(pGetCoeff(p), pGetCoeff(elem(an).p), currRing->cf)) return iterator_at(en);
-          return iterator_at(an);
+          if (cmp == cmp_int)  return iterator(this, an);
+          if (cmp == -cmp_int) return iterator(this, en);
+          if (n_DivBy(pGetCoeff(p), pGetCoeff(elem(an).p), currRing->cf)) return iterator(this, en);
+          return iterator(this, an);
         }
         i = (an+en) / 2;
         cmp = pLmCmp(elem(i).p,p);
@@ -4771,18 +4771,18 @@ sBasisSet::iterator sBasisSet::find_pos(const poly p, int ecart_p, iterator end_
     }
     else
     if (pLmCmp(elem(length).p,p)== -cmp_int)
-      return iterator_at(length+1);
+      return iterator(this, length+1);
 
     loop
     {
       if (an >= en-1)
       {
-        if (pLmCmp(elem(an).p,p) == cmp_int) return iterator_at(an);
-        if (pLmCmp(elem(an).p,p) == -cmp_int) return iterator_at(en);
+        if (pLmCmp(elem(an).p,p) == cmp_int) return iterator(this, an);
+        if (pLmCmp(elem(an).p,p) == -cmp_int) return iterator(this, en);
         if ((cmp_int!=1)
         && ((elem(an).ecart)>ecart_p))
-          return iterator_at(an);
-        return iterator_at(en);
+          return iterator(this, an);
+        return iterator(this, en);
       }
       i=(an+en) / 2;
       if (pLmCmp(elem(i).p,p) == cmp_int) en=i;
@@ -4820,7 +4820,7 @@ sBasisSet::iterator sBasisSet::find_divisor_search_bound(poly p, iterator max, k
   // (we want to include the element at fp), one more for the historic
   // "+1" overshoot. Cap at max.
   if (ende.index() + 2 <= max.index())
-    ende = iterator_at(ende.index() + 2);
+    ende = iterator(this, ende.index() + 2);
   else
     ende = max;
   return ende;
@@ -4848,7 +4848,7 @@ sBasisSet::iterator sBasisSet::find_pos_monfirst(const poly p)
 
     if ((op < o)
     || ((op == o) && (pLtCmp(elem(mon).p, p) == -1)))
-      return iterator_at(length + 1);
+      return iterator(this, length + 1);
     int i;
     int an = 0;
     int en = mon;
@@ -4859,8 +4859,8 @@ sBasisSet::iterator sBasisSet::find_pos_monfirst(const poly p)
         op = p_Deg(elem(an).p, currRing);
         if ((op < o)
         || ((op == o) && (pLtCmp(elem(an).p, p) == -1)))
-          return iterator_at(en);
-        return iterator_at(an);
+          return iterator(this, en);
+        return iterator(this, an);
       }
       i = (an + en) / 2;
       op = p_Deg(elem(i).p, currRing);
@@ -4878,7 +4878,7 @@ sBasisSet::iterator sBasisSet::find_pos_monfirst(const poly p)
 
     if ((op < o)
     || ((op == o) && (pLtCmp(elem(length).p, p) == -1)))
-      return iterator_at(length + 1);
+      return iterator(this, length + 1);
     int i;
     int an = 0;
     for (i = 0; i <= length; i++)
@@ -4892,8 +4892,8 @@ sBasisSet::iterator sBasisSet::find_pos_monfirst(const poly p)
         op = p_Deg(elem(an).p, currRing);
         if ((op < o)
         || ((op == o) && (pLtCmp(elem(an).p, p) == -1)))
-          return iterator_at(en);
-        return iterator_at(an);
+          return iterator(this, en);
+        return iterator(this, an);
       }
       i = (an + en) / 2;
       op = p_Deg(elem(i).p, currRing);
