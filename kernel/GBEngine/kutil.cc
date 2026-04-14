@@ -7477,17 +7477,20 @@ void initSyzRules (kStrategy strat)
       omFreeSize(strat->sevSyz,(strat->syzmax)*sizeof(unsigned long));
       omFreeSize(strat->syz,(strat->syzmax)*sizeof(poly));
     }
-    int i, j, k, diff, comp, comp_old, ps=0, ctr=0;
+    int j, diff, comp, comp_old, ps=0, ctr=0;
     /************************************************************
      * computing the length of the syzygy array needed
      ***********************************************************/
-    for(i=1; i < strat->S.size(); i++)
     {
-      // iterator_at(i-1) / iterator_at(i): two-element comparison, not
-      // easily expressed as a range iteration.
-      if (pGetComp(strat->S.iterator_at(i-1)->sig) != pGetComp(strat->S.iterator_at(i)->sig))
+      // Trailing-pair iterator walk: prev=i-1, cur=i. Count is cur.index().
+      auto prev = strat->S.begin();
+      auto cur  = prev; ++cur;
+      for (; cur != strat->S.end(); ++prev, ++cur)
       {
-        ps += i;
+        if (pGetComp(prev->sig) != pGetComp(cur->sig))
+        {
+          ps += cur.index();
+        }
       }
     }
     ps += strat->S.size();
@@ -7502,23 +7505,25 @@ void initSyzRules (kStrategy strat)
 #if defined(DEBUGF5) || defined(DEBUGF51)
     PrintS("------------- GENERATING SYZ RULES NEW ---------------\n");
 #endif
-    i = 1;
     j = 0;
     /************************************************************
      * generating the leading terms of the principal syzygies
      ***********************************************************/
-    while (i < strat->S.size())
     {
+      auto prev = strat->S.begin();
+      auto sit_i = prev; ++sit_i;
+      for (; sit_i != strat->S.end(); ++prev, ++sit_i)
+      {
       /**********************************************************
        * principal syzygies start with component index 2
        * the array syzIdx starts with index 0
        * => the rules for a signature with component comp start
        *    at strat->syz[strat->syzIdx[comp-2]] !
        *********************************************************/
-      if (pGetComp(strat->S.iterator_at(i-1)->sig) != pGetComp(strat->S.iterator_at(i)->sig))
+      if (pGetComp(prev->sig) != pGetComp(sit_i->sig))
       {
-        comp      = pGetComp(strat->S.iterator_at(i)->sig);
-        comp_old  = pGetComp(strat->S.iterator_at(i-1)->sig);
+        comp      = pGetComp(sit_i->sig);
+        comp_old  = pGetComp(prev->sig);
         diff      = comp - comp_old - 1;
         // diff should be zero, but sometimes also the initial generating
         // elements of the input ideal reduce to zero. then there is an
@@ -7537,10 +7542,8 @@ void initSyzRules (kStrategy strat)
         j++;
         LObject Q;
         int pos;
-        auto sit_i = strat->S.iterator_at(i);
-        for (k = 0; k<i; k++)
+        for (auto sit_k = strat->S.begin(); sit_k != sit_i; ++sit_k)
         {
-          auto sit_k = strat->S.iterator_at(k);
           Q.sig          = pOne();
           if(rField_is_Ring(currRing))
             p_SetCoeff(Q.sig,nCopy(p_GetCoeff(sit_k->p,currRing)),currRing);
@@ -7559,13 +7562,16 @@ void initSyzRules (kStrategy strat)
           ctr++;
         }
       }
-      i++;
+      }
     }
     /**************************************************************
     * add syzygies for upcoming first element of new iteration step
     **************************************************************/
     comp      = strat->currIdx;
-    comp_old  = pGetComp(strat->S.iterator_at(i-1)->sig);
+    {
+      auto sit_last = strat->S.end(); --sit_last;
+      comp_old  = pGetComp(sit_last->sig);
+    }
     diff      = comp - comp_old - 1;
     // diff should be zero, but sometimes also the initial generating
     // elements of the input ideal reduce to zero. then there is an
@@ -8376,11 +8382,10 @@ sBasisSet::iterator enterSSba (LObject &p, kStrategy strat, int atR, int atS)
 {
   auto it = strat->S.enter_sba(p, strat, atR, atS);
 #ifdef DEBUGF5
-  int k;
   Print("--- LIST S: %d ---\n",strat->S.size()-1);
-  for(k=0;k < strat->S.size();k++)
+  for (auto sit = strat->S.begin(); sit != strat->S.end(); ++sit)
   {
-    pWrite(strat->S.iterator_at(k)->sig);
+    pWrite(sit->sig);
   }
   PrintS("--- LIST S END ---\n");
 #endif
@@ -8470,24 +8475,26 @@ void replaceInLAndSAndT(LObject &p, int tj, kStrategy strat)
   assume(strat->tailRing == p.tailRing);
   assume(p.pLength == 0 || pLength(p.p) == p.pLength || rIsSyzIndexRing(currRing)); // modulo syzring
 
-  int j, pos;
+  int pos;
   poly tp = strat->T[tj].p;
 
   /* enter p to T set */
   enterT(p, strat);
 
-  for (j = 0; j < strat->S.size(); ++j)
+  auto sit_match = strat->S.end();
+  for (auto sit = strat->S.begin(); sit != strat->S.end(); ++sit)
   {
-    if (pLtCmp(tp, strat->S.iterator_at(j)->p) == 0)
+    if (pLtCmp(tp, sit->p) == 0)
     {
+      sit_match = sit;
       break;
     }
   }
   /* it may be that the exchanged element
    * is until now only in T and not in S */
-  if (j < strat->S.size())
+  if (sit_match != strat->S.end())
   {
-    deleteInS(j, strat);
+    deleteInS(sit_match.index(), strat);
   }
 
   pos = strat->S.find_pos(strat, p.p, p.ecart, strat->S.size()-1);
@@ -9618,14 +9625,19 @@ void updateResult(ideal Q, kStrategy strat)
   }
   // Compact S: remove NULL gaps left by pDelete, matching old idSkipZeroes behavior.
   // This matters because bba continues using S after updateResult returns.
+  // Two-cursor shift (std::remove_if idiom). The write and read cursors
+  // walk raw positions, including deleted/NULL slots, so iterator_at() with
+  // int indices is the natural spelling here.
   {
     int j = 0;
-    for (int k = 0; k < strat->S.size(); k++)
+    const int n = strat->S.size();
+    for (int k = 0; k < n; k++)
     {
-      if (strat->S.iterator_at(k)->p != NULL)
+      auto src = strat->S.iterator_at(k);
+      if (src->p != NULL)
       {
         if (j != k)
-          *strat->S.iterator_at(j) = *strat->S.iterator_at(k);
+          *strat->S.iterator_at(j) = *src;
         j++;
       }
     }
@@ -9662,7 +9674,7 @@ void completeReduce (kStrategy strat, BOOLEAN withT)
     int end_pos=strat->S.size()-1;
     if ((strat->hasFromQ) && (sit->fromQ)) continue; // do not reduce Q_i
     if (strat->ak==0) end_pos=i-1;
-    TObject* T_j = strat->s_2_t(i);
+    TObject* T_j = strat->S.s_2_t(sit, strat);
     if ((T_j != NULL)&&(T_j->p==sit->p))
     {
       L = *T_j;

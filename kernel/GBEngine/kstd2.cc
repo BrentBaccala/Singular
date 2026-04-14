@@ -4055,18 +4055,7 @@ ideal sba (ideal F0, ideal Q,intvec *w,bigintmat *hilb,kStrategy strat)
     }
   }
   // Find the "sigdrop element" and put the same signature as the previous one - do we really need this?? - now i put it on the 0 position - no more comparing needed
-  #if 0
-  if(strat->sigdrop && rField_is_Ring(currRing))
-  {
-    for(k=strat->S.size()-1;k>=0;k--)
-    {
-      auto sit_k = strat->S.iterator_at(k);
-      printf("\nsig[%i] = ",i);pWrite(sit_k->sig);
-      if(sit_k->sig == NULL)
-        sit_k->sig = pCopy(strat->S.iterator_at(k-1)->sig);
-    }
-  }
-  #endif
+  // (historical #if 0 block deleted during iterator_at(int) migration)
   //Never do this - you will damage S
   //idSkipZeroes(strat->Shdl);
   //idPrint(strat->Shdl);
