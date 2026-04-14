@@ -682,6 +682,49 @@ struct SElement {
  *                     Used by sba() over rings.
  *   SORDER_APPEND:    append at end, no sorting (parallel phase).
  *                     erase() sets deleted flag (no shifting).
+ *
+ * --- Iterator invalidation contract ------------------------------------
+ *
+ * Iterators are position-based handles {sBasisSet*, int pos_}. Because
+ * the underlying BlockArray is append-only for storage blocks and never
+ * reallocates existing blocks, iterators remain valid across BlockArray
+ * directory reallocation — their held integer index stays correct in
+ * the absence of set-level mutations listed below.
+ *
+ * Mutation operations have the following effects on outstanding iterators:
+ *
+ * 1. Append (enter_bba / push_back at end / insert() when order_ ==
+ *    SORDER_APPEND): does NOT invalidate any existing iterator. An
+ *    iterator previously captured at end() now validly refers to the
+ *    first appended element. This intentionally diverges from STL
+ *    vector::end() semantics, and is relied upon by the parallel
+ *    survivor-drain path (e.g. sLObject::checked, to land in Stage B).
+ *
+ * 2. Insert-in-middle (enter_bba / insert() in sorted mode at a
+ *    find_pos-computed position): invalidates all iterators at
+ *    positions >= the insert position. Iterators at positions < insert
+ *    remain valid.
+ *
+ * 3. Non-lazy erase (erase_and_next in SORDER_STANDARD / SORDER_MONFIRST,
+ *    or erase() when not in APPEND mode): shifts elements down.
+ *    Invalidates all iterators at positions > the erased position.
+ *    The iterator AT the erased position is returned by erase_and_next
+ *    repointed at whatever element slid into the vacated slot (or end()
+ *    if the erased element was last).
+ *
+ * 4. Lazy erase (erase() in SORDER_APPEND mode): sets the deleted
+ *    tombstone flag on the element. Invalidates only the iterator at
+ *    the tombstoned position — it becomes a "tombstone iterator" whose
+ *    operator++ will skip forward past all consecutive tombstones and
+ *    land on the next live element.
+ *
+ * 5. Reorder (reorder()): invalidates ALL outstanding iterators. Callers
+ *    must drop every stored iterator before calling reorder().
+ *
+ * 6. Responsibility is on callers. There is no runtime enforcement of
+ *    these rules; violations are undefined behaviour (in practice: a
+ *    stale iterator refers to a different logical element than the one
+ *    the caller captured).
  */
 enum SOrderMode { SORDER_STANDARD, SORDER_MONFIRST, SORDER_APPEND };
 
