@@ -516,17 +516,19 @@ public:
   // constructor to avoid exposing an int->iterator adapter at the class
   // API level. old_pos > new_pos for move_forward; old_pos < new_pos for
   // move_backward.
-  void move_forward(int old_pos, int new_pos) {
+  iterator move_forward(int old_pos, int new_pos) {
     assume(old_pos >= new_pos);
     SElement saved = elem(old_pos);
     for (int k = old_pos; k > new_pos; k--) elem(k) = elem(k - 1);
     elem(new_pos) = saved;
+    return iterator(this, new_pos);
   }
-  void move_backward(int old_pos, int new_pos) {
+  iterator move_backward(int old_pos, int new_pos) {
     assume(old_pos <= new_pos);
     SElement saved = elem(old_pos);
     for (int k = old_pos; k < new_pos; k++) elem(k) = elem(k + 1);
     elem(new_pos) = saved;
+    return iterator(this, new_pos);
   }
 
   // Construct an iterator at a raw index (no skip).

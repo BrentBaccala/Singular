@@ -647,31 +647,29 @@ int tgb_pair_better_gen2 (const void *ap, const void *bp)
   return (-tgb_pair_better_gen (ap, bp));
 }
 
-int kFindDivisibleByInS_easy (kStrategy strat, const red_object & obj)
+sBasisSet::iterator kFindDivisibleByInS_easy (kStrategy strat, const red_object & obj)
 {
   poly p = obj.p;
-  if ((strat->syzComp>0) && (pGetComp(p)>strat->syzComp)) return -1;
+  if ((strat->syzComp>0) && (pGetComp(p)>strat->syzComp)) return strat->S.end();
   long not_sev = ~obj.sev;
-  int i = 0;
-  for(auto sit = strat->S.begin(); sit != strat->S.end(); ++sit, i++)
+  for(auto sit = strat->S.begin(); sit != strat->S.end(); ++sit)
   {
     if(pLmShortDivisibleBy (sit->p, sit->sev, p, not_sev))
-      return i;
+      return sit;
   }
-  return -1;
+  return strat->S.end();
 }
 
-int kFindDivisibleByInS_easy (kStrategy strat, poly p, long sev)
+sBasisSet::iterator kFindDivisibleByInS_easy (kStrategy strat, poly p, long sev)
 {
-  if ((strat->syzComp>0) && (pGetComp(p)>strat->syzComp)) return -1;
+  if ((strat->syzComp>0) && (pGetComp(p)>strat->syzComp)) return strat->S.end();
   long not_sev = ~sev;
-  int i = 0;
-  for(auto sit = strat->S.begin(); sit != strat->S.end(); ++sit, i++)
+  for(auto sit = strat->S.begin(); sit != strat->S.end(); ++sit)
   {
     if(pLmShortDivisibleBy (sit->p, sit->sev, p, not_sev))
-      return i;
+      return sit;
   }
-  return -1;
+  return strat->S.end();
 }
 
 static int
@@ -883,18 +881,15 @@ BOOLEAN lenS_correct (kStrategy strat)
 
 static void cleanS (kStrategy strat, slimgb_alg * c)
 {
-  int i = 0;
   LObject P;
-  while(i < strat->S.size())
+  auto sit = strat->S.begin();
+  while(sit != strat->S.end())
   {
-    auto sit = strat->S.unsafe_iterator_at_int(i);
     P.p = sit->p;
     P.sev = sit->sev;
-    //int dummy=strat->S.size()-1;
-    //if(kFindDivisibleByInS(strat,&dummy,&P)!=i)
-    if(kFindDivisibleByInS_easy (strat, P.p, P.sev) != i)
+    if(kFindDivisibleByInS_easy (strat, P.p, P.sev) != sit)
     {
-      deleteInS (i, strat);
+      sit = strat->S.erase_and_next(sit);
       //remember destroying poly
       BOOLEAN found = FALSE;
       int j;
@@ -911,7 +906,7 @@ static void cleanS (kStrategy strat, slimgb_alg * c)
       //remember additional reductors
     }
     else
-      i++;
+      ++sit;
   }
 }
 
@@ -934,7 +929,6 @@ add_to_reductors (slimgb_alg * c, poly h, int len, int ecart,
   //inDebug(h);
   assume (lenS_correct (c->strat));
   assume (len == pLength (h));
-  int i;
 //   if (c->isDifficultField)
 //        i=simple_posInS(c->strat,h,pSLength(h,len),c->isDifficultField);
 //   else
@@ -958,15 +952,14 @@ add_to_reductors (slimgb_alg * c, poly h, int len, int ecart,
     //pNormalize (P.p);
   }
   wlen_type pq = pQuality (h, c, len);
-  i = simple_posInS (c->strat, h, len, pq);
+  auto sit = c->strat->S.simple_find_pos(h, len, pq, c->strat);
   c->strat->enterS (P, c->strat, c->strat->T.size()-1, c->strat->S.end());
   {
+    int target = sit.index();
     int appended_pos = c->strat->S.size() - 1;
-    if (i < appended_pos)
-      c->strat->S.move_forward(appended_pos, i);
+    if (target < appended_pos)
+      c->strat->S.move_forward(appended_pos, target);
   }
-
-  auto sit = c->strat->S.unsafe_iterator_at_int(i);
   sit->length = len;
   assume (pLength (sit->p) == sit->length);
   if(c->strat->use_lenSw)
@@ -1195,29 +1188,6 @@ static void add_later (poly p, const char *prot, slimgb_alg * c)
 static inline int simple_posInS (kStrategy strat, poly p, int len, wlen_type wlen)
 {
   return strat->S.simple_find_pos(p, len, wlen, strat).index();
-}
-
-/*2
- *if the leading term of p
- *divides the leading term of some S[i] it will be canceled
- */
-static inline void
-clearS (poly p, unsigned long p_sev, int l, int *at, int *k, kStrategy strat)
-{
-  assume (p_sev == pGetShortExpVector (p));
-  auto sit_at = strat->S.unsafe_iterator_at_int(*at);
-  if(!pLmShortDivisibleBy (p, p_sev, sit_at->p, ~sit_at->sev))
-    return;
-  if(l >= sit_at->length)
-    return;
-  if(TEST_OPT_PROT)
-    PrintS ("!");
-  mflush ();
-  //pDelete(&strat->S[*at].p);
-  deleteInS ((*at), strat);
-  (*at)--;
-  (*k)--;
-//  assume(lenS_correct(strat));
 }
 
 static int iq_crit (const void *ap, const void *bp)
@@ -1491,10 +1461,10 @@ sorted_pair_node **add_to_basis_ideal_quotient (poly h, slimgb_alg * c,
             assume (pLength (short_s) == 1);
             if(TEST_V_UPTORADICAL)
               monomial_root (short_s, c->r);
-            int iS = kFindDivisibleByInS_easy (c->strat, short_s,
-                                               p_GetShortExpVector (short_s,
-                                                                    c->r));
-            if(iS < 0)
+            auto iS = kFindDivisibleByInS_easy (c->strat, short_s,
+                                                p_GetShortExpVector (short_s,
+                                                                     c->r));
+            if(iS == c->strat->S.end())
             {
               //PrintS("N");
               if(TRUE)
@@ -1507,7 +1477,7 @@ sorted_pair_node **add_to_basis_ideal_quotient (poly h, slimgb_alg * c,
             }
             else
             {
-              if(c->strat->S.unsafe_iterator_at_int(iS)->length > 1)
+              if(iS->length > 1)
               {
                 //PrintS("O");
                 if(TRUE)
@@ -1729,7 +1699,6 @@ static poly redNF2 (poly h, slimgb_alg * c, int &len, number & m, int n)
   {
     return h;
   }
-  int j;
 
   LObject P (h);
   P.SetShortExpVector ();
@@ -1745,11 +1714,9 @@ static poly redNF2 (poly h, slimgb_alg * c, int &len, number & m, int n)
   loop
   {
     //int dummy=strat->S.size()-1;
-    j = kFindDivisibleByInS_easy (strat, P.p, P.sev);
-    //j=kFindDivisibleByInS(strat,&dummy,&P);
-    if(j >= 0)
+    auto sit_j = kFindDivisibleByInS_easy (strat, P.p, P.sev);
+    if(sit_j != strat->S.end())
     {
-      auto sit_j = strat->S.unsafe_iterator_at_int(j);
       if((!n) ||
                     ((sit_j->length <= n) &&
                      ((!strat->use_lenSw) || (sit_j->wlength <= n))))
@@ -2375,13 +2342,12 @@ noro_red_mon (poly t, BOOLEAN force_unique, NoroCache * cache, slimgb_alg * c)
   }
 
   unsigned long sev = p_GetShortExpVector (t, currRing);
-  int i = kFindDivisibleByInS_easy (c->strat, t, sev);
-  if(i >= 0)
+  auto sit = kFindDivisibleByInS_easy (c->strat, t, sev);
+  if(sit != c->strat->S.end())
   {
     number coef_bak = p_GetCoeff (t, c->r);
 
     p_SetCoeff (t, npInit (1), c->r);
-    auto sit = c->strat->S.unsafe_iterator_at_int(i);
     assume (npIsOne (p_GetCoeff (sit->p, c->r)));
     number coefstrat = p_GetCoeff (sit->p, c->r);
 
@@ -2864,7 +2830,7 @@ static void go_on (slimgb_alg * c)
     int k;
     for(k = 0; k < i; k++)
     {
-      assume (kFindDivisibleByInS_easy (c->strat, buf[k]) < 0);
+      assume (kFindDivisibleByInS_easy (c->strat, buf[k]) == c->strat->S.end());
       int k2;
       for(k2 = 0; k2 < i; k2++)
       {
@@ -2946,7 +2912,6 @@ static poly redNFTail (poly h, const int sl, kStrategy strat, int len)
     return h;
   BOOLEAN nc = rIsPluralRing (currRing);
 
-  int j;
   poly res = h;
   poly act = res;
   LObject P (pNext (h));
@@ -2965,9 +2930,8 @@ static poly redNFTail (poly h, const int sl, kStrategy strat, int len)
     P.SetShortExpVector ();
     loop
     {
-      //int dummy=strat->S.size()-1;
-      j = kFindDivisibleByInS_easy (strat, P.p, P.sev); //kFindDivisibleByInS(strat,&dummy,&P);
-      if(j >= 0)
+      auto sit_j = kFindDivisibleByInS_easy (strat, P.p, P.sev);
+      if(sit_j != strat->S.end())
       {
 #ifdef REDTAIL_PROT
         PrintS ("r");
@@ -2979,12 +2943,10 @@ static poly redNFTail (poly h, const int sl, kStrategy strat, int len)
           PrintS ("red tail:");
           wrp (h);
           PrintS (" with ");
-          auto sit_j_dbg = strat->S.unsafe_iterator_at_int(j);
-          wrp (sit_j_dbg->p);
+          wrp (sit_j->p);
         }
 #endif
         number coef;
-        auto sit_j = strat->S.unsafe_iterator_at_int(j);
         pTest (sit_j->p);
 #ifdef HAVE_PLURAL
         if(nc)
@@ -4128,9 +4090,9 @@ multi_reduction_lls_trick (red_object * los, int /*losl*/, slimgb_alg * c,
   BOOLEAN swap_roles;           //from reduce_by, to_reduce_u if fromS
   if(erg.fromS)
   {
-    if(pLmEqual (c->strat->S.unsafe_iterator_at_int(erg.reduce_by)->p, los[erg.to_reduce_u].p))
+    if(pLmEqual (erg.s_pos->p, los[erg.to_reduce_u].p))
     {
-      wlen_type quality_a = quality_of_pos_in_strat_S (erg.reduce_by, c);
+      wlen_type quality_a = quality_of_pos_in_strat_S (erg.s_pos.index(), c);
       int best = erg.to_reduce_u + 1;
 /*
       for (i=erg.to_reduce_u;i>=erg.to_reduce_l;i--)
@@ -4171,11 +4133,11 @@ multi_reduction_lls_trick (red_object * los, int /*losl*/, slimgb_alg * c,
     {
       if(erg.to_reduce_u > erg.to_reduce_l)
       {
-        wlen_type quality_a = quality_of_pos_in_strat_S (erg.reduce_by, c);
+        wlen_type quality_a = quality_of_pos_in_strat_S (erg.s_pos.index(), c);
 #ifdef HAVE_PLURAL
         if((c->nc) && (!(rIsSCA (c->r))))
           quality_a =
-            quality_of_pos_in_strat_S_mult_high (erg.reduce_by,
+            quality_of_pos_in_strat_S_mult_high (erg.s_pos.index(),
                                                  los[erg.to_reduce_u].p, c);
 #endif
         int best = erg.to_reduce_u + 1;
@@ -4203,7 +4165,7 @@ multi_reduction_lls_trick (red_object * los, int /*losl*/, slimgb_alg * c,
       else
       {
         assume (erg.to_reduce_u == erg.to_reduce_l);
-        wlen_type quality_a = quality_of_pos_in_strat_S (erg.reduce_by, c);
+        wlen_type quality_a = quality_of_pos_in_strat_S (erg.s_pos.index(), c);
         wlen_type qc = los[erg.to_reduce_u].guess_quality (c);
         if(qc < 0)
           PrintS ("Wrong wlen_type");
@@ -4227,7 +4189,7 @@ multi_reduction_lls_trick (red_object * los, int /*losl*/, slimgb_alg * c,
             {
               if(qc < quality_a / 2)
                 exp = TRUE;
-              else if(erg.reduce_by < c->n / 4)
+              else if(erg.s_pos.index() < c->n / 4)
                 exp = TRUE;
             }
             if(exp)
@@ -4302,9 +4264,9 @@ multi_reduction_lls_trick (red_object * los, int /*losl*/, slimgb_alg * c,
     //kBucketClear(los[bp].bucket,&clear_into,&new_length);
     new_length = los[bp].clear_to_poly ();
     clear_into = los[bp].p;
-    auto sit_rb = c->strat->S.unsafe_iterator_at_int(erg.reduce_by);
+    auto sit_rb = erg.s_pos;
     poly p = sit_rb->p;
-    int j = erg.reduce_by;
+    int j = erg.s_pos.index();
     int old_length = sit_rb->length; // in view of S
     los[bp].p = p;
     kBucketInit (los[bp].bucket, p, old_length);
@@ -4352,7 +4314,7 @@ multi_reduction_lls_trick (red_object * los, int /*losl*/, slimgb_alg * c,
         tdeg = c->pTotaldegree (clear_into);
       }
     }
-    auto sit_j = c->strat->S.unsafe_iterator_at_int(j);
+    auto sit_j = erg.s_pos;
     sit_j->p = clear_into;
     sit_j->length = new_length;
 
@@ -4367,7 +4329,7 @@ multi_reduction_lls_trick (red_object * los, int /*losl*/, slimgb_alg * c,
     else
       pNorm (clear_into);
 #ifdef FIND_DETERMINISTIC
-    erg.reduce_by = j;
+    // erg.s_pos already points at j (no move); nothing to update.
     //resort later see diploma thesis, find_in_S must be deterministic
     //during multireduction if spolys are only in the span of the
     //input polys
@@ -4375,9 +4337,8 @@ multi_reduction_lls_trick (red_object * los, int /*losl*/, slimgb_alg * c,
     if(new_pos < j)
     {
       if(c->strat->honey)
-        c->strat->S.unsafe_iterator_at_int(j)->ecart = tdeg_full - tdeg;
-      c->strat->S.move_forward(j, new_pos);
-      erg.reduce_by = new_pos;
+        erg.s_pos->ecart = tdeg_full - tdeg;
+      erg.s_pos = c->strat->S.move_forward(j, new_pos);
     }
 #endif
   }
@@ -4477,11 +4438,12 @@ multi_reduction_find (red_object * los, int losl, slimgb_alg * c, int startf,
     assume ((i == losl - 1) || (pLmCmp (los[i].p, los[i + 1].p) <= 0));
     #endif
     assume (is_valid_ro (los[i]));
-    j = kFindDivisibleByInS_easy (strat, los[i]);
-    if(j >= 0)
+    auto s_it = kFindDivisibleByInS_easy (strat, los[i]);
+    if(s_it != strat->S.end())
     {
       erg.to_reduce_u = i;
-      erg.reduce_by = j;
+      erg.s_pos = s_it;
+      erg.reduce_by = 0;  // non-negative; error signal is reserved (-1 unmet)
       erg.fromS = TRUE;
       int i2 = fwbw (los, i);
       assume (pLmEqual (los[i].p, los[i2].p));
@@ -4900,16 +4862,15 @@ void multi_reduce_step (find_erg & erg, red_object * r, slimgb_alg * c)
   id++;
   unsigned long sev;
   BOOLEAN lt_changed = FALSE;
-  int rn = erg.reduce_by;
+  int rn = erg.reduce_by;  // los index (valid only when !fromS)
   poly red;
   int red_len;
   simple_reducer *pointer;
   BOOLEAN work_on_copy = FALSE;
   if(erg.fromS)
   {
-    auto sit_rn = c->strat->S.unsafe_iterator_at_int(rn);
-    red = sit_rn->p;
-    red_len = sit_rn->length;
+    red = erg.s_pos->p;
+    red_len = erg.s_pos->length;
     assume (red_len == (int)pLength (red));
   }
   else
@@ -4979,7 +4940,7 @@ void multi_reduce_step (find_erg & erg, red_object * r, slimgb_alg * c)
     int ecart;
     if(erg.fromS)
     {
-      ecart = c->strat->S.unsafe_iterator_at_int(erg.reduce_by)->ecart;
+      ecart = erg.s_pos->ecart;
     }
     else
     {

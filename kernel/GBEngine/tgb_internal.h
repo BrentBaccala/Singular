@@ -322,9 +322,9 @@ sorted_pair_node* quick_pop_pair(slimgb_alg* c);
 sorted_pair_node* top_pair(slimgb_alg* c);
 sorted_pair_node** add_to_basis_ideal_quotient(poly h, slimgb_alg* c, int* ip);//, BOOLEAN new_pairs=TRUE);
 sorted_pair_node**  spn_merge(sorted_pair_node** p, int pn,sorted_pair_node **q, int qn,slimgb_alg* c);
-int kFindDivisibleByInS_easy(kStrategy strat,const red_object & obj);
+sBasisSet::iterator kFindDivisibleByInS_easy(kStrategy strat,const red_object & obj);
 int tgb_pair_better_gen2(const void* ap,const void* bp);
-int kFindDivisibleByInS_easy(kStrategy strat,poly p, long sev);
+sBasisSet::iterator kFindDivisibleByInS_easy(kStrategy strat,poly p, long sev);
 /**
    makes on each red_object in a region a single_step
  **/
@@ -371,7 +371,9 @@ struct find_erg
   int expand_length;
   int to_reduce_u;
   int to_reduce_l;
-  int reduce_by;//index of reductor
+  int reduce_by;//index of reductor into los (used only when fromS==FALSE;
+                //also holds -1 as the "no reductor found" error code).
+  sBasisSet::iterator s_pos;//reductor iterator in strat->S (used only when fromS==TRUE).
   BOOLEAN fromS;//else from los
 
 };
