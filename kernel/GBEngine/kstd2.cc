@@ -2989,9 +2989,9 @@ ideal bba (ideal F, ideal Q,intvec *w,bigintmat *hilb,kStrategy strat)
         strat->P.SetShortExpVector();
         enterT(strat->P, strat);
         if (rField_is_Ring(currRing))
-          superenterpairs(strat->P.p,strat->S.size()-1,strat->P.ecart,pos.index(),strat, strat->T.size()-1);
+          superenterpairs(strat->P.p,strat->S.size()-1,strat->P.ecart,pos,strat, strat->T.size()-1);
         else
-          enterpairs(strat->P.p,strat->S.size()-1,strat->P.ecart,pos.index(),strat, strat->T.size()-1);
+          enterpairs(strat->P.p,strat->S.size()-1,strat->P.ecart,pos,strat, strat->T.size()-1);
         // posInS only depends on the leading term
         strat->enterS(strat->P, strat, strat->T.size()-1, strat->S.end());
 #if 0
@@ -3024,9 +3024,9 @@ ideal bba (ideal F, ideal Q,intvec *w,bigintmat *hilb,kStrategy strat)
           auto pos=strat->S.find_pos(strat->P.p,strat->P.ecart);
           enterT(strat->P, strat);
           if (rField_is_Ring(currRing))
-            superenterpairs(strat->P.p,strat->S.size()-1,strat->P.ecart,pos.index(),strat, strat->T.size()-1);
+            superenterpairs(strat->P.p,strat->S.size()-1,strat->P.ecart,pos,strat, strat->T.size()-1);
           else
-            enterpairs(strat->P.p,strat->S.size()-1,strat->P.ecart,pos.index(),strat, strat->T.size()-1);
+            enterpairs(strat->P.p,strat->S.size()-1,strat->P.ecart,pos,strat, strat->T.size()-1);
           strat->enterS(strat->P, strat, strat->T.size()-1, strat->S.end());
         }
       }
@@ -3713,9 +3713,9 @@ ideal sba (ideal F0, ideal Q,intvec *w,bigintmat *hilb,kStrategy strat)
       pWrite(strat->P.sig);
       */
       if (rField_is_Ring(currRing))
-        superenterpairsSig(strat->P.p,strat->P.sig,strat->S.size(),strat->S.size()-1,strat->P.ecart,pos,strat, strat->T.size()-1);
+        superenterpairsSig(strat->P.p,strat->P.sig,strat->S.size(),strat->S.size()-1,strat->P.ecart,end_snapshot,strat, strat->T.size()-1);
       else
-        enterpairsSig(strat->P.p,strat->P.sig,strat->S.size(),strat->S.size()-1,strat->P.ecart,pos,strat, strat->T.size()-1);
+        enterpairsSig(strat->P.p,strat->P.sig,strat->S.size(),strat->S.size()-1,strat->P.ecart,end_snapshot,strat, strat->T.size()-1);
       if(rField_is_Ring(currRing) && strat->sigdrop)
         break;
       if(rField_is_Ring(currRing))
@@ -4960,7 +4960,7 @@ ideal bbaShift(ideal F, ideal Q,intvec *w,bigintmat *hilb,kStrategy strat)
       if ((!TEST_OPT_IDLIFT) || (pGetComp(strat->P.p) <= strat->syzComp))
       {
         enterT(strat->P, strat);
-        enterpairsShift(strat->P.p,strat->S.size()-1,strat->P.ecart,pos.index(),strat, strat->T.size()-1);
+        enterpairsShift(strat->P.p,strat->S.size()-1,strat->P.ecart,pos,strat, strat->T.size()-1);
         // posInS only depends on the leading term
         strat->enterS(strat->P, strat, strat->T.size()-1, strat->S.end());
         if (!strat->rightGB)
@@ -4982,7 +4982,7 @@ ideal bbaShift(ideal F, ideal Q,intvec *w,bigintmat *hilb,kStrategy strat)
           // and add pairs
           auto pos=strat->S.find_pos(strat->P.p,strat->P.ecart);
           enterT(strat->P, strat);
-          enterpairsShift(strat->P.p,strat->S.size()-1,strat->P.ecart,pos.index(),strat, strat->T.size()-1);
+          enterpairsShift(strat->P.p,strat->S.size()-1,strat->P.ecart,pos,strat, strat->T.size()-1);
           strat->enterS(strat->P, strat, strat->T.size()-1, strat->S.end());
           if (!strat->rightGB)
             enterTShift(strat->P,strat);

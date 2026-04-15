@@ -4494,20 +4494,18 @@ void enterExtendedSpolySig(poly h,poly hSig,kStrategy strat)
   nDelete(&zero);
 }
 
-void clearSbatch (poly h,int k,int pos,kStrategy strat)
+void clearSbatch (poly h,int k,sBasisSet::iterator pos,kStrategy strat)
 {
   if ( (!strat->fromT)
   && ((strat->syzComp==0)
     ||(pGetComp(h)<=strat->syzComp)
   ))
   {
-    // Print("start clearS k=%d, pos=%d, sl=%d\n",k,pos,strat->S.size()-1);
     // Caller contract: k == strat->S.size()-1 on entry; iterator range is safe.
     assume(k == strat->S.size() - 1);
     unsigned long h_sev = pGetShortExpVector(h);
-    for (auto it = strat->S.iterator_at(pos); it != strat->S.end(); ++it)
+    for (auto it = pos; it != strat->S.end(); ++it)
       strat->S.clear_if_divisible(h, h_sev, it, strat);
-    // Print("end clearS sl=%d\n",strat->S.size()-1);
   }
 }
 
@@ -4515,7 +4513,7 @@ void clearSbatch (poly h,int k,int pos,kStrategy strat)
 * Generates a sufficient set of spolys (maybe just a finite generating
 * set of the syzygys)
 */
-void superenterpairs (poly h,int k,int ecart,int pos,kStrategy strat, int atR)
+void superenterpairs (poly h,int k,int ecart,sBasisSet::iterator pos,kStrategy strat, int atR)
 {
   assume (rField_is_Ring(currRing));
 #if HAVE_SHIFTBBA
@@ -4528,7 +4526,7 @@ void superenterpairs (poly h,int k,int ecart,int pos,kStrategy strat, int atR)
   clearSbatch(h, k, pos, strat);
 }
 
-void superenterpairsSig (poly h,poly hSig,int hFrom,int k,int ecart,int pos,kStrategy strat, int atR)
+void superenterpairsSig (poly h,poly hSig,int hFrom,int k,int ecart,sBasisSet::iterator pos,kStrategy strat, int atR)
 {
   assume (rField_is_Ring(currRing));
   // enter also zero divisor * poly, if this is non zero and of smaller degree
@@ -4545,7 +4543,7 @@ void superenterpairsSig (poly h,poly hSig,int hFrom,int k,int ecart,int pos,kStr
 *(s[0],h),...,(s[k],h) will be put to the pairset L(via initenterpairs)
 *superfluous elements in S will be deleted
 */
-void enterpairs (poly h,int k,int ecart,int pos,kStrategy strat, int atR)
+void enterpairs (poly h,int k,int ecart,sBasisSet::iterator pos,kStrategy strat, int atR)
 {
   assume (!rField_is_Ring(currRing));
   initenterpairs(h,k,ecart,0,strat, atR);
@@ -4556,7 +4554,7 @@ void enterpairs (poly h,int k,int ecart,int pos,kStrategy strat, int atR)
     // Caller contract: k == strat->S.size()-1 on entry.
     assume(k == strat->S.size() - 1);
     unsigned long h_sev = pGetShortExpVector(h);
-    for (auto it = strat->S.iterator_at(pos); it != strat->S.end(); ++it)
+    for (auto it = pos; it != strat->S.end(); ++it)
       strat->S.clear_if_divisible(h, h_sev, it, strat);
   }
 }
@@ -4567,7 +4565,7 @@ void enterpairs (poly h,int k,int ecart,int pos,kStrategy strat, int atR)
 *this is a special variant of signature-based algorithms including the
 *signatures for criteria checks
 */
-void enterpairsSig (poly h,poly hSig,int hFrom,int k,int ecart,int pos,kStrategy strat, int atR)
+void enterpairsSig (poly h,poly hSig,int hFrom,int k,int ecart,sBasisSet::iterator pos,kStrategy strat, int atR)
 {
   assume (!rField_is_Ring(currRing));
   initenterpairsSig(h,hSig,hFrom,k,ecart,0,strat, atR);
@@ -4578,7 +4576,7 @@ void enterpairsSig (poly h,poly hSig,int hFrom,int k,int ecart,int pos,kStrategy
     // Caller contract: k == strat->S.size()-1 on entry.
     assume(k == strat->S.size() - 1);
     unsigned long h_sev = pGetShortExpVector(h);
-    for (auto it = strat->S.iterator_at(pos); it != strat->S.end(); ++it)
+    for (auto it = pos; it != strat->S.end(); ++it)
       strat->S.clear_if_divisible(h, h_sev, it, strat);
   }
 }
@@ -4587,7 +4585,7 @@ void enterpairsSig (poly h,poly hSig,int hFrom,int k,int ecart,int pos,kStrategy
 *(s[0],h),...,(s[k],h) will be put to the pairset L(via initenterpairs)
 *superfluous elements in S will be deleted
 */
-void enterpairsSpecial (poly h,int k,int ecart,int pos,kStrategy strat, int atR = -1)
+void enterpairsSpecial (poly h,int k,int ecart,sBasisSet::iterator pos,kStrategy strat, int atR = -1)
 {
   const int iCompH = pGetComp(h);
 
@@ -4647,7 +4645,7 @@ void enterpairsSpecial (poly h,int k,int ecart,int pos,kStrategy strat, int atR 
     // Caller contract: k == strat->S.size()-1 on entry.
     assume(k == strat->S.size() - 1);
     unsigned long h_sev = pGetShortExpVector(h);
-    for (auto it = strat->S.iterator_at(pos); it != strat->S.end(); ++it)
+    for (auto it = pos; it != strat->S.end(); ++it)
       strat->S.clear_if_divisible(h, h_sev, it, strat);
   }
 }
@@ -7755,7 +7753,7 @@ void initSSpecial (ideal F, ideal Q, ideal P,kStrategy strat)
           h.sev = pGetShortExpVector(h.p);
           h.SetpFDeg();
           auto pos_it = strat->S.find_pos(h.p,h.ecart);
-          enterpairsSpecial(h.p,strat->S.size()-1,h.ecart,pos_it.index(),strat,strat->T.size());
+          enterpairsSpecial(h.p,strat->S.size()-1,h.ecart,pos_it,strat,strat->T.size());
           strat->enterS(h, strat, strat->T.size(), strat->S.end());
           enterT(h,strat);
         }
@@ -7888,7 +7886,7 @@ void initSSpecialSba (ideal F, ideal Q, ideal P,kStrategy strat)
           h.sev = pGetShortExpVector(h.p);
           h.SetpFDeg();
           auto pos_it = strat->S.find_pos(h.p,h.ecart);
-          enterpairsSpecial(h.p,strat->S.size()-1,h.ecart,pos_it.index(),strat,strat->T.size());
+          enterpairsSpecial(h.p,strat->S.size()-1,h.ecart,pos_it,strat,strat->T.size());
           strat->enterS(h, strat, strat->T.size(), strat->S.end());
           enterT(h,strat);
         }
@@ -8527,12 +8525,12 @@ void replaceInLAndSAndT(LObject &p, int tj, kStrategy strat)
   }
 #ifdef HAVE_SHIFTBBA
   if (rIsLPRing(currRing))
-    enterpairsShift(p.p, strat->S.size()-1, p.ecart, pos.index(), strat, strat->T.size()-1); // TODO LP
+    enterpairsShift(p.p, strat->S.size()-1, p.ecart, pos, strat, strat->T.size()-1); // TODO LP
   else
 #endif
   {
     /* generate new pairs with p, probably removing older, now useless pairs */
-    superenterpairs(p.p, strat->S.size()-1, p.ecart, pos.index(), strat, strat->T.size()-1);
+    superenterpairs(p.p, strat->S.size()-1, p.ecart, pos, strat, strat->T.size()-1);
   }
   /* enter p to S set */
   strat->enterS(p, strat, strat->T.size()-1, strat->S.end());
@@ -12332,7 +12330,7 @@ void initenterstrongPairsShift (poly h,int k,int ecart,int isFromQ, kStrategy st
 *superfluous elements in S will be deleted
 */
 #ifdef HAVE_SHIFTBBA
-void enterpairsShift (poly h,int k,int ecart,int pos,kStrategy strat, int atR)
+void enterpairsShift (poly h,int k,int ecart,sBasisSet::iterator pos,kStrategy strat, int atR)
 {
   /* h is strat->P.p, that is LObject with LM in currRing and Tail in tailRing */
   /* Q: what is exactly the strat->fromT ? A: a local case trick; don't need it yet*/
@@ -12346,7 +12344,7 @@ void enterpairsShift (poly h,int k,int ecart,int pos,kStrategy strat, int atR)
     // Caller contract: k == strat->S.size()-1 on entry.
     assume(k == strat->S.size() - 1);
     unsigned long h_sev = pGetShortExpVector(h);
-    for (auto it = strat->S.iterator_at(pos); it != strat->S.end(); ++it)
+    for (auto it = pos; it != strat->S.end(); ++it)
     {
       // TODO this currently doesn't clear all possible elements because of commutative division
       if (strat->rightGB && strat->hasFromQ && it->fromQ) continue;

@@ -2031,9 +2031,9 @@ ideal mora (ideal F, ideal Q,intvec *w,bigintmat *hilb,kStrategy strat)
       enterT(strat->P,strat);
       // build new pairs
       if (rField_is_Ring(currRing))
-        superenterpairs(strat->P.p,strat->S.size()-1,strat->P.ecart,0,strat, strat->T.size()-1);
+        superenterpairs(strat->P.p,strat->S.size()-1,strat->P.ecart,strat->S.begin(),strat, strat->T.size()-1);
       else
-        enterpairs(strat->P.p,strat->S.size()-1,strat->P.ecart,0,strat, strat->T.size()-1);
+        enterpairs(strat->P.p,strat->S.size()-1,strat->P.ecart,strat->S.begin(),strat, strat->T.size()-1);
       // put in S
       strat->enterS(strat->P, strat, strat->T.size()-1, strat->S.end());
       // apply hilbert criterion

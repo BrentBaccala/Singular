@@ -1319,15 +1319,15 @@ int redRing_Z (LObject* h,kStrategy strat);
 int redRiloc (LObject* h,kStrategy strat);
 void enterExtendedSpoly(poly h,kStrategy strat);
 void enterExtendedSpolySig(poly h,poly hSig,kStrategy strat);
-void superenterpairs (poly h,int k,int ecart,int pos,kStrategy strat, int atR = -1);
-void superenterpairsSig (poly h,poly hSig,int hFrom,int k,int ecart,int pos,kStrategy strat, int atR = -1);
+void superenterpairs (poly h,int k,int ecart,sBasisSet::iterator pos,kStrategy strat, int atR = -1);
+void superenterpairsSig (poly h,poly hSig,int hFrom,int k,int ecart,sBasisSet::iterator pos,kStrategy strat, int atR = -1);
 int redLazy (LObject* h,kStrategy strat);
 int redHomog (LObject* h,kStrategy strat);
 int redSig (LObject* h,kStrategy strat);
 int redSigRing (LObject* h,kStrategy strat);
 //adds hSig to be able to check with F5's criteria when entering pairs!
-void enterpairsSig (poly h, poly hSig, int from, int k, int ec, int pos,kStrategy strat, int atR = -1);
-void enterpairs (poly h, int k, int ec, int pos,kStrategy strat, int atR = -1);
+void enterpairsSig (poly h, poly hSig, int from, int k, int ec, sBasisSet::iterator pos,kStrategy strat, int atR = -1);
+void enterpairs (poly h, int k, int ec, sBasisSet::iterator pos,kStrategy strat, int atR = -1);
 void entersets (LObject h);
 void pairs ();
 BOOLEAN sbaCheckGcdPair (LObject* h,kStrategy strat);
@@ -1670,7 +1670,7 @@ void enterTShift(LObject p, kStrategy strat, int atT = -1);
 
 BOOLEAN enterOnePairShift (poly q, poly p, int ecart, int isFromQ, kStrategy strat, int atR, int ecartq, int qisFromQ, int shiftcount, sBasisSet::const_iterator ifromS);
 
-void enterpairsShift (poly h,int k,int ecart,int pos,kStrategy strat, int atR);
+void enterpairsShift (poly h,int k,int ecart,sBasisSet::iterator pos,kStrategy strat, int atR);
 
 void superenterpairsShift (poly h,int k,int ecart,int pos,kStrategy strat, int atR);
 

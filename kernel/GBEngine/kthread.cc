@@ -876,7 +876,6 @@ static void process_survivor_lobject(SweepContext *ctx, LObject *P, int thread_i
   if (TEST_OPT_PROT) PrintS("s");
 
   auto pos_it = strat->S.find_pos(P->p, P->ecart);
-  int pos = pos_it.index();
 
   strat->redTailChange = FALSE;
 
@@ -929,9 +928,9 @@ static void process_survivor_lobject(SweepContext *ctx, LObject *P, int thread_i
 #endif
 
     if (rField_is_Ring(currRing))
-      superenterpairs(P->p, strat->S.size()-1, P->ecart, pos, strat, strat->T.size()-1);
+      superenterpairs(P->p, strat->S.size()-1, P->ecart, pos_it, strat, strat->T.size()-1);
     else
-      enterpairs(P->p, strat->S.size()-1, P->ecart, pos, strat, strat->T.size()-1);
+      enterpairs(P->p, strat->S.size()-1, P->ecart, pos_it, strat, strat->T.size()-1);
 
 #ifdef KTHREAD_INSTRUMENT
     if (KT_STATS(ctx)) enterpairs_accum += kt_now_ns() - ep0;

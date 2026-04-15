@@ -1221,7 +1221,7 @@ ideal k_gnc_gr_bba(const ideal F, const ideal Q, const intvec *, const bigintmat
           }
           // kTest(strat);
           //
-          enterpairs(strat->P.p,strat->S.size()-1,strat->P.ecart,pos.index(),strat);
+          enterpairs(strat->P.p,strat->S.size()-1,strat->P.ecart,pos,strat);
 
           if (strat->S.empty()) pos=strat->S.begin();
           else pos=strat->S.find_pos(strat->P.p,strat->P.ecart);
