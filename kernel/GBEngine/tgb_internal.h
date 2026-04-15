@@ -753,13 +753,26 @@ template<class number_type> MonRedResNP<number_type> noro_red_mon_to_non_poly(po
     }
 
   unsigned long sev=p_GetShortExpVector(t,currRing);
-  int i=kFindDivisibleByInS_easy(c->strat,t,sev);
-  if (i>=0)
+  // Same walk as kFindDivisibleByInS_easy(c->strat, t, sev), but returning
+  // the iterator directly rather than routing through an int index.
+  auto sit = c->strat->S.end();
+  if (!((c->strat->syzComp>0) && (pGetComp(t)>c->strat->syzComp)))
+  {
+    unsigned long not_sev = ~sev;
+    for (auto scan = c->strat->S.begin(); scan != c->strat->S.end(); ++scan)
+    {
+      if (pLmShortDivisibleBy(scan->p, scan->sev, t, not_sev))
+      {
+        sit = scan;
+        break;
+      }
+    }
+  }
+  if (sit != c->strat->S.end())
   {
     number coef_bak=p_GetCoeff(t,c->r);
 
     p_SetCoeff(t,npInit(1,c->r->cf),c->r);
-    auto sit = c->strat->S.iterator_at(i);
     assume(npIsOne(p_GetCoeff(sit->p,c->r),c->r->cf));
     number coefstrat=p_GetCoeff(sit->p,c->r);
 
