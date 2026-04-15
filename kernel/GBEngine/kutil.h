@@ -504,8 +504,10 @@ public:
   void clear_if_divisible(poly p, unsigned long p_sev,
                           iterator &at, kStrategy strat);
 
-  // For tgb.cc: binary search variant with different comparison.
-  iterator simple_find_pos(kStrategy strat, poly p);
+  // For tgb.cc: binary search ordering by length/wlength first, then
+  // by leading monomial. Replaces tgb.cc's static simple_posInS.
+  // Implementation in kutil.cc (needs complete kStrategy).
+  iterator simple_find_pos(poly p, int len, wlen_type wlen, kStrategy strat);
 
   // For tgb.cc: shift an element within S. Both take raw int positions
   // because tgb's slimgb path manages S by raw-index arithmetic

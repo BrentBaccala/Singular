@@ -1192,59 +1192,9 @@ static void add_later (poly p, const char *prot, slimgb_alg * c)
   c->add_later->m[i] = p;
 }
 
-static int simple_posInS (kStrategy strat, poly p, int len, wlen_type wlen)
+static inline int simple_posInS (kStrategy strat, poly p, int len, wlen_type wlen)
 {
-  if(strat->S.empty())
-    return 0;
-  int length=strat->S.size()-1;
-  int i;
-  int an = 0;
-  int en= length;
-  if(strat->use_lenSw)
-  {
-    wlen_type wl = wlen;
-    auto sit_length = strat->S.unsafe_iterator_at_int(length);
-    if ((wl>sit_length->wlength)
-        || ((wl==sit_length->wlength) && (pLmCmp(sit_length->p,p)== -1)))
-      return length+1;
-    loop
-    {
-      if (an >= en-1)
-      {
-        auto sit_an = strat->S.unsafe_iterator_at_int(an);
-        if ((wl<sit_an->wlength)
-            || ((wl==sit_an->wlength) && (pLmCmp(sit_an->p,p) == 1))) return an;
-        return en;
-      }
-      i=(an+en) / 2;
-      auto sit_i = strat->S.unsafe_iterator_at_int(i);
-      if ((wl<sit_i->wlength)
-          || ((wl==sit_i->wlength) && (pLmCmp(sit_i->p,p) == 1))) en=i;
-      else an=i;
-    }
-  }
-  else
-  {
-    auto sit_length = strat->S.unsafe_iterator_at_int(length);
-    if ((len>sit_length->length)
-        || ((len==sit_length->length) && (pLmCmp(sit_length->p,p)== -1)))
-      return length+1;
-    loop
-    {
-      if (an >= en-1)
-      {
-        auto sit_an = strat->S.unsafe_iterator_at_int(an);
-        if ((len<sit_an->length)
-            || ((len==sit_an->length) && (pLmCmp(sit_an->p,p) == 1))) return an;
-        return en;
-      }
-      i=(an+en) / 2;
-      auto sit_i = strat->S.unsafe_iterator_at_int(i);
-      if ((len<sit_i->length)
-          || ((len==sit_i->length) && (pLmCmp(sit_i->p,p) == 1))) en=i;
-      else an=i;
-    }
-  }
+  return strat->S.simple_find_pos(p, len, wlen, strat).index();
 }
 
 /*2

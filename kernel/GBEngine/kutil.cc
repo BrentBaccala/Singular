@@ -1210,6 +1210,47 @@ void sBasisSet::clear_if_divisible(poly p, unsigned long p_sev,
   --at;
 }
 
+sBasisSet::iterator sBasisSet::simple_find_pos(poly p, int len, wlen_type wlen, kStrategy strat)
+{
+  if (empty()) return begin();
+  int length = size() - 1;
+  int i, an = 0, en = length;
+  if (strat->use_lenSw) {
+    wlen_type wl = wlen;
+    if ((wl > elem(length).wlength)
+        || ((wl == elem(length).wlength) && (pLmCmp(elem(length).p, p) == -1)))
+      return end();
+    loop {
+      if (an >= en - 1) {
+        if ((wl < elem(an).wlength)
+            || ((wl == elem(an).wlength) && (pLmCmp(elem(an).p, p) == 1)))
+          return iterator(this, an);
+        return iterator(this, en);
+      }
+      i = (an + en) / 2;
+      if ((wl < elem(i).wlength)
+          || ((wl == elem(i).wlength) && (pLmCmp(elem(i).p, p) == 1))) en = i;
+      else an = i;
+    }
+  } else {
+    if ((len > elem(length).length)
+        || ((len == elem(length).length) && (pLmCmp(elem(length).p, p) == -1)))
+      return end();
+    loop {
+      if (an >= en - 1) {
+        if ((len < elem(an).length)
+            || ((len == elem(an).length) && (pLmCmp(elem(an).p, p) == 1)))
+          return iterator(this, an);
+        return iterator(this, en);
+      }
+      i = (an + en) / 2;
+      if ((len < elem(i).length)
+          || ((len == elem(i).length) && (pLmCmp(elem(i).p, p) == 1))) en = i;
+      else an = i;
+    }
+  }
+}
+
 #ifdef HAVE_SHIFTBBA
 static BOOLEAN is_shifted_p1(const kStrategy strat)
 {
