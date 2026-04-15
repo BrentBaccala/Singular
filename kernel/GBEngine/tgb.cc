@@ -1779,11 +1779,10 @@ static poly redTailShort (poly h, kStrategy strat)
   {
     bit_reduce (pNext (h), strat->tailRing);
   }
-  int i;
+  int i = 0;
   int len = pLength (h);
-  for(i = 0; i < strat->S.size(); i++)
+  for(auto sit = strat->S.begin(); sit != strat->S.end(); ++sit, ++i)
   {
-    auto sit = strat->S.unsafe_iterator_at_int(i);
     if((sit->length > 2)
        || ((strat->use_lenSw) && (sit->wlength > 2)))
       break;
@@ -3662,30 +3661,22 @@ static void shorten_tails (slimgb_alg * c, poly monom)
       q = pQuality (c->S->m[i], c, c->lengths[i]);
       new_pos = simple_posInS (c->strat, c->S->m[i], c->lengths[i], q);
 
-      int old_pos = -1;
+      auto sit_old = c->strat->S.end();
       //assume new_pos<old_pos
-      for(int z = 0; z <= c->strat->S.size()-1; z++)
+      for(auto scan = c->strat->S.begin(); scan != c->strat->S.end(); ++scan)
       {
-        auto sit_z = c->strat->S.unsafe_iterator_at_int(z);
-        if(sit_z->p == c->S->m[i])
+        if(scan->p == c->S->m[i])
         {
-          old_pos = z;
+          sit_old = scan;
           break;
         }
       }
-      if(old_pos == -1)
-        for(int z = new_pos - 1; z >= 0; z--)
-        {
-          auto sit_z = c->strat->S.unsafe_iterator_at_int(z);
-          if(sit_z->p == c->S->m[i])
-          {
-            old_pos = z;
-            break;
-          }
-        }
-      assume (old_pos >= 0);
+      // (The second search in the original code walked backward from
+      // new_pos-1 but only when the forward walk failed; since the forward
+      // walk already covered the whole S, the backward walk was dead.)
+      assume (sit_old != c->strat->S.end());
+      int old_pos = sit_old.index();
       assume (new_pos <= old_pos);
-      auto sit_old = c->strat->S.unsafe_iterator_at_int(old_pos);
       assume ((int)pLength (sit_old->p) == c->lengths[i]);
       sit_old->length = c->lengths[i];
       if(c->strat->use_lenSw)
@@ -3743,12 +3734,11 @@ void slimgb_alg::cleanDegs (int lower, int upper)
           weighted_lengths[i] = wlen;
         lengths[i] = len;
         assume (h == S->m[i]);
-        int j;
-        for(j = 0; j < strat->S.size(); j++)
+        for(auto sit_j = strat->S.begin(); sit_j != strat->S.end(); ++sit_j)
         {
-          auto sit_j = strat->S.unsafe_iterator_at_int(j);
           if(h == sit_j->p)
           {
+            int j = sit_j.index();
             int new_pos = simple_posInS (strat, h, len, wlen);
             if(strat->use_lenS)
             {
@@ -4058,9 +4048,8 @@ static poly kBucketGcd (kBucket * b, ring r)
 }
 #endif
 
-static inline wlen_type quality_of_pos_in_strat_S (int pos, slimgb_alg * c)
+static inline wlen_type quality_of_pos_in_strat_S (sBasisSet::const_iterator sit, slimgb_alg * c)
 {
-  auto sit = c->strat->S.unsafe_iterator_at_int(pos);
   if(c->strat->use_lenSw)
     return sit->wlength;
   return sit->length;
@@ -4068,10 +4057,9 @@ static inline wlen_type quality_of_pos_in_strat_S (int pos, slimgb_alg * c)
 
 #ifdef HAVE_PLURAL
 static inline wlen_type
-quality_of_pos_in_strat_S_mult_high (int pos, poly high, slimgb_alg * c)
+quality_of_pos_in_strat_S_mult_high (sBasisSet::const_iterator sit, poly high, slimgb_alg * c)
   //meant only for nc
 {
-  auto sit = c->strat->S.unsafe_iterator_at_int(pos);
   poly m = pOne ();
   pExpVectorDiff (m, high, sit->p);
   poly product = nc_mm_Mult_pp (m, sit->p, c->r);
@@ -4092,7 +4080,7 @@ multi_reduction_lls_trick (red_object * los, int /*losl*/, slimgb_alg * c,
   {
     if(pLmEqual (erg.s_pos->p, los[erg.to_reduce_u].p))
     {
-      wlen_type quality_a = quality_of_pos_in_strat_S (erg.s_pos.index(), c);
+      wlen_type quality_a = quality_of_pos_in_strat_S (erg.s_pos, c);
       int best = erg.to_reduce_u + 1;
 /*
       for (i=erg.to_reduce_u;i>=erg.to_reduce_l;i--)
@@ -4133,11 +4121,11 @@ multi_reduction_lls_trick (red_object * los, int /*losl*/, slimgb_alg * c,
     {
       if(erg.to_reduce_u > erg.to_reduce_l)
       {
-        wlen_type quality_a = quality_of_pos_in_strat_S (erg.s_pos.index(), c);
+        wlen_type quality_a = quality_of_pos_in_strat_S (erg.s_pos, c);
 #ifdef HAVE_PLURAL
         if((c->nc) && (!(rIsSCA (c->r))))
           quality_a =
-            quality_of_pos_in_strat_S_mult_high (erg.s_pos.index(),
+            quality_of_pos_in_strat_S_mult_high (erg.s_pos,
                                                  los[erg.to_reduce_u].p, c);
 #endif
         int best = erg.to_reduce_u + 1;
@@ -4165,7 +4153,7 @@ multi_reduction_lls_trick (red_object * los, int /*losl*/, slimgb_alg * c,
       else
       {
         assume (erg.to_reduce_u == erg.to_reduce_l);
-        wlen_type quality_a = quality_of_pos_in_strat_S (erg.s_pos.index(), c);
+        wlen_type quality_a = quality_of_pos_in_strat_S (erg.s_pos, c);
         wlen_type qc = los[erg.to_reduce_u].guess_quality (c);
         if(qc < 0)
           PrintS ("Wrong wlen_type");
