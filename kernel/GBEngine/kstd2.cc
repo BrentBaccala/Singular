@@ -3051,20 +3051,21 @@ bba_post_loop:
   {
     if (!rField_is_Ring(currRing))
     {
-      int k = 1;
-      int j;
-      while (k < strat->S.size())
+      auto sk = strat->S.begin();
+      if (sk != strat->S.end()) ++sk;
+      while (sk != strat->S.end())
       {
-        j = 0;
-        loop
+        auto sj = strat->S.begin();
+        while (sj != sk)
         {
-          if (j >= k) break;
-          auto sit_j = strat->S.iterator_at(j);
-          clearS(sit_j->p, sit_j->sev, &k, &j, strat);
-          j++;
+          int sz = strat->S.size();
+          strat->S.clear_if_divisible(sj->p, sj->sev, sk, strat);
+          if (strat->S.size() == sz) ++sj;
+          else { ++sk; if (sk == strat->S.end()) goto post_loop_done; }
         }
-        k++;
+        ++sk;
       }
+      post_loop_done:;
     }
   }
 
@@ -3076,20 +3077,21 @@ bba_post_loop:
   {
     if(!rField_is_Ring(currRing))
     {
-      int k=1;
-      int j;
-      while(k < strat->S.size())
+      auto sk = strat->S.begin();
+      if (sk != strat->S.end()) ++sk;
+      while (sk != strat->S.end())
       {
-        j=0;
-        loop
+        auto sj = strat->S.begin();
+        while (sj != sk)
         {
-          if (j>=k) break;
-          auto sit_j = strat->S.iterator_at(j);
-          clearS(sit_j->p,sit_j->sev,&k,&j,strat);
-          j++;
+          int sz = strat->S.size();
+          strat->S.clear_if_divisible(sj->p, sj->sev, sk, strat);
+          if (strat->S.size() == sz) ++sj;
+          else { ++sk; if (sk == strat->S.end()) goto sb1_done_a; }
         }
-        k++;
+        ++sk;
       }
+      sb1_done_a:;
     }
   }
   /* complete reduction of the standard basis--------- */
@@ -3956,20 +3958,21 @@ ideal sba (ideal F0, ideal Q,intvec *w,bigintmat *hilb,kStrategy strat)
   {
     if(!rField_is_Ring(currRing))
     {
-      int k=1;
-      int j;
-      while(k < strat->S.size())
+      auto sk = strat->S.begin();
+      if (sk != strat->S.end()) ++sk;
+      while (sk != strat->S.end())
       {
-        j=0;
-        loop
+        auto sj = strat->S.begin();
+        while (sj != sk)
         {
-          if (j>=k) break;
-          auto sit_j = strat->S.iterator_at(j);
-          clearS(sit_j->p,sit_j->sev,&k,&j,strat);
-          j++;
+          int sz = strat->S.size();
+          strat->S.clear_if_divisible(sj->p, sj->sev, sk, strat);
+          if (strat->S.size() == sz) ++sj;
+          else { ++sk; if (sk == strat->S.end()) goto sb1_done_b; }
         }
-        k++;
+        ++sk;
       }
+      sb1_done_b:;
     }
   }
   /* complete reduction of the standard basis--------- */

@@ -1239,20 +1239,31 @@ ideal k_gnc_gr_bba(const ideal F, const ideal Q, const intvec *, const bigintmat
   /* complete reduction of the standard basis--------- */
   if (TEST_OPT_SB_1)
   {
-    int k=1;
-    int j;
-    while(k < strat->S.size())
+    auto sk = strat->S.begin();
+    if (sk != strat->S.end()) ++sk;
+    while (sk != strat->S.end())
     {
-      j=0;
-      loop
+      auto sj = strat->S.begin();
+      while (sj != sk)
       {
-        if (j>=k) break;
-        auto sj = strat->S.iterator_at(j);
-        clearS(sj->p,sj->sev,&k,&j,strat);
-        j++;
+        int sz = strat->S.size();
+        strat->S.clear_if_divisible(sj->p, sj->sev, sk, strat);
+        if (strat->S.size() == sz)
+        {
+          ++sj;
+        }
+        else
+        {
+          // clear_if_divisible pre-decrements sk expecting a caller
+          // ++sk; re-advance it to keep sk pointing at the element
+          // now at the same raw index, and retry same sj against it.
+          ++sk;
+          if (sk == strat->S.end()) goto sb1_done;
+        }
       }
-      k++;
+      ++sk;
     }
+    sb1_done:;
   }
 
   if (TEST_OPT_REDSB)

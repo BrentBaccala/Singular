@@ -1306,21 +1306,6 @@ KINLINE poly redtailBba_Z (poly p,sBasisSet::const_iterator end,kStrategy strat)
   return redtailBba_Z(&L, end, strat);
 }
 
-// Old int-based clearS — delegates to sBasisSet::clear_if_divisible.
-// Kept for callers not yet migrated to iterator API.
-KINLINE void clearS (poly p, unsigned long p_sev, int* at, int* k,
-                    kStrategy strat)
-{
-  auto sit = strat->S.iterator_at(*at);
-  int old_size = strat->S.size();
-  strat->S.clear_if_divisible(p, p_sev, sit, strat);
-  if (strat->S.size() < old_size)
-  {
-    (*at)--;
-    (*k)--;
-  }
-}
-
 // dummy function for function pointer strat->rewCrit being usable in all
 // possible choices for criteria
 KINLINE BOOLEAN arriRewDummy(poly /*sig*/, unsigned long /*not_sevSig*/, poly /*lm*/, kStrategy /*strat*/, sBasisSet::const_iterator /*start*/)

@@ -1665,8 +1665,6 @@ void kDebugPrint(kStrategy strat);
 // getting sb order for sba computations
 ring sbaRing(kStrategy strat, const ring r=currRing, BOOLEAN complete=TRUE, int sgn=1);
 
-KINLINE void clearS (poly p, unsigned long p_sev, int* at, int* k,
-  kStrategy strat);
 
 #include "kernel/GBEngine/kInline.h"
 
