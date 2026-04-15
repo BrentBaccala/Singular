@@ -268,7 +268,12 @@ static void completeReduceFac (kStrategy strat, ideal_list FL)
   }
   for (si=strat->S.size()-1; si>0; si--)
   {
-    auto sit = strat->S.iterator_at(si);
+    // Walk a forward iterator from begin() to raw index si. Erase in
+    // this loop body leaves positions < si untouched, so the next
+    // iteration's smaller si is still valid (walked afresh from begin).
+    auto sit = strat->S.begin();
+    for (int skip = si; skip > 0 && sit != strat->S.end(); --skip) ++sit;
+    if (sit == strat->S.end()) break;
     sit->p = redtailBba(sit->p,sit,strat);
     if (TEST_OPT_INTSTRATEGY)
     {
