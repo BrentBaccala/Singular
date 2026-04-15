@@ -1674,7 +1674,7 @@ void enterpairsShift (poly h,int k,int ecart,sBasisSet::iterator pos,kStrategy s
 
 void superenterpairsShift (poly h,int k,int ecart,int pos,kStrategy strat, int atR);
 
-poly redtailBbaShift (LObject* L, int pos, kStrategy strat, BOOLEAN withT, BOOLEAN normalize);
+poly redtailBbaShift (LObject* L, sBasisSet::const_iterator end, kStrategy strat, BOOLEAN withT, BOOLEAN normalize);
 
 int redFirstShift (LObject* h,kStrategy strat); // ok
 

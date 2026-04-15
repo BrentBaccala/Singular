@@ -124,8 +124,8 @@ inline void _my_memmove(void* d, void* s, long l)
 #define memmove(d,s,l) _my_memmove(d, s, l)
 #endif
 
-static poly redMora (poly h,int maxIndex,kStrategy strat);
-static poly redBba (poly h,int maxIndex,kStrategy strat);
+static poly redMora (poly h,sBasisSet::const_iterator end,kStrategy strat);
+static poly redBba (poly h,sBasisSet::const_iterator end,kStrategy strat);
 
 #define pDivComp_EQUAL 2
 #define pDivComp_LESS 1
@@ -7728,7 +7728,7 @@ void initSSpecial (ideal F, ideal Q, ideal P,kStrategy strat)
       {
         if (rHasGlobalOrdering(currRing))
         {
-          h.p=redBba(h.p,strat->S.size()-1,strat);
+          h.p=redBba(h.p,strat->S.end(),strat);
           if ((h.p!=NULL)&&(TEST_OPT_REDTAIL || TEST_OPT_REDSB))
           {
             h.p=redtailBba(h.p,strat->S.end(),strat);
@@ -7736,7 +7736,7 @@ void initSSpecial (ideal F, ideal Q, ideal P,kStrategy strat)
         }
         else
         {
-          h.p=redMora(h.p,strat->S.size()-1,strat);
+          h.p=redMora(h.p,strat->S.end(),strat);
         }
         if(h.p!=NULL)
         {
@@ -7861,7 +7861,7 @@ void initSSpecialSba (ideal F, ideal Q, ideal P,kStrategy strat)
       {
         if (rHasGlobalOrdering(currRing))
         {
-          h.p=redBba(h.p,strat->S.size()-1,strat);
+          h.p=redBba(h.p,strat->S.end(),strat);
           if ((h.p!=NULL)&&(TEST_OPT_REDTAIL || TEST_OPT_REDSB))
           {
             h.p=redtailBba(h.p,strat->S.end(),strat);
@@ -7869,7 +7869,7 @@ void initSSpecialSba (ideal F, ideal Q, ideal P,kStrategy strat)
         }
         else
         {
-          h.p=redMora(h.p,strat->S.size()-1,strat);
+          h.p=redMora(h.p,strat->S.end(),strat);
         }
         if(h.p!=NULL)
         {
@@ -8007,18 +8007,18 @@ static poly redQ (poly h, int /*j*/, kStrategy strat)
 * reduces h using the set S
 * procedure used in updateS
 */
-static poly redBba (poly h,int maxIndex,kStrategy strat)
+static poly redBba (poly h,sBasisSet::const_iterator end,kStrategy strat)
 {
   unsigned long not_sev = ~ pGetShortExpVector(h);
 
-  auto sit = strat->S.begin();
-  while (sit != strat->S.end() && sit.index() <= maxIndex)
+  sBasisSet::const_iterator sit = strat->S.cbegin();
+  while (sit != end)
   {
     if (pLmShortDivisibleBy(sit->p, sit->sev, h, not_sev))
     {
       h = ksOldSpolyRed(sit->p, h, strat->kNoetherTail());
       if (h==NULL) return NULL;
-      sit = strat->S.begin();
+      sit = strat->S.cbegin();
       not_sev = ~ pGetShortExpVector(h);
     }
     else ++sit;
@@ -8031,15 +8031,15 @@ static poly redBba (poly h,int maxIndex,kStrategy strat)
 *e is the ecart of h
 *procedure used in updateS
 */
-static poly redMora (poly h,int maxIndex,kStrategy strat)
+static poly redMora (poly h,sBasisSet::const_iterator end,kStrategy strat)
 {
   int  e,l;
   unsigned long not_sev = ~ pGetShortExpVector(h);
 
-  if (maxIndex >= 0)
+  if (end != strat->S.cbegin())
   {
     e = currRing->pLDeg(h,&l,currRing)-p_FDeg(h,currRing);
-    auto sit = strat->S.begin();
+    sBasisSet::const_iterator sit = strat->S.cbegin();
     do
     {
       if (pLmShortDivisibleBy(sit->p, sit->sev, h, not_sev)
@@ -8061,12 +8061,12 @@ static poly redMora (poly h,int maxIndex,kStrategy strat)
         // pDelete(&h);
         if (h == NULL) return NULL;
         e = currRing->pLDeg(h,&l,currRing)-p_FDeg(h,currRing);
-        sit = strat->S.begin();
+        sit = strat->S.cbegin();
         not_sev = ~ pGetShortExpVector(h);
       }
       else ++sit;
     }
-    while (sit != strat->S.end() && sit.index() <= maxIndex);
+    while (sit != end);
   }
   return h;
 }
@@ -8079,7 +8079,7 @@ static poly redMora (poly h,int maxIndex,kStrategy strat)
 void updateS(BOOLEAN toT,kStrategy strat)
 {
   LObject h;
-  int i, suc=0;
+  int suc=0;
   poly redSi=NULL;
   BOOLEAN change,any_change;
 //  Print("nach initS: updateS start mit sl=%d\n",(strat->S.size()-1));
@@ -8095,17 +8095,19 @@ void updateS(BOOLEAN toT,kStrategy strat)
   {
     while (suc != -1)
     {
-      i=suc+1;
-      while (i < strat->S.size())
+      // Walk a live iterator starting at index suc+1. After reorder we
+      // re-enter here from begin() since positions have shuffled.
+      auto sit = strat->S.begin();
+      for (int skip = suc+1; skip > 0 && sit != strat->S.end(); --skip) ++sit;
+      while (sit != strat->S.end())
       {
         change=FALSE;
         if(rField_is_Ring(currRing))
             any_change = FALSE;
-        auto sit = strat->S.iterator_at(i);
-        if (((!strat->hasFromQ) || (sit->fromQ==0)) && (i>0))
+        if (((!strat->hasFromQ) || (sit->fromQ==0)) && (sit != strat->S.begin()))
         {
           redSi = pHead(sit->p);
-          sit->p = redBba(sit->p,i-1,strat);
+          sit->p = redBba(sit->p,sit,strat);
           //if ((strat->ak!=0)&&(strat->S[i].p!=NULL))
           //  strat->S[i].p=redQ(strat->S[i].p,i+1,strat); /*reduce S[i] mod Q*/
           if (pCmp(redSi,sit->p)!=0)
@@ -8131,8 +8133,8 @@ void updateS(BOOLEAN toT,kStrategy strat)
           pLmDelete(&redSi);
           if (sit->p==NULL)
           {
-            strat->S.erase(sit);
-            i--;
+            sit = strat->S.erase_and_next(sit);
+            continue;
           }
           else if (change)
           {
@@ -8163,7 +8165,7 @@ void updateS(BOOLEAN toT,kStrategy strat)
             sit->sev = pGetShortExpVector(sit->p);
           }
         }
-        i++;
+        ++sit;
       }
       if (any_change) strat->S.reorder(&suc,strat);
       else break;
@@ -8207,19 +8209,21 @@ void updateS(BOOLEAN toT,kStrategy strat)
   {
     while (suc != -1)
     {
-      i=suc;
-      while (i < strat->S.size())
+      auto sit = strat->S.begin();
+      for (int skip = suc; skip > 0 && sit != strat->S.end(); --skip) ++sit;
+      while (sit != strat->S.end())
       {
         change=FALSE;
-        auto sit = strat->S.iterator_at(i);
-        if (((!strat->hasFromQ) || (sit->fromQ==0)) && (i>0))
+        if (((!strat->hasFromQ) || (sit->fromQ==0)) && (sit != strat->S.begin()))
         {
           redSi=pHead(sit->p);
-          sit->p = redMora(sit->p,i-1,strat);
+          sit->p = redMora(sit->p,sit,strat);
           if (sit->p==NULL)
           {
-            strat->S.erase(sit);
-            i--;
+            sit = strat->S.erase_and_next(sit);
+            pLmDelete(&redSi);
+            kTest(strat);
+            continue;
           }
           else if (pCmp(sit->p,redSi)!=0)
           {
@@ -8257,7 +8261,7 @@ void updateS(BOOLEAN toT,kStrategy strat)
           pLmDelete(&redSi);
           kTest(strat);
         }
-        i++;
+        ++sit;
       }
 #ifdef KDEBUG
       kTest(strat);
@@ -12382,7 +12386,7 @@ void enterTShift(LObject p, kStrategy strat, int atT)
 #endif
 
 #ifdef HAVE_SHIFTBBA
-poly redtailBbaShift (LObject* L, int pos, kStrategy strat, BOOLEAN withT, BOOLEAN normalize)
+poly redtailBbaShift (LObject* L, sBasisSet::const_iterator end, kStrategy strat, BOOLEAN withT, BOOLEAN normalize)
 {
   /* for the shift case need to run it with withT = TRUE */
   strat->redTailChange=FALSE;
@@ -12419,7 +12423,7 @@ poly redtailBbaShift (LObject* L, int pos, kStrategy strat, BOOLEAN withT, BOOLE
       }
       else
       {
-        With = kFindDivisibleByInS_T(strat, strat->S.const_iterator_at(pos + 1), &Ln, &With_s);
+        With = kFindDivisibleByInS_T(strat, end, &Ln, &With_s);
         if (With == NULL) break;
       }
       if (normalize && (!TEST_OPT_INTSTRATEGY) && (!nIsOne(pGetCoeff(With->p))))
