@@ -960,22 +960,10 @@ add_to_reductors (slimgb_alg * c, poly h, int len, int ecart,
   wlen_type pq = pQuality (h, c, len);
   i = simple_posInS (c->strat, h, len, pq);
   c->strat->enterS (P, c->strat, c->strat->T.size()-1, c->strat->S.end());
-  // enter_bba in SORDER_APPEND mode put it at the end. Move it to position i
-  // (inline shift since move_forward_in_S is defined later as static).
   {
     int appended_pos = c->strat->S.size() - 1;
     if (i < appended_pos)
-    {
-      auto src_it = c->strat->S.unsafe_iterator_at_int(appended_pos);
-      SElement saved = *src_it;
-      for (int k = appended_pos; k > i; k--)
-      {
-        auto dst = c->strat->S.unsafe_iterator_at_int(k);
-        auto src = c->strat->S.unsafe_iterator_at_int(k - 1);
-        *dst = *src;
-      }
-      *c->strat->S.unsafe_iterator_at_int(i) = saved;
-    }
+      c->strat->S.move_forward(appended_pos, i);
   }
 
   auto sit = c->strat->S.unsafe_iterator_at_int(i);
@@ -1007,77 +995,6 @@ static void length_one_crit (slimgb_alg * c, int pos, int len)
   }
 }
 
-static void move_forward_in_S (int old_pos, int new_pos, kStrategy strat)
-{
-  assume (old_pos >= new_pos);
-  auto old_it = strat->S.unsafe_iterator_at_int(old_pos);
-  SElement saved = *old_it;
-  assume (saved.length == (int)pLength (saved.p));
-  int i;
-  for(i = old_pos; i > new_pos; i--)
-  {
-    auto dst = strat->S.unsafe_iterator_at_int(i);
-    auto src = strat->S.unsafe_iterator_at_int(i - 1);
-    dst->p = src->p;
-    dst->ecart = src->ecart;
-    dst->sev = src->sev;
-    dst->s_2_r = src->s_2_r;
-  }
-  if(strat->use_lenS)
-    for(i = old_pos; i > new_pos; i--)
-    {
-      auto dst = strat->S.unsafe_iterator_at_int(i);
-      auto src = strat->S.unsafe_iterator_at_int(i - 1);
-      dst->length = src->length;
-    }
-  if(strat->use_lenSw)
-    for(i = old_pos; i > new_pos; i--)
-    {
-      auto dst = strat->S.unsafe_iterator_at_int(i);
-      auto src = strat->S.unsafe_iterator_at_int(i - 1);
-      dst->wlength = src->wlength;
-    }
-
-  auto new_it = strat->S.unsafe_iterator_at_int(new_pos);
-  *new_it = saved;
-  //assume(lenS_correct(strat));
-}
-
-static void move_backward_in_S (int old_pos, int new_pos, kStrategy strat)
-{
-  assume (old_pos <= new_pos);
-  auto old_it = strat->S.unsafe_iterator_at_int(old_pos);
-  SElement saved = *old_it;
-  assume (saved.length == (int)pLength (saved.p));
-  int i;
-  for(i = old_pos; i < new_pos; i++)
-  {
-    auto dst = strat->S.unsafe_iterator_at_int(i);
-    auto src = strat->S.unsafe_iterator_at_int(i + 1);
-    dst->p = src->p;
-    dst->ecart = src->ecart;
-    dst->sev = src->sev;
-    dst->s_2_r = src->s_2_r;
-  }
-  if(strat->use_lenS)
-    for(i = old_pos; i < new_pos; i++)
-    {
-      auto dst = strat->S.unsafe_iterator_at_int(i);
-      auto src = strat->S.unsafe_iterator_at_int(i + 1);
-      dst->length = src->length;
-    }
-  if(strat->use_lenSw)
-    for(i = old_pos; i < new_pos; i++)
-    {
-      auto dst = strat->S.unsafe_iterator_at_int(i);
-      auto src = strat->S.unsafe_iterator_at_int(i + 1);
-      dst->wlength = src->wlength;
-    }
-
-  auto new_it = strat->S.unsafe_iterator_at_int(new_pos);
-  *new_it = saved;
-  //assume(lenS_correct(strat));
-}
 
 static int *make_connections (int from, int to, poly bound, slimgb_alg * c)
 {
@@ -3862,7 +3779,7 @@ static void shorten_tails (slimgb_alg * c, poly monom)
       if(c->strat->use_lenSw)
         sit_old->wlength = q;
       if(new_pos < old_pos)
-        move_forward_in_S (old_pos, new_pos, c->strat);
+        c->strat->S.move_forward(old_pos, new_pos);
       length_one_crit (c, i, c->lengths[i]);
     }
   }
@@ -3931,14 +3848,14 @@ void slimgb_alg::cleanDegs (int lower, int upper)
             }
             if(new_pos < j)
             {
-              move_forward_in_S (j, new_pos, strat);
+              strat->S.move_forward(j, new_pos);
             }
             else
             {
               if(new_pos > j)
                 new_pos = new_pos - 1;  //is identical with one element
               if(new_pos > j)
-                move_backward_in_S (j, new_pos, strat);
+                strat->S.move_backward(j, new_pos);
             }
             break;
           }
@@ -4509,7 +4426,7 @@ multi_reduction_lls_trick (red_object * los, int /*losl*/, slimgb_alg * c,
     {
       if(c->strat->honey)
         c->strat->S.unsafe_iterator_at_int(j)->ecart = tdeg_full - tdeg;
-      move_forward_in_S (j, new_pos, c->strat);
+      c->strat->S.move_forward(j, new_pos);
       erg.reduce_by = new_pos;
     }
 #endif

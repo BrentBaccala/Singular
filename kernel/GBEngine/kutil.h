@@ -507,10 +507,25 @@ public:
   // For tgb.cc: binary search variant with different comparison.
   iterator simple_find_pos(kStrategy strat, poly p);
 
-  // For tgb.cc: move an element from one position to another,
-  // shifting intervening elements. old_it and new_it provide the
-  // element positions.
-  void move_elem(iterator old_it, iterator new_it);
+  // For tgb.cc: shift an element within S. Both take raw int positions
+  // because tgb's slimgb path manages S by raw-index arithmetic
+  // (simple_posInS + adjacent shifts); these methods are the sBasisSet-
+  // internal encapsulation of that raw shift, using the private iterator
+  // constructor to avoid exposing an int->iterator adapter at the class
+  // API level. old_pos > new_pos for move_forward; old_pos < new_pos for
+  // move_backward.
+  void move_forward(int old_pos, int new_pos) {
+    assume(old_pos >= new_pos);
+    SElement saved = elem(old_pos);
+    for (int k = old_pos; k > new_pos; k--) elem(k) = elem(k - 1);
+    elem(new_pos) = saved;
+  }
+  void move_backward(int old_pos, int new_pos) {
+    assume(old_pos <= new_pos);
+    SElement saved = elem(old_pos);
+    for (int k = old_pos; k < new_pos; k++) elem(k) = elem(k + 1);
+    elem(new_pos) = saved;
+  }
 
   // Construct an iterator at a raw index (no skip).
   // Transitional: used by code migrating from int-based to iterator-based API.
