@@ -254,8 +254,6 @@ BOOLEAN k_factorize(poly p,ideal &rfac, ideal &fac_copy)
 
 static void completeReduceFac (kStrategy strat, ideal_list FL)
 {
-  int si;
-
   strat->noTailReduction = FALSE;
   if (TEST_OPT_PROT)
   {
@@ -266,14 +264,19 @@ static void completeReduceFac (kStrategy strat, ideal_list FL)
   {
     Print("(S:%d)",strat->S.size()-1);mflush();
   }
-  for (si=strat->S.size()-1; si>0; si--)
+  // Outer loop: walk strat->S in reverse. Each successful factorization
+  // either ends the function (L and S both non-empty) or restarts the
+  // walk from the new top. k_factorize failures just advance to the
+  // next smaller S element (inner `continue`).
+  while (true)
   {
-    // Walk a forward iterator from begin() to raw index si. Erase in
-    // this loop body leaves positions < si untouched, so the next
-    // iteration's smaller si is still valid (walked afresh from begin).
-    auto sit = strat->S.begin();
-    for (int skip = si; skip > 0 && sit != strat->S.end(); --skip) ++sit;
-    if (sit == strat->S.end()) break;
+  bool break_out = false;
+  bool restart = false;
+  for (auto rit = strat->S.rbegin();
+       rit != strat->S.rend() && rit.index() > 0;
+       ++rit)
+  {
+    auto sit = rit.base(); --sit;   // forward iterator at current element
     sit->p = redtailBba(sit->p,sit,strat);
     if (TEST_OPT_INTSTRATEGY)
     {
@@ -403,7 +406,9 @@ static void completeReduceFac (kStrategy strat, ideal_list FL)
               }
               for (auto ssit = n->S.begin(); ssit != n->S.end(); ++ssit) ssit->p = NULL;
               while (!n->S.empty()) n->S.erase(--n->S.end());
-              if (strat==n) si=-1;
+              // If strat==n, strat->S is now empty; the outer while will
+              // terminate naturally once line 461's check fails and the
+              // for(rit) re-enters over an empty S.
               break;
             }
             else
@@ -445,7 +450,8 @@ static void completeReduceFac (kStrategy strat, ideal_list FL)
               }
               for (auto ssit = n->S.begin(); ssit != n->S.end(); ++ssit) ssit->p = NULL;
               while (!n->S.empty()) n->S.erase(--n->S.end());
-              if (strat==n) si=-1;
+              // If strat==n, strat->S is now empty; outer while terminates
+              // naturally via the restart path.
               idDelete(&r);
               break;
             }
@@ -458,9 +464,13 @@ static void completeReduceFac (kStrategy strat, ideal_list FL)
     for(i=0;i<IDELEMS(fac);i++) fac->m[i]=NULL;
     idDelete(&fac);
     idDelete(&fac_copy);
-    if (! strat->L.empty() && ((!strat->S.empty()))) break;
-    else si=strat->S.size();
-  }
+    if (!strat->L.empty() && !strat->S.empty()) break_out = true;
+    else restart = true;
+    break;
+  } /* for (rit) */
+  if (break_out) break;
+  if (!restart) break;  // for ended naturally (rit exhausted): done
+  } /* while (true) */
 }
 
 ideal bbafac (ideal /*F*/, ideal Q,intvec* /*w*/,kStrategy strat, ideal_list FL)
