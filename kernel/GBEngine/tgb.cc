@@ -952,14 +952,10 @@ add_to_reductors (slimgb_alg * c, poly h, int len, int ecart,
     //pNormalize (P.p);
   }
   wlen_type pq = pQuality (h, c, len);
-  auto sit = c->strat->S.simple_find_pos(h, len, pq, c->strat);
-  c->strat->enterS (P, c->strat, c->strat->T.size()-1, c->strat->S.end());
-  {
-    int target = sit.index();
-    int appended_pos = c->strat->S.size() - 1;
-    if (target < appended_pos)
-      c->strat->S.move_forward(appended_pos, target);
-  }
+  // Insert directly at the length-sorted position (enter_bba supports
+  // insert-at-middle via atS, shifting existing elements up by one).
+  auto sit = c->strat->enterS (P, c->strat, c->strat->T.size()-1,
+                                c->strat->S.simple_find_pos(h, len, pq, c->strat));
   sit->length = len;
   assume (pLength (sit->p) == sit->length);
   if(c->strat->use_lenSw)
