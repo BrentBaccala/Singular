@@ -1119,14 +1119,6 @@ BOOLEAN kTest_TS(kStrategy strat)
 #endif // KDEBUG
 
 /*2
-*cancels the i-th polynomial in the standardbase s
-*/
-void deleteInS (int i,kStrategy strat)
-{
-  strat->S.erase(strat->S.iterator_at(i));
-}
-
-/*2
 * sBasisSet::erase_and_next — delete element at iterator, return next valid iterator.
 */
 sBasisSet::iterator sBasisSet::erase_and_next(iterator it)
@@ -4660,28 +4652,6 @@ void enterpairsSpecial (poly h,int k,int ecart,sBasisSet::iterator pos,kStrategy
 
   if (strat->noClearS) return;
 
-//   #ifdef HAVE_PLURAL
-/*
-  if (rIsPluralRing(currRing))
-  {
-    j=pos;
-    loop
-    {
-      if (j > k) break;
-
-      if (pLmDivisibleBy(h, strat->S.iterator_at(j)->p))
-      {
-        deleteInS(j, strat);
-        j--;
-        k--;
-      }
-
-      j++;
-    }
-  }
-  else
-*/
-//   #endif // ??? Why was the following cancellation disabled for non-commutative rings?
   {
     // Caller contract: k == strat->S.size()-1 on entry.
     assume(k == strat->S.size() - 1);

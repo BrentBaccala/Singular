@@ -531,39 +531,12 @@ public:
     return iterator(this, new_pos);
   }
 
-  // Construct an iterator at a raw index (no skip).
-  // Transitional: used by code migrating from int-based to iterator-based API.
-  // In lazy mode, the element at index i may be deleted — caller must check.
-  iterator iterator_at(int i) { return iterator(this, i); }
-  const_iterator const_iterator_at(int i) const { return const_iterator(this, i); }
-
-  // Escape hatch for subsystems (slimgb/tgb) that manage S via int
-  // indices internally and do not use SORDER_APPEND lazy deletion. These
-  // calls are semantically equivalent to iterator_at(int) but document
-  // that the caller has audited the site as lazy-mode-unaffected. Only
-  // call in contexts where no tombstoned slots exist in S.
-  iterator unsafe_iterator_at_int(int i) { return iterator(this, i); }
-  const_iterator unsafe_const_iterator_at_int(int i) const { return const_iterator(this, i); }
-
-  // Raw position-indexed access, WITHOUT skip-deleted semantics. Returns
-  // an iterator sitting at raw slot i — including tombstoned slots. This
-  // is the escape hatch for code that MUST walk the underlying storage
-  // (compaction, re-ordering, any bulk rewrite that treats S as an array
-  // rather than a logical sequence). Ordinary logical iteration should
-  // use begin()/end() / find_pos() / s_2_t(), etc.
-  //
-  // See the "Iterator invalidation contract" block above the sBasisSet
-  // class for the distinction between logical iteration (skip-deleted)
-  // and raw walks. raw_at bypasses that contract by design.
-  iterator raw_at(int i) { return iterator(this, i); }
-  const_iterator const_raw_at(int i) const { return const_iterator(this, i); }
-
   // --- Reverse iteration ---
   // Thin wrappers using the forward iterator's operator-- . Note: the
   // forward iterator's skip_deleted_backward stops at pos_ > 0, so if
-  // slot 0 is tombstoned a reverse walk will observe it (same contract
-  // as raw_at). Intended for callers that don't have tombstones in S
-  // (e.g. ring-coefficient post-compaction paths).
+  // slot 0 is tombstoned a reverse walk will observe it. Intended for
+  // callers that don't have tombstones in S (e.g. ring-coefficient
+  // post-compaction paths).
   class reverse_iterator {
     iterator it_;  // points one past the current element (like std::reverse_iterator)
   public:
@@ -1289,7 +1262,6 @@ int compareLSpecial (const LObject &lhs, const LObject &rhs, const kStrategy str
 
 void deleteHC(poly *p, int *e, int *l, kStrategy strat);
 void deleteHC(LObject* L, kStrategy strat, BOOLEAN fromNext = FALSE);
-void deleteInS (int i,kStrategy strat);
 void cleanT (kStrategy strat);
 sBasisSet::iterator enterSBba (LObject &p, kStrategy strat, int atR, sBasisSet::iterator atS);
 sBasisSet::iterator enterSBbaShift (LObject &p, kStrategy strat, int atR, sBasisSet::iterator atS);
