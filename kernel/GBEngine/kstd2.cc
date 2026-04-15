@@ -1117,7 +1117,10 @@ static int redRing_Z_S (LObject* h,kStrategy strat)
          * change the polys to h <- spoly(h,tj) and h2 <- gpoly(h,tj). */
         LObject h2  = *h;
         h2.Copy();
-        TObject tj(strat->S.iterator_at(j)->p);
+        // j came from kFindSameLMInT_Z (a T index); use T directly rather than
+        // routing via S. In ring paths S and T sync so T[j].p equals the
+        // former S.iterator_at(j)->p.
+        TObject tj(strat->T[j].p);
 
         ksReducePolyZ(h, &tj, NULL, NULL, strat);
         ksReducePolyGCD(&h2, &tj, NULL, NULL, strat);
@@ -3821,19 +3824,19 @@ ideal sba (ideal F0, ideal Q,intvec *w,bigintmat *hilb,kStrategy strat)
           // possible syzygies with elements of higher index
           for (unsigned i=cmp+1; i<=max_cmp; ++i)
           {
-            pos = -1;
+            auto found_it = strat->S.end();
             {
             int last_idx = strat->S.size()-1;
             for (auto sit_j=strat->S.begin(); sit_j!=strat->S.end() && sit_j.index() < last_idx; ++sit_j)
             {
               if (__p_GetComp(sit_j->sig,currRing) == i)
               {
-                pos = sit_j.index();
+                found_it = sit_j;
                 break;
               }
             }
             }
-            if (pos != -1)
+            if (found_it != strat->S.end())
             {
               Q.sig = p_One(currRing);
               p_SetExpV(Q.sig, vv, currRing);
@@ -3841,7 +3844,7 @@ ideal sba (ideal F0, ideal Q,intvec *w,bigintmat *hilb,kStrategy strat)
               p_ExpVectorAdd(Q.sig,F->m[i-1],currRing);
               p_SetComp(Q.sig, i, currRing);
               poly help = p_Copy(strat->P.sig,currRing);
-              p_ExpVectorAdd(help,strat->S.iterator_at(pos)->p,currRing);
+              p_ExpVectorAdd(help,found_it->p,currRing);
               Q.sig = p_Add_q(Q.sig,help,currRing);
               if (strat->sbaOrder == 0)
               {
