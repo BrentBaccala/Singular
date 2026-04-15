@@ -7228,7 +7228,11 @@ void initS (ideal F, ideal Q, kStrategy strat)
        && n_IsUnit(pGetCoeff(strat->S.begin()->p),currRing->cf)
        && pIsConstant(strat->S.begin()->p))
   {
-    while ((strat->S.size() > 1)) deleteInS(strat->S.size()-1,strat);
+    while (strat->S.size() > 1)
+    {
+      auto last = strat->S.end(); --last;
+      strat->S.erase(last);
+    }
   }
 }
 
@@ -9636,29 +9640,9 @@ void updateResult(ideal Q, kStrategy strat)
       }
     }
   }
-  // Compact S: remove NULL gaps left by pDelete, matching old idSkipZeroes behavior.
-  // This matters because bba continues using S after updateResult returns.
-  // Two-cursor shift (std::remove_if idiom). The write and read cursors
-  // walk raw positions, including deleted/NULL slots — use raw_at() to
-  // make this intent explicit. This deliberately bypasses the iterator
-  // API's skip-deleted semantics; see the iterator invalidation contract
-  // above the sBasisSet class declaration in kutil.h. Compaction is a
-  // bulk rewrite rather than logical iteration.
-  {
-    int j = 0;
-    const int n = strat->S.size();
-    for (int k = 0; k < n; k++)
-    {
-      auto src = strat->S.raw_at(k);
-      if (src->p != NULL)
-      {
-        if (j != k)
-          *strat->S.raw_at(j) = *src;
-        j++;
-      }
-    }
-    strat->S.setsize(j);
-  }
+  // Compact S: remove NULL gaps left by pDelete, matching old idSkipZeroes
+  // behavior. Bba continues using S after updateResult returns.
+  strat->S.compact_null_p();
 }
 
 void completeReduce (kStrategy strat, BOOLEAN withT)

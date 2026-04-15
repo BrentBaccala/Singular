@@ -431,6 +431,23 @@ public:
   void set_pairtest_any() { pairtest_any_ = true; }
   bool has_pairtest() const { return pairtest_any_; }
 
+  // Compact: remove entries whose .p field is NULL (typically set by
+  // updateResult's pDelete pass). Differs from compact() in that this
+  // filters on p==NULL rather than on the deleted tombstone flag; some
+  // callers pDelete directly without marking the element deleted.
+  void compact_null_p() {
+    int dst = 0;
+    for (int src = 0; src < count; src++) {
+      if (elem(src).p != NULL) {
+        if (dst != src)
+          elem(dst) = elem(src);
+        dst++;
+      }
+    }
+    count = dst;
+    live_count_ = dst;
+  }
+
   // Compact: remove deleted entries, pack remaining entries contiguously.
   // Only meaningful after lazy mode. Resets to non-lazy mode.
   void compact() {
