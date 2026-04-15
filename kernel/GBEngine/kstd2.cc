@@ -976,7 +976,7 @@ int redRing_Z (LObject* h,kStrategy strat)
         ksReducePolyGCD(&h2, &(strat->T[j]), NULL, NULL, strat);
         if (!rHasLocalOrMixedOrdering(currRing))
         {
-          redtailBbaAlsoLC_Z(&h2, j, strat);
+          redtailBbaAlsoLC_Z(&h2, strat);
         }
         /* replace h2 for tj in L (already generated pairs with tj), S and T */
         replaceInLAndSAndT(h2, j, strat);
@@ -1936,7 +1936,7 @@ int redSigRing (LObject* h,kStrategy strat)
 }
 
 // tail reduction for SBA
-poly redtailSba (LObject* L, int pos, kStrategy strat, BOOLEAN withT, BOOLEAN normalize)
+poly redtailSba (LObject* L, sBasisSet::const_iterator end, kStrategy strat, BOOLEAN withT, BOOLEAN normalize)
 {
   strat->redTailChange=FALSE;
   if (strat->noTailReduction) return L->GetLmCurrRing();
@@ -1977,7 +1977,7 @@ poly redtailSba (LObject* L, int pos, kStrategy strat, BOOLEAN withT, BOOLEAN no
       }
       else
       {
-        With = kFindDivisibleByInS_T(strat, strat->S.const_iterator_at(pos + 1), &Ln, &With_s);
+        With = kFindDivisibleByInS_T(strat, end, &Ln, &With_s);
         if (With == NULL) break;
       }
       cnt--;
@@ -2935,7 +2935,7 @@ ideal bba (ideal F, ideal Q,intvec *w,bigintmat *hilb,kStrategy strat)
        * the coefficients in the tail terms */
       if (rField_is_Z(currRing) && !rHasLocalOrMixedOrdering(currRing))
       {
-        redtailBbaAlsoLC_Z(&(strat->P), strat->T.size()-1, strat);
+        redtailBbaAlsoLC_Z(&(strat->P), strat);
       }
 
       if (TEST_OPT_INTSTRATEGY)
@@ -3589,6 +3589,10 @@ ideal sba (ideal F0, ideal Q,intvec *w,bigintmat *hilb,kStrategy strat)
       // in F5E we know that the last reduced element is already the
       // the one with highest signature
       int pos = strat->S.size();
+      // Snapshot past-end iterator matching `pos`. S is not mutated
+      // between here and the redtailSba calls below, so end_snapshot
+      // == strat->S.end() at call time; capture for clarity.
+      auto end_snapshot = strat->S.end();
 
       // reduce the tail and normalize poly
       // in the ring case we cannot expect LC(f) = 1,
@@ -3599,7 +3603,7 @@ ideal sba (ideal F0, ideal Q,intvec *w,bigintmat *hilb,kStrategy strat)
       if(rField_is_Ring(currRing))
       {
         if ((TEST_OPT_REDSB)||(TEST_OPT_REDTAIL))
-          strat->P.p = redtailSba(&(strat->P),pos-1,strat, withT);
+          strat->P.p = redtailSba(&(strat->P),end_snapshot,strat, withT);
       }
       else
       {
@@ -3610,7 +3614,7 @@ ideal sba (ideal F0, ideal Q,intvec *w,bigintmat *hilb,kStrategy strat)
             strat->P.pCleardenom();
             if ((TEST_OPT_REDSB)||(TEST_OPT_REDTAIL))
             {
-              strat->P.p = redtailSba(&(strat->P),pos-1,strat, withT);
+              strat->P.p = redtailSba(&(strat->P),end_snapshot,strat, withT);
               strat->P.pCleardenom();
             }
           }
@@ -3618,7 +3622,7 @@ ideal sba (ideal F0, ideal Q,intvec *w,bigintmat *hilb,kStrategy strat)
           {
             strat->P.pNorm();
             if ((TEST_OPT_REDSB)||(TEST_OPT_REDTAIL))
-              strat->P.p = redtailSba(&(strat->P),pos-1,strat, withT);
+              strat->P.p = redtailSba(&(strat->P),end_snapshot,strat, withT);
           }
         }
       }
@@ -4189,7 +4193,7 @@ poly kNF2 (ideal F,ideal Q,poly q,kStrategy strat, int lazyReduce)
     }
     else if (rField_is_Ring(currRing))
     {
-      p = redtailBba_Ring(p,strat->S.size()-1,strat);
+      p = redtailBba_Ring(p,strat->S.end(),strat);
     }
     else
     {
@@ -4249,16 +4253,16 @@ poly kNF2Bound (ideal F,ideal Q,poly q,int bound,kStrategy strat, int lazyReduce
     if (TEST_OPT_PROT) { PrintS("t"); mflush(); }
     if (rField_is_Z(currRing)||(rField_is_Zn(currRing)))
     {
-      p = redtailBba_Z(p,strat->S.size()-1,strat);
+      p = redtailBba_Z(p,strat->S.end(),strat);
     }
     else if (rField_is_Ring(currRing))
     {
-      p = redtailBba_Ring(p,strat->S.size()-1,strat);
+      p = redtailBba_Ring(p,strat->S.end(),strat);
     }
     else
     {
       si_opt_1 &= ~Sy_bit(OPT_INTSTRATEGY);
-      p = redtailBbaBound(p,strat->S.size()-1,strat,bound,(lazyReduce & KSTD_NF_NONORM)==0);
+      p = redtailBbaBound(p,strat->S.end(),strat,bound,(lazyReduce & KSTD_NF_NONORM)==0);
     }
   }
   /*- release temp data------------------------------- -*/
@@ -4391,16 +4395,16 @@ ideal kNF2Bound (ideal F,ideal Q,ideal q,int bound,kStrategy strat, int lazyRedu
         if (TEST_OPT_PROT) { PrintS("t"); mflush(); }
         if (rField_is_Z(currRing)||(rField_is_Zn(currRing)))
         {
-          p = redtailBba_Z(p,strat->S.size()-1,strat);
+          p = redtailBba_Z(p,strat->S.end(),strat);
         }
         else if (rField_is_Ring(currRing))
         {
-          p = redtailBba_Ring(p,strat->S.size()-1,strat);
+          p = redtailBba_Ring(p,strat->S.end(),strat);
         }
         else
         {
           si_opt_1 &= ~Sy_bit(OPT_INTSTRATEGY);
-          p = redtailBbaBound(p,strat->S.size()-1,strat,bound,(lazyReduce & KSTD_NF_NONORM)==0);
+          p = redtailBbaBound(p,strat->S.end(),strat,bound,(lazyReduce & KSTD_NF_NONORM)==0);
         }
       }
       res->m[i]=p;
@@ -4895,7 +4899,7 @@ ideal bbaShift(ideal F, ideal Q,intvec *w,bigintmat *hilb,kStrategy strat)
        * the coefficients in the tail terms */
       if (rField_is_Z(currRing) && !rHasLocalOrMixedOrdering(currRing))
       {
-        redtailBbaAlsoLC_Z(&(strat->P), strat->T.size()-1, strat);
+        redtailBbaAlsoLC_Z(&(strat->P), strat);
       }
 
       if (TEST_OPT_INTSTRATEGY)

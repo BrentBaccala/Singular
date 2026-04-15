@@ -1290,25 +1290,24 @@ int posInSyz (const kStrategy strat, const poly sig);
 // reduce against [strat->S.begin(), end)). Previous int end_pos was
 // *inclusive* — translation for callers: old `pos-1` (inclusive) becomes
 // new `pos` (exclusive iterator); old `strat->S.size()-1` becomes
-// `strat->S.end()`; old raw `max_ind` (inclusive int) becomes
-// `strat->S.iterator_at(max_ind + 1)`.
+// `strat->S.end()`.
 KINLINE poly redtailBba (poly p,sBasisSet::const_iterator end,kStrategy strat,BOOLEAN normalize=FALSE);
-KINLINE poly redtailBbaBound (poly p,int end_pos,kStrategy strat,int bound,BOOLEAN normalize=FALSE);
-KINLINE poly redtailBba_Ring (poly p,int end_pos,kStrategy strat);
-KINLINE poly redtailBba_Z (poly p,int end_pos,kStrategy strat);
+KINLINE poly redtailBbaBound (poly p,sBasisSet::const_iterator end,kStrategy strat,int bound,BOOLEAN normalize=FALSE);
+KINLINE poly redtailBba_Ring (poly p,sBasisSet::const_iterator end,kStrategy strat);
+KINLINE poly redtailBba_Z (poly p,sBasisSet::const_iterator end,kStrategy strat);
 poly redtailBba_NF (poly p, kStrategy strat );
-poly redtailBba_Ring (LObject* L, int end_pos, kStrategy strat );
-poly redtailBba_Z (LObject* L, int end_pos, kStrategy strat );
-void redtailBbaAlsoLC_Z (LObject* L, int end_pos, kStrategy strat );
+poly redtailBba_Ring (LObject* L, sBasisSet::const_iterator end, kStrategy strat );
+poly redtailBba_Z (LObject* L, sBasisSet::const_iterator end, kStrategy strat );
+void redtailBbaAlsoLC_Z (LObject* L, kStrategy strat );
 poly redtailBba (LObject *L, sBasisSet::const_iterator end,kStrategy strat,
                  BOOLEAN withT = FALSE,BOOLEAN normalize=FALSE);
-poly redtailBbaBound (LObject *L, int end_pos,kStrategy strat,int bound,
+poly redtailBbaBound (LObject *L, sBasisSet::const_iterator end,kStrategy strat,int bound,
                  BOOLEAN withT = FALSE,BOOLEAN normalize=FALSE);
-poly redtailSba (LObject *L, int end_pos,kStrategy strat,
+poly redtailSba (LObject *L, sBasisSet::const_iterator end,kStrategy strat,
                  BOOLEAN withT = FALSE,BOOLEAN normalize=FALSE);
 poly redtailBba (TObject *T, sBasisSet::const_iterator end,kStrategy strat);
-poly redtail (poly p,int end_pos,kStrategy strat);
-poly redtail (LObject *L,int end_pos,kStrategy strat);
+poly redtail (poly p,sBasisSet::const_iterator end,kStrategy strat);
+poly redtail (LObject *L,sBasisSet::const_iterator end,kStrategy strat);
 poly redNF (poly h,int nonorm,kStrategy strat);
 int redNF0 (LObject *P,kStrategy strat);
 poly redNFTail (poly h,const int sl,kStrategy strat);

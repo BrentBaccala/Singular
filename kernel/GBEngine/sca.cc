@@ -1056,7 +1056,7 @@ ideal k_sca_mora(const ideal F, const ideal Q, const intvec */*w*/, const bigint
       if (!TEST_OPT_INTSTRATEGY)
         strat->P.pNorm();
       // tailreduction
-      strat->P.p = redtail(&(strat->P),strat->S.size()-1,strat);
+      strat->P.p = redtail(&(strat->P),strat->S.end(),strat);
       // set ecart -- might have changed because of tail reductions
       if ((!strat->noTailReduction) && (!strat->honey))
         strat->initEcart(&strat->P);

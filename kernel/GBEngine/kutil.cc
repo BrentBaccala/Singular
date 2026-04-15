@@ -6403,7 +6403,7 @@ TObject* kFindDivisibleByInS_T(kStrategy strat, sBasisSet::const_iterator end, L
   }
 }
 
-poly redtail (LObject* L, int end_pos, kStrategy strat)
+poly redtail (LObject* L, sBasisSet::const_iterator end, kStrategy strat)
 {
   poly h, hn;
   strat->redTailChange=FALSE;
@@ -6436,9 +6436,9 @@ poly redtail (LObject* L, int end_pos, kStrategy strat)
       Ln.Set(hn, strat->tailRing);
       Ln.sev = p_GetShortExpVector(hn, strat->tailRing);
       if (strat->kAllAxis)
-        With = kFindDivisibleByInS_T(strat, strat->S.const_iterator_at(end_pos + 1), &Ln, &With_s);
+        With = kFindDivisibleByInS_T(strat, end, &Ln, &With_s);
       else
-        With = kFindDivisibleByInS_T(strat, strat->S.const_iterator_at(end_pos + 1), &Ln, &With_s, e);
+        With = kFindDivisibleByInS_T(strat, end, &Ln, &With_s, e);
       if (With == NULL) break;
       With->length=0;
       With->pLength=0;
@@ -6449,7 +6449,7 @@ poly redtail (LObject* L, int end_pos, kStrategy strat)
         if (kStratChangeTailRing(strat, L))
         {
           strat->kAllAxis = save_HE;
-          return redtail(L, end_pos, strat);
+          return redtail(L, end, strat);
         }
         else
           return NULL;
@@ -6473,21 +6473,16 @@ poly redtail (LObject* L, int end_pos, kStrategy strat)
   return p;
 }
 
-poly redtail (poly p, int end_pos, kStrategy strat)
+poly redtail (poly p, sBasisSet::const_iterator end, kStrategy strat)
 {
   LObject L(p, currRing);
-  return redtail(&L, end_pos, strat);
+  return redtail(&L, end, strat);
 }
 
 // `end` is the exclusive upper-bound iterator: reduction considers
-// S-elements in [strat->S.begin(), end). Previously `int end_pos` was
-// inclusive ([0..end_pos]); callers' old `pos-1` (inclusive int) becomes
-// new `pos` (exclusive iterator). Internally we still need an inclusive
-// int for kFindDivisibleByInS_T (not yet migrated).
+// S-elements in [strat->S.begin(), end).
 poly redtailBba (LObject* L, sBasisSet::const_iterator end, kStrategy strat, BOOLEAN withT, BOOLEAN normalize)
 {
-  const int end_pos = (end == strat->S.cend()) ? strat->S.size() - 1
-                                                : end.index() - 1;
   strat->redTailChange=FALSE;
   if (strat->noTailReduction) return L->GetLmCurrRing();
   poly h, p;
@@ -6539,7 +6534,7 @@ poly redtailBba (LObject* L, sBasisSet::const_iterator end, kStrategy strat, BOO
       }
       else
       {
-        With = kFindDivisibleByInS_T(strat, strat->S.const_iterator_at(end_pos + 1), &Ln, &With_s);
+        With = kFindDivisibleByInS_T(strat, end, &Ln, &With_s);
         if (With == NULL) break;
         assume(With->GetpLength()==pLength(With->p != __null ? With->p : With->t_p));
       }
@@ -6599,7 +6594,7 @@ poly redtailBba (LObject* L, sBasisSet::const_iterator end, kStrategy strat, BOO
   return L->GetLmCurrRing();
 }
 
-poly redtailBbaBound (LObject* L, int end_pos, kStrategy strat, int bound, BOOLEAN withT, BOOLEAN normalize)
+poly redtailBbaBound (LObject* L, sBasisSet::const_iterator end, kStrategy strat, int bound, BOOLEAN withT, BOOLEAN normalize)
 {
   strat->redTailChange=FALSE;
   if (strat->noTailReduction) return L->GetLmCurrRing();
@@ -6647,7 +6642,7 @@ poly redtailBbaBound (LObject* L, int end_pos, kStrategy strat, int bound, BOOLE
       }
       else
       {
-        With = kFindDivisibleByInS_T(strat, strat->S.const_iterator_at(end_pos + 1), &Ln, &With_s);
+        With = kFindDivisibleByInS_T(strat, end, &Ln, &With_s);
         if (With == NULL) break;
       }
       cnt--;
@@ -6714,7 +6709,7 @@ poly redtailBbaBound (LObject* L, int end_pos, kStrategy strat, int bound, BOOLE
   return L->GetLmCurrRing();
 }
 
-void redtailBbaAlsoLC_Z (LObject* L, int end_pos, kStrategy strat )
+void redtailBbaAlsoLC_Z (LObject* L, kStrategy strat )
 // normalize=FALSE, withT=FALSE, coeff=Z
 {
   strat->redTailChange=FALSE;
@@ -6843,7 +6838,7 @@ void redtailBbaAlsoLC_Z (LObject* L, int end_pos, kStrategy strat )
   return;
 }
 
-poly redtailBba_Z (LObject* L, int end_pos, kStrategy strat )
+poly redtailBba_Z (LObject* L, sBasisSet::const_iterator end, kStrategy strat )
 // normalize=FALSE, withT=FALSE, coeff=Z
 {
   strat->redTailChange=FALSE;
@@ -6872,7 +6867,7 @@ poly redtailBba_Z (LObject* L, int end_pos, kStrategy strat )
     loop
     {
       Ln.SetShortExpVector();
-      With = kFindDivisibleByInS_T(strat, strat->S.const_iterator_at(end_pos + 1), &Ln, &With_s);
+      With = kFindDivisibleByInS_T(strat, end, &Ln, &With_s);
       if (With == NULL) break;
       cnt--;
       if (cnt==0)
@@ -6948,7 +6943,7 @@ poly redtailBba_NF (poly p, kStrategy strat )
   return h;
 }
 
-poly redtailBba_Ring (LObject* L, int end_pos, kStrategy strat )
+poly redtailBba_Ring (LObject* L, sBasisSet::const_iterator end, kStrategy strat )
 // normalize=FALSE, withT=FALSE, coeff=Ring
 {
   strat->redTailChange=FALSE;
@@ -6978,7 +6973,7 @@ poly redtailBba_Ring (LObject* L, int end_pos, kStrategy strat )
     {
       Ln.SetShortExpVector();
       With_s.Init(currRing);
-      With = kFindDivisibleByInS_T(strat, strat->S.const_iterator_at(end_pos + 1), &Ln, &With_s);
+      With = kFindDivisibleByInS_T(strat, end, &Ln, &With_s);
       if (With == NULL) break;
       cnt--;
       if (cnt==0)
@@ -8285,7 +8280,7 @@ void updateS(BOOLEAN toT,kStrategy strat)
     {
       if ((!strat->hasFromQ) || (sit->fromQ==0))
       {
-        sit->p = h.p = redtail(sit->p,strat->S.size()-1,strat);
+        sit->p = h.p = redtail(sit->p,strat->S.end(),strat);
         strat->initEcart(&h);
         sit->ecart = h.ecart;
         h.sev = pGetShortExpVector(h.p);
@@ -9716,7 +9711,7 @@ void completeReduce (kStrategy strat, BOOLEAN withT)
       }
       else
       {
-        sit->p = redtail(&L, strat->S.size()-1, strat);
+        sit->p = redtail(&L, strat->S.end(), strat);
       }
       #ifdef KDEBUG
       if (TEST_OPT_DEBUG)
@@ -9755,7 +9750,7 @@ void completeReduce (kStrategy strat, BOOLEAN withT)
       }
       else
       {
-        sit->p = redtail(sit->p, strat->S.size()-1, strat);
+        sit->p = redtail(sit->p, strat->S.end(), strat);
       }
       if (TEST_OPT_INTSTRATEGY)
       {

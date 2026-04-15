@@ -1289,21 +1289,21 @@ KINLINE poly redtailBba (poly p,sBasisSet::const_iterator end,kStrategy strat,BO
   return redtailBba(&L, end, strat,FALSE, normalize);
 }
 
-KINLINE poly redtailBbaBound (poly p,int pos,kStrategy strat,int bound,BOOLEAN normalize)
+KINLINE poly redtailBbaBound (poly p,sBasisSet::const_iterator end,kStrategy strat,int bound,BOOLEAN normalize)
 {
   LObject L(p, currRing, strat->tailRing); // ? L(p); ??
-  return redtailBbaBound(&L, pos, strat,bound, FALSE, normalize);
+  return redtailBbaBound(&L, end, strat,bound, FALSE, normalize);
 }
 
-KINLINE poly redtailBba_Ring (poly p,int pos,kStrategy strat)
+KINLINE poly redtailBba_Ring (poly p,sBasisSet::const_iterator end,kStrategy strat)
 {
   LObject L(p, currRing, strat->tailRing);
-  return redtailBba_Ring(&L, pos, strat);
+  return redtailBba_Ring(&L, end, strat);
 }
-KINLINE poly redtailBba_Z (poly p,int pos,kStrategy strat)
+KINLINE poly redtailBba_Z (poly p,sBasisSet::const_iterator end,kStrategy strat)
 {
   LObject L(p, currRing, strat->tailRing);
-  return redtailBba_Z(&L, pos, strat);
+  return redtailBba_Z(&L, end, strat);
 }
 
 // Old int-based clearS — delegates to sBasisSet::clear_if_divisible.

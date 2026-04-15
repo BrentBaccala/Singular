@@ -2011,7 +2011,7 @@ ideal mora (ideal F, ideal Q,intvec *w,bigintmat *hilb,kStrategy strat)
       else
         strat->P.pNorm();
       // tailreduction
-      strat->P.p = redtail(&(strat->P),strat->S.size()-1,strat);
+      strat->P.p = redtail(&(strat->P),strat->S.end(),strat);
       if (strat->P.p==NULL)
       {
         WerrorS("exponent overflow - wrong ordering");
@@ -2211,7 +2211,7 @@ poly kNF1 (ideal F,ideal Q,poly q, kStrategy strat, int lazyReduce)
   if ((p!=NULL)&&((lazyReduce & KSTD_NF_LAZY)==0))
   {
     if (TEST_OPT_PROT) { PrintS("t"); mflush(); }
-    p = redtail(p,strat->S.size()-1,strat);
+    p = redtail(p,strat->S.end(),strat);
   }
   /*- release temp data------------------------------- -*/
   cleanT(strat);
@@ -2347,7 +2347,7 @@ ideal kNF1 (ideal F,ideal Q,ideal q, kStrategy strat, int lazyReduce)
         if ((p!=NULL)&&((lazyReduce & KSTD_NF_LAZY)==0))
         {
           if (TEST_OPT_PROT) { PrintS("t"); mflush(); }
-          p = redtail(p,strat->S.size()-1,strat);
+          p = redtail(p,strat->S.end(),strat);
         }
         cleanT(strat);
       }

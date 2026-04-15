@@ -881,7 +881,7 @@ static void process_survivor_lobject(SweepContext *ctx, LObject *P, int thread_i
   strat->redTailChange = FALSE;
 
   if (rField_is_Z(currRing) && !rHasLocalOrMixedOrdering(currRing))
-    redtailBbaAlsoLC_Z(P, strat->T.size()-1, strat);
+    redtailBbaAlsoLC_Z(P, strat);
 
   if (TEST_OPT_INTSTRATEGY)
   {
