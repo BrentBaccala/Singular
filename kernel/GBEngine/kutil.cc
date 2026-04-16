@@ -542,6 +542,13 @@ void cleanT (kStrategy strat)
   poly  p;
   assume(currRing == strat->tailRing || strat->tailRing != NULL);
 
+  // Optional tombstone-pile-up instrumentation for SORDER_STANDARD /
+  // SORDER_APPEND tombstone-on-erase (task 503). Set env var
+  // SINGULAR_SBASIS_STATS to see the stats at cleanT entry.
+  if (getenv("SINGULAR_SBASIS_STATS") != NULL) {
+    strat->S.debug_print_stats("cleanT");
+  }
+
   pShallowCopyDeleteProc p_shallow_copy_delete =
     (strat->tailRing != currRing ?
      pGetShallowCopyDeleteProc(strat->tailRing, currRing) :
@@ -1204,6 +1211,7 @@ void sBasisSet::clear_if_divisible(poly p, unsigned long p_sev,
 
 sBasisSet::iterator sBasisSet::simple_find_pos(poly p, int len, wlen_type wlen, kStrategy strat)
 {
+  if (deleted_count_ > 0) compact();
   if (empty()) return begin();
   int length = size() - 1;
   int i, an = 0, en = length;
@@ -4673,6 +4681,14 @@ void enterpairsSpecial (poly h,int k,int ecart,sBasisSet::iterator pos,kStrategy
 void sBasisSet::reorder(int *suc, kStrategy strat)
 {
   int i,j,at;
+
+  // Compact first: reorder walks by physical index (elem(i)) and
+  // shifts whole SElements. Tombstones in the array would corrupt the
+  // shift semantics. After compact(), physical count == live_count,
+  // and *suc (a live-index set by a prior reorder call or 0 initially)
+  // is a valid physical index into the compacted sequence.
+  compact();
+
   int new_suc = size();
   i = *suc;
   if (i < 0) i = 0;
@@ -4702,14 +4718,23 @@ void sBasisSet::reorder(int *suc, kStrategy strat)
 /*2
 * sBasisSet::find_pos — binary search for sorted insertion position.
 * Replaces the old free posInS function. Public form scans all of S.
+*
+* Tombstone handling: find_pos does index-based binary search, which
+* cannot cope with tombstoned entries (their .p may have been set to
+* NULL by callers before the erase, e.g. updateS/redBba). Compact the
+* array first if any tombstones exist. This is amortized O(n) per
+* find_pos call only when tombstones accumulated since the last
+* compact; insert-heavy phases pay no compaction cost.
 */
 sBasisSet::iterator sBasisSet::find_pos(const poly p, int ecart_p)
 {
+  if (deleted_count_ > 0) compact();
   return find_pos(p, ecart_p, end());
 }
 
 /* Bounded form: search within [0 .. end_bound). Only used internally
- * by find_divisor_search_bound. */
+ * by find_divisor_search_bound (which must ensure the set is already
+ * compacted). */
 sBasisSet::iterator sBasisSet::find_pos(const poly p, int ecart_p, iterator end_bound)
 {
   if (empty()) return begin();
@@ -4824,6 +4849,15 @@ sBasisSet::iterator sBasisSet::find_divisor_search_bound(poly p, iterator max, k
   // Bounded find_pos returns the insertion point within [0, max). The
   // old code used an inclusive "ende = fp + 1" clamp; translated to an
   // exclusive iterator-end, that's fp + 2 clamped to max.
+  // Compact first: the bounded find_pos does not compact itself so that
+  // callers passing a pre-computed max iterator aren't silently affected.
+  if (deleted_count_ > 0) {
+    int max_idx = max.index();
+    compact();
+    // After compact, max_idx may now be past physical count. Re-clamp.
+    if (max_idx > count) max_idx = count;
+    max = iterator(this, max_idx);
+  }
   iterator ende = find_pos(p, 0, max);
   // Advance two raw slots: one for the "+1" inclusive -> exclusive shift
   // (we want to include the element at fp), one more for the historic
@@ -4841,6 +4875,7 @@ sBasisSet::iterator sBasisSet::find_divisor_search_bound(poly p, iterator max, k
 */
 sBasisSet::iterator sBasisSet::find_pos_monfirst(const poly p)
 {
+  if (deleted_count_ > 0) compact();
   if (empty()) return begin();
   int length = size() - 1;
   if (pNext(p) == NULL)
@@ -8334,8 +8369,9 @@ ideal skStrategy::getShdl()
   int n = S.size();
   if (n < 1) n = 1;  // always at least 1 slot (Singular convention for zero ideal)
   ideal I = idInit(n, Srank);
-  for (int i = 0; i < S.size(); i++)
-    I->m[i] = S[i].p;
+  int i = 0;
+  for (auto sit = S.begin(); sit != S.end(); ++sit)
+    I->m[i++] = sit->p;
   return I;
 }
 

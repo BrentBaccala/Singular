@@ -193,11 +193,22 @@ struct SElement {
  * Ordering modes control insert() and erase() behavior:
  *   SORDER_STANDARD:  sorted by leading monomial + ecart (posInS).
  *                     insert() finds position via binary search, shifts.
- *                     erase() shifts elements down.
+ *                     erase() sets deleted flag (no shifting).
  *   SORDER_MONFIRST:  monomials first, then by degree (posInSMonFirst).
  *                     Used by sba() over rings.
+ *                     erase() shifts elements down.
  *   SORDER_APPEND:    append at end, no sorting (parallel phase).
  *                     erase() sets deleted flag (no shifting).
+ *
+ * Tombstone-on-erase (SORDER_STANDARD, SORDER_APPEND): physical `count`
+ * of the underlying BlockArray is not decremented by erase(); only the
+ * `deleted` flag on SElement is flipped and live_count_ is decremented.
+ * Iterators automatically skip deleted entries via skip_deleted_forward /
+ * skip_deleted_backward. Binary search in find_pos still works because
+ * sort order is preserved (polys on tombstoned entries are not freed;
+ * the enclosing T set owns them). Compaction via compact() packs live
+ * entries contiguously; it is called implicitly at the start of
+ * reorder() and cleanT().
  *
  * --- Iterator invalidation contract ------------------------------------
  *
@@ -221,23 +232,27 @@ struct SElement {
  *    positions >= the insert position. Iterators at positions < insert
  *    remain valid.
  *
- * 3. Non-lazy erase (erase_and_next in SORDER_STANDARD / SORDER_MONFIRST,
- *    or erase() when not in APPEND mode): shifts elements down.
- *    Invalidates all iterators at positions > the erased position.
- *    The iterator AT the erased position is returned by erase_and_next
- *    repointed at whatever element slid into the vacated slot (or end()
- *    if the erased element was last).
+ * 3. Non-lazy erase (erase_and_next in SORDER_MONFIRST, or erase() in
+ *    SORDER_MONFIRST mode): shifts elements down. Invalidates all
+ *    iterators at positions > the erased position. The iterator AT
+ *    the erased position is returned by erase_and_next repointed at
+ *    whatever element slid into the vacated slot (or end() if the
+ *    erased element was last).
  *
- * 4. Lazy erase (erase() in SORDER_APPEND mode): sets the deleted
- *    tombstone flag on the element. Invalidates only the iterator at
- *    the tombstoned position — it becomes a "tombstone iterator" whose
- *    operator++ will skip forward past all consecutive tombstones and
- *    land on the next live element.
+ * 4. Lazy erase (erase() in SORDER_STANDARD or SORDER_APPEND mode):
+ *    sets the deleted tombstone flag on the element. Invalidates only
+ *    the iterator at the tombstoned position — it becomes a "tombstone
+ *    iterator" whose operator++ will skip forward past all consecutive
+ *    tombstones and land on the next live element.
  *
  * 5. Reorder (reorder()): invalidates ALL outstanding iterators. Callers
- *    must drop every stored iterator before calling reorder().
+ *    must drop every stored iterator before calling reorder(). reorder()
+ *    also compacts tombstones as a side effect.
  *
- * 6. Responsibility is on callers. There is no runtime enforcement of
+ * 6. Compact (compact()): invalidates ALL outstanding iterators. Callers
+ *    must drop every stored iterator before calling compact().
+ *
+ * 7. Responsibility is on callers. There is no runtime enforcement of
  *    these rules; violations are undefined behaviour (in practice: a
  *    stale iterator refers to a different logical element than the one
  *    the caller captured).
@@ -331,7 +346,9 @@ public:
   };
 
   // --- Construction / mode ---
-  sBasisSet() : order_(SORDER_STANDARD), live_count_(0), pairtest_any_(false) {
+  sBasisSet() : order_(SORDER_STANDARD), live_count_(0), pairtest_any_(false),
+                deleted_count_(0), peak_deleted_count_(0),
+                erase_call_count_(0), compact_call_count_(0) {
     pthread_mutex_init(&mutex_, NULL);
   }
   ~sBasisSet() {
@@ -399,15 +416,26 @@ public:
   }
 
   // --- Erase ---
-  // SORDER_APPEND: set deleted flag (no shifting).
-  // Other modes: shift elements down.
+  // SORDER_STANDARD, SORDER_APPEND: set deleted flag (no shifting).
+  //   The physical `count` of the underlying BlockArray is unchanged;
+  //   live_count_ is decremented. Compaction packs the array later via
+  //   compact() (called by reorder(), cleanT(), or explicitly by callers).
+  // SORDER_MONFIRST: shift elements down (legacy shift semantics).
+  //   MONFIRST is only used by sba() over rings and is uncommon; keeping
+  //   shift avoids touching the binary-search assumptions of the
+  //   monfirst-count logic in find_pos_monfirst.
   void erase(iterator it) {
-    if (order_ == SORDER_APPEND) {
-      elem(it.pos_).deleted = true;
-    } else {
+    erase_call_count_++;
+    if (order_ == SORDER_MONFIRST) {
       BlockArray<SElement>::erase(it.pos_);
+      live_count_--;
+    } else {
+      if (!elem(it.pos_).deleted) {
+        elem(it.pos_).deleted = true;
+        deleted_count_++;
+        live_count_--;
+      }
     }
-    live_count_--;
   }
 
   // --- Capacity / storage ---
@@ -415,10 +443,15 @@ public:
   using BlockArray<SElement>::capacity;
   using BlockArray<SElement>::free_all;
 
-  // Set element count directly (used during initialization).
+  // Set element count directly (used during initialization and by
+  // paths that rebuild S from scratch, e.g. SCA's kInterRedOld).
+  // Clears tombstone flags for the retained n slots so the caller sees
+  // a clean array with live_count == physical count.
   void setsize(int n) {
     BlockArray<SElement>::setsize(n);
     live_count_ = n;
+    deleted_count_ = 0;
+    for (int i = 0; i < n; i++) elem(i).deleted = false;
   }
 
   // --- Pairtest ---
@@ -435,10 +468,12 @@ public:
   // updateResult's pDelete pass). Differs from compact() in that this
   // filters on p==NULL rather than on the deleted tombstone flag; some
   // callers pDelete directly without marking the element deleted.
+  // Also drops any tombstoned entries (whose p might still be non-NULL)
+  // because after compact_null_p the intent is a packed live array.
   void compact_null_p() {
     int dst = 0;
     for (int src = 0; src < count; src++) {
-      if (elem(src).p != NULL) {
+      if (elem(src).p != NULL && !elem(src).deleted) {
         if (dst != src)
           elem(dst) = elem(src);
         dst++;
@@ -446,11 +481,24 @@ public:
     }
     count = dst;
     live_count_ = dst;
+    deleted_count_ = 0;
   }
 
   // Compact: remove deleted entries, pack remaining entries contiguously.
-  // Only meaningful after lazy mode. Resets to non-lazy mode.
+  // Walks the physical array in place; the live entries retain their
+  // relative ordering (so SORDER_STANDARD sort-order is preserved).
+  // Resets physical count to live_count_ and clears deleted_count_.
+  // Does NOT change order_ — callers that want SORDER_STANDARD should
+  // set it explicitly.
+  // Invalidates all outstanding iterators.
   void compact() {
+    compact_call_count_++;
+    if (deleted_count_ > peak_deleted_count_)
+      peak_deleted_count_ = deleted_count_;
+    if (deleted_count_ == 0 && live_count_ == count) {
+      // Fast path: nothing to do.
+      return;
+    }
     int dst = 0;
     for (int src = 0; src < count; src++) {
       if (!elem(src).deleted) {
@@ -461,7 +509,22 @@ public:
     }
     count = dst;
     live_count_ = dst;
-    order_ = SORDER_STANDARD;
+    deleted_count_ = 0;
+  }
+
+  // --- Erase / compact statistics ---
+  // Cumulative counters for diagnostics; use debug_print_stats() to dump.
+  // Not thread-safe with live writes; read from a quiescent state.
+  int deleted_count() const { return deleted_count_; }
+  int peak_deleted_count() const { return peak_deleted_count_; }
+  int erase_call_count() const { return erase_call_count_; }
+  int compact_call_count() const { return compact_call_count_; }
+  int physical_count() const { return count; }
+  void debug_print_stats(const char *tag = NULL) const {
+    fprintf(stderr,
+            "sBasisSet[%s] live=%d physical=%d deleted=%d peak_deleted=%d erase_calls=%d compact_calls=%d\n",
+            tag ? tag : "", live_count_, count, deleted_count_,
+            peak_deleted_count_, erase_call_count_, compact_call_count_);
   }
 
   // --- Stable pointer access (valid as long as element exists) ---
@@ -581,6 +644,16 @@ private:
   int live_count_;
   bool pairtest_any_;  // sentinel: true if any SElement.pairtest was set
   pthread_mutex_t mutex_;  // parallel drain path serialization
+
+  // Erase / compact instrumentation (cumulative across the lifetime of
+  // the sBasisSet). deleted_count_ is the current tombstone population
+  // (decremented by compact()); peak_deleted_count_ tracks the largest
+  // value deleted_count_ reached before a compact call;
+  // erase_call_count_ / compact_call_count_ are monotonically increasing.
+  int deleted_count_;
+  int peak_deleted_count_;
+  int erase_call_count_;
+  int compact_call_count_;
 
   // Internal: insert at a specific position (for reorder, etc.)
   iterator insert_at(int pos, const SElement& val) {
