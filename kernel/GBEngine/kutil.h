@@ -16,6 +16,8 @@
 #include <unordered_map>
 #include <utility>
 #include <pthread.h>
+#include <atomic>
+#include <cstdint>
 
 #include "omalloc/omalloc.h"
 #ifdef HAVE_OMALLOC
@@ -190,11 +192,22 @@ struct SElement {
   int fromQ;           // from quotient ideal
   poly sig;            // signature (sba only)
   unsigned long sevSig;// short exponent vector of signature (sba only)
+  // arrival_id: monotonic counter captured at enterS() time, used by
+  // parallel phase-1 drainers to iterate "entries that arrived before
+  // me" — enterS places at a sorted position, so insertion index does
+  // not reflect arrival order under SORDER_STANDARD.  Serial code also
+  // bumps the counter to keep arrival_id monotonic over runs.  0 is a
+  // valid id for the very first S entry; set to UINT64_MAX in the
+  // default constructor so that pre-parallel-drain entries (entered
+  // before the counter was started) trivially satisfy "arrived before
+  // me" checks regardless of my_arrival.
+  uint64_t arrival_id;
   bool deleted;              // lazy-delete flag for parallel phase (atomic access)
   mutable bool pairtest;     // transient: true if spoly(this, h)==0 during enterOnePair
 
   SElement() : p(NULL), ecart(0), sev(0), s_2_r(0), length(0), wlength(0),
-               fromQ(0), sig(NULL), sevSig(0), deleted(false), pairtest(false) {}
+               fromQ(0), sig(NULL), sevSig(0), arrival_id(0),
+               deleted(false), pairtest(false) {}
 };
 
 // Atomic helpers for SElement.deleted.  Serial code can still read/write
@@ -1406,6 +1419,15 @@ public:
   BlockArray<TObject> T;
   LSet L;
   LSet    B;
+  // arrival_counter: monotonic counter incremented on every successful
+  // enterS.  Used by the parallel phase-1 drainer to filter S iteration
+  // to entries that arrived before the current survivor h — because
+  // enterS places h at a sorted position, the insertion index does not
+  // reflect arrival order.  Serial code also bumps the counter (keeps
+  // the invariant that every S element has a unique arrival_id) but
+  // never reads it.  Declared std::atomic<uint64_t> for parallel
+  // fetch_add semantics; zero-cost in serial mode.
+  std::atomic<uint64_t> arrival_counter{0};
   poly    kNoether = NULL;
   poly    t_kNoether = NULL; // same polys in tailring
   KINLINE poly    kNoetherTail();

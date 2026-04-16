@@ -8490,6 +8490,11 @@ sBasisSet::iterator sBasisSet::enter_bba(LObject &p, kStrategy strat, int atR, i
   sobj.length = 0;
   sobj.wlength = 0;
   sobj.fromQ = p.fromQ;
+  // Capture arrival order.  Under parallel drain, this is taken from
+  // strat->arrival_counter.fetch_add so that phase-1 iteration can
+  // filter on "arrival_id < my_arrival".  Serial callers also bump the
+  // counter to keep ordering monotonic.
+  sobj.arrival_id = strat->arrival_counter.fetch_add(1, std::memory_order_relaxed);
 
   return insert_at(pos, sobj);
 }
@@ -8559,6 +8564,7 @@ sBasisSet::iterator sBasisSet::enter_sba(LObject &p, kStrategy strat, int atR, i
   sobj.length = 0;
   sobj.wlength = 0;
   sobj.fromQ = p.fromQ;
+  sobj.arrival_id = strat->arrival_counter.fetch_add(1, std::memory_order_relaxed);
 
   // Original enterSSba inserts FIRST then sets sig/sevSig.
   auto it = insert_at(pos, sobj);
