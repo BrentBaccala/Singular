@@ -1661,7 +1661,7 @@ static void enterOnePairRing (const SElement &si,poly p,int /*ecart*/, int isFro
         h.lcm=NULL;
       }
       h.Clear();
-      si.pairtest = true; strat->S.set_pairtest_any();
+      selement_pairtest_set(si); strat->S.set_pairtest_any();
       return;
     }
     else
@@ -1692,7 +1692,7 @@ static void enterOnePairRing (const SElement &si,poly p,int /*ecart*/, int isFro
   h.i_r = -1;
   if(h.p == NULL)
   {
-    si.pairtest = true; strat->S.set_pairtest_any();
+    selement_pairtest_set(si); strat->S.set_pairtest_any();
     return;
   }
   h.tailRing = strat->tailRing;
@@ -2330,7 +2330,7 @@ void enterOnePairNormal (const SElement &si,poly p,int ecart, int isFromQ,kStrat
   if (Lp.p == NULL)
   {
     /*- the case that the s-poly is 0 -*/
-    si.pairtest = true; strat->S.set_pairtest_any();
+    selement_pairtest_set(si); strat->S.set_pairtest_any();
     /*hint for spoly(S[i],p) == 0 for some i,0 <= i <= sl*/
     /*
     *suppose we have (s,r),(r,p),(s,p) and spoly(s,p) == 0 and (r,p) is
@@ -2560,7 +2560,7 @@ static void enterOnePairLift (const SElement &si,poly p,int ecart, int isFromQ,k
   if (Lp.p == NULL)
   {
     /*- the case that the s-poly is 0 -*/
-    si.pairtest = true; strat->S.set_pairtest_any();
+    selement_pairtest_set(si); strat->S.set_pairtest_any();
     /*hint for spoly(S[i],p) == 0 for some i,0 <= i <= sl*/
     /*
     *suppose we have (s,r),(r,p),(s,p) and spoly(s,p) == 0 and (r,p) is
@@ -3409,7 +3409,7 @@ void chainCritNormal (poly p,int ecart,kStrategy strat)
     {
       for (auto sit = strat->S.begin(); sit != strat->S.end(); ++sit)
       {
-        if (sit->pairtest)
+        if (selement_pairtest_load(*sit))
         {
           for (auto it = strat_B(strat).ubegin(); it != strat_B(strat).uend(); )
           {
@@ -3430,7 +3430,7 @@ void chainCritNormal (poly p,int ecart,kStrategy strat)
       /*- i.e. there is an i with pairtest[i]==TRUE -*/
       for (auto sit = strat->S.begin(); sit != strat->S.end(); ++sit)
       {
-        if (sit->pairtest)
+        if (selement_pairtest_load(*sit))
         {
           for (auto it = strat_B(strat).ubegin(); it != strat_B(strat).uend(); )
           {
@@ -3732,7 +3732,7 @@ void chainCritPart (poly p,int ecart,kStrategy strat)
     /*- i.e. there is an i with pairtest[i]==TRUE -*/
     for (auto sit = strat->S.begin(); sit != strat->S.end(); ++sit)
     {
-      if (sit->pairtest)
+      if (selement_pairtest_load(*sit))
       {
         for (auto it = strat_B(strat).ubegin(); it != strat_B(strat).uend(); )
         {
@@ -4217,7 +4217,7 @@ void chainCritRing (poly p,int, kStrategy strat)
       /*- i.e. there is an i with pairtest[i]==TRUE -*/
       for (auto sit = strat->S.begin(); sit != strat->S.end(); ++sit)
       {
-        if (sit->pairtest)
+        if (selement_pairtest_load(*sit))
         {
           for (auto it = strat_B(strat).ubegin(); it != strat_B(strat).uend(); )
           {
@@ -11951,7 +11951,7 @@ BOOLEAN enterOnePairShift (poly q, poly p, int ecart, int isFromQ, kStrategy str
     // TODO: currently ifromS is only > 0 if called from enterOnePairWithShifts
     if (ifromS != strat->S.end() && ifromS.index() > 0)
     {
-      ifromS->pairtest = true; strat->S.set_pairtest_any();/*- hint for spoly(S^[i],p)=0 -*/
+      selement_pairtest_set(*ifromS); strat->S.set_pairtest_any();/*- hint for spoly(S^[i],p)=0 -*/
     }
       //if (TEST_OPT_DEBUG){Print("!");} // option teach
     /* END _ TEMPORARILY DISABLED FOR SHIFTS */

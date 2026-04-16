@@ -250,6 +250,24 @@ static inline void selement_deleted_clear(SElement &e) {
   __atomic_store_n(&e.deleted, false, __ATOMIC_RELAXED);
 }
 
+// Atomic helpers for SElement.pairtest.  Multiple parallel phase-1
+// drainers may concurrently set pairtest=true on the same SElement
+// (from enterOnePair when spoly is zero), and concurrently read it
+// inside chainCritNormal, and clear_pairtest clears them all.  All
+// three operations use atomic RELAXED: writes are either idempotent
+// (both threads write true) or mass-clear (clear_pairtest) and a
+// stale read just means a pair survives to the next scan.
+static inline bool selement_pairtest_load(const SElement &e) {
+  return __atomic_load_n(&e.pairtest, __ATOMIC_RELAXED);
+}
+static inline void selement_pairtest_set(const SElement &e) {
+  // pairtest is mutable; cast away const as the C API expects non-const.
+  __atomic_store_n(const_cast<bool*>(&e.pairtest), true, __ATOMIC_RELAXED);
+}
+static inline void selement_pairtest_clear(SElement &e) {
+  __atomic_store_n(&e.pairtest, false, __ATOMIC_RELAXED);
+}
+
 /**
  * @class sBasisSet
  * @brief The S-set (standard basis) for Groebner basis computation.
@@ -543,14 +561,22 @@ public:
   }
 
   // --- Pairtest ---
-  // Clear all pairtest flags and the sentinel.
+  // Clear all pairtest flags and the sentinel.  Parallel phase-1 drainers
+  // that concurrently read pairtest see atomically-cleared values; a stale
+  // `true` read just means one extra (safe) chain-crit pass.
   void clear_pairtest() {
-    for (int i = 0; i < count; i++) elem(i).pairtest = false;
-    pairtest_any_ = false;
+    for (int i = 0; i < count; i++)
+      selement_pairtest_clear(elem(i));
+    __atomic_store_n(&pairtest_any_, false, __ATOMIC_RELAXED);
   }
-  // Set the sentinel (some zero spoly was found).
-  void set_pairtest_any() { pairtest_any_ = true; }
-  bool has_pairtest() const { return pairtest_any_; }
+  // Set the sentinel (some zero spoly was found).  Atomic because phase-1
+  // drainers may race on this flag from enterOnePair.
+  void set_pairtest_any() {
+    __atomic_store_n(&pairtest_any_, true, __ATOMIC_RELAXED);
+  }
+  bool has_pairtest() const {
+    return __atomic_load_n(&pairtest_any_, __ATOMIC_RELAXED);
+  }
 
   // Compact: remove entries whose .p field is NULL (typically set by
   // updateResult's pDelete pass). Differs from compact() in that this
@@ -628,6 +654,11 @@ public:
   // Builds an SElement, inserts at the position determined by ordering mode.
   // Returns an iterator to the just-inserted element.
   // atS: end() means "compute position via find_pos internally" (was int atS = -1).
+  // arrival_id is set from strat->arrival_counter.fetch_add(1) so the
+  // inserted SElement's arrival_id is unique among all elements ever
+  // entered into S.  Parallel drain captures my_arrival =
+  // strat->arrival_counter.load() BEFORE calling enter_bba, knowing it
+  // holds S-exclusive so this enter_bba will get exactly my_arrival.
   iterator enter_bba(LObject &p, kStrategy strat, int atR, iterator atS);
 
   // Insert for signature-based algorithms (replaces enterSSba).
