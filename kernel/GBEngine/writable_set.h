@@ -51,6 +51,15 @@
 #include <utility>
 #include <vector>
 
+// Default "is-tombstoned" predicate: returns false (entry is live).
+// Specialize this for element types that carry a tombstone flag so
+// writable_set iterators can skip over logically-deleted entries.
+//   template<> inline bool writable_set_is_deleted<MyType>(const MyType& x)
+//     { return x.deleted; }
+// This is the hook used by LSet's lazy-erase (LObject.deleted).
+template<typename T>
+inline bool writable_set_is_deleted(const T&) { return false; }
+
 template<typename T, typename Compare = std::less<T>>
 class writable_set {
 private:
@@ -72,11 +81,25 @@ public:
     using size_type = typename set_type::size_type;
     using difference_type = typename set_type::difference_type;
 
-    // Iterator that dereferences pointers automatically
+    // Iterator that dereferences pointers automatically.
+    // Tombstone-aware when constructed with the skip_tombstones flag set:
+    // skips entries where writable_set_is_deleted<T> returns true on
+    // advance.  Use the (it, end, /*skip=*/true) ctor for tombstone-aware
+    // iteration (begin()), or (it) for raw iteration (raw_begin(), end()).
     template<typename BaseIterator>
     class iterator_wrapper {
         BaseIterator it_;
+        BaseIterator end_it_;  // end of the underlying container (for skip bounds)
+        bool skip_tombstones_ = false;  // if true, ++ skips tombstoned entries
         friend class writable_set;
+
+        // Skip over tombstoned entries (forward).  No-op when skipping is
+        // disabled.  Stops at end_it_.
+        void skip_deleted_forward() {
+            if (!skip_tombstones_) return;
+            while (it_ != end_it_ && writable_set_is_deleted<T>(**it_))
+                ++it_;
+        }
 
     public:
         using iterator_category = std::bidirectional_iterator_tag;
@@ -86,13 +109,35 @@ public:
         using reference = T&;
 
         iterator_wrapper() = default;
-        explicit iterator_wrapper(BaseIterator it) : it_(it) {}
+        // Raw ctor (no tombstone skipping — for end() and raw_begin()).
+        explicit iterator_wrapper(BaseIterator it)
+            : it_(it), end_it_(it), skip_tombstones_(false) {}
+        // Tombstone-aware ctor — skips to the first live entry on
+        // construction and on every subsequent operator++.
+        iterator_wrapper(BaseIterator it, BaseIterator end_it)
+            : it_(it), end_it_(end_it), skip_tombstones_(true) {
+            skip_deleted_forward();
+        }
 
         reference operator*() const { return **it_; }
         pointer operator->() const { return *it_; }
 
-        iterator_wrapper& operator++() { ++it_; return *this; }
-        iterator_wrapper operator++(int) { iterator_wrapper tmp = *this; ++it_; return tmp; }
+        iterator_wrapper& operator++() {
+            ++it_;
+            skip_deleted_forward();
+            return *this;
+        }
+        iterator_wrapper operator++(int) {
+            iterator_wrapper tmp = *this;
+            ++(*this);
+            return tmp;
+        }
+        // Note: operator-- does NOT know the container's begin, so it cannot
+        // skip past tombstones in reverse without a caller-supplied bound.
+        // Callers that need reverse iteration through a tombstoned LSet
+        // should use index-based access or iterate forward.  For reverse
+        // iteration over a non-tombstoning set, operator-- is the expected
+        // "step one back" — same as before.
         iterator_wrapper& operator--() { --it_; return *this; }
         iterator_wrapper operator--(int) { iterator_wrapper tmp = *this; --it_; return tmp; }
 
@@ -132,16 +177,24 @@ public:
     using reverse_iterator = std::reverse_iterator<iterator>;
     using const_reverse_iterator = std::reverse_iterator<const_iterator>;
 
-    // Unordered iterator for cache-friendly scanning of the flat array
+    // Unordered iterator for cache-friendly scanning of the flat array.
+    // Skips both physical tombstones (flat_[pos_] == end()) and logical
+    // tombstones (writable_set_is_deleted<T> true on the live element).
     class unordered_iterator {
         writable_set* owner_;
         size_t pos_;
         friend class writable_set;
 
         void skip_deleted() {
-            while (pos_ < owner_->flat_.size()
-                   && owner_->flat_[pos_] == owner_->data_.end())
-                ++pos_;
+            while (pos_ < owner_->flat_.size()) {
+                if (owner_->flat_[pos_] == owner_->data_.end()) {
+                    ++pos_; continue;
+                }
+                if (writable_set_is_deleted<T>(**(owner_->flat_[pos_]))) {
+                    ++pos_; continue;
+                }
+                break;
+            }
         }
 
     public:
@@ -251,12 +304,16 @@ public:
         clear();
     }
 
-    // Ordered iterators
-    iterator begin() { return iterator(data_.begin()); }
+    // Ordered iterators.
+    // begin() is tombstone-aware (skips leading tombstones).
+    // end() is constructed with a default iterator_wrapper whose end_it_
+    // equals it_, which disables skip-forward behavior — required so that
+    // end() can still compare equal to a begin that advanced off the end.
+    iterator begin() { return iterator(data_.begin(), data_.end()); }
     iterator end() { return iterator(data_.end()); }
-    const_iterator begin() const { return const_iterator(data_.begin()); }
+    const_iterator begin() const { return const_iterator(data_.begin(), data_.end()); }
     const_iterator end() const { return const_iterator(data_.end()); }
-    const_iterator cbegin() const { return const_iterator(data_.begin()); }
+    const_iterator cbegin() const { return const_iterator(data_.begin(), data_.end()); }
     const_iterator cend() const { return const_iterator(data_.end()); }
 
     // Unordered iterators
@@ -275,6 +332,17 @@ public:
 
     // Size of the flat array (including deleted entries)
     size_t flat_size() const { return flat_.size(); }
+
+    // --- Raw underlying-tree iterator access (for tombstone-aware callers) ---
+    // raw_begin() returns a non-skipping iterator at the physical tree head.
+    // Used by LSet::pop() to count tombstones skipped before the first live
+    // element.  The returned iterator is a plain iterator_wrapper whose
+    // end_it_ equals it_, so operator++ does not skip — callers can walk
+    // tombstones one by one.
+    iterator raw_begin() { return iterator(data_.begin()); }
+    iterator raw_end()   { return iterator(data_.end()); }
+    const_iterator raw_begin() const { return const_iterator(data_.begin()); }
+    const_iterator raw_end()   const { return const_iterator(data_.end()); }
 
     reverse_iterator rbegin() { return reverse_iterator(end()); }
     reverse_iterator rend() { return reverse_iterator(begin()); }
@@ -302,7 +370,12 @@ public:
         new_obj->flat_index = flat_.size();
         auto result = data_.insert(new_obj);
         flat_.push_back(result);
-        return iterator(result);
+        // Note: we construct an iterator wrapping the just-inserted
+        // result, with end_it_ set to data_.end(); the new element is
+        // live (deleted flag false by construction), so skip_deleted_forward
+        // is a no-op on it, but subsequent ++it will correctly skip
+        // tombstones toward end.
+        return iterator(result, data_.end());
     }
 
     iterator insert(T&& value) {
@@ -310,7 +383,7 @@ public:
         new_obj->flat_index = flat_.size();
         auto result = data_.insert(new_obj);
         flat_.push_back(result);
-        return iterator(result);
+        return iterator(result, data_.end());
     }
 
     template<typename... Args>
@@ -319,14 +392,14 @@ public:
         new_obj->flat_index = flat_.size();
         auto result = data_.insert(new_obj);
         flat_.push_back(result);
-        return iterator(result);
+        return iterator(result, data_.end());
     }
 
     iterator erase(const_iterator pos) {
         size_t fi = (*pos.it_)->flat_index;
         if (fi < flat_.size()) flat_[fi] = data_.end();
         delete *pos.it_;
-        return iterator(data_.erase(pos.it_));
+        return iterator(data_.erase(pos.it_), data_.end());
     }
 
     iterator erase(const_iterator first, const_iterator last) {
@@ -335,7 +408,7 @@ public:
             if (fi < flat_.size()) flat_[fi] = data_.end();
             delete *it.it_;
         }
-        return iterator(data_.erase(first.it_, last.it_));
+        return iterator(data_.erase(first.it_, last.it_), data_.end());
     }
 
     // Erase via unordered_iterator; returns next valid unordered position
@@ -349,6 +422,19 @@ public:
         return pos;
     }
 
+    // Erase by raw flat-array index, no iterator / no skip_deleted.
+    // Used by LSet::compact() to physically remove a tombstoned slot;
+    // the slot's LObject may be deleted==true, in which case we must NOT
+    // skip it (skip_deleted would advance past it and we'd erase the
+    // wrong slot).
+    void erase_at(size_t pos) {
+        if (pos >= flat_.size() || flat_[pos] == data_.end()) return;
+        auto set_it = flat_[pos];
+        delete *set_it;
+        data_.erase(set_it);
+        flat_[pos] = data_.end();
+    }
+
     size_type erase(const T& value) {
         auto it = find(value);
         if (it != end()) {
@@ -358,7 +444,9 @@ public:
         return 0;
     }
 
-    // Lookup
+    // Lookup — returns a raw (non-skipping) iterator to the found element,
+    // or end() if not found.  Callers that want tombstone-aware lookup
+    // should check writable_set_is_deleted<T>(*it) on the result.
     iterator find(const T& value) {
         T temp = value;
         T* temp_ptr = &temp;

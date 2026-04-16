@@ -999,15 +999,40 @@ KINLINE bool LSet::would_be_top(LObject& lobject) {
 }
 
 KINLINE const LObject& LSet::top(void) {
+  /* begin() is tombstone-aware — it skips leading tombstones to the
+   * first live element. */
   return *begin();
 }
 
 KINLINE void LSet::pop(void) {
-  /* We don't call our erase() method because it would deallocate
-   * stuff in the LObject and we don't want that done here because we
-   * copied top() (typically to strat->P) before we called pop().
-   * But we still need to remove from pair_index and invalidate sev_flat_.
+  /* pop() physically removes the first live element from L.  Under
+   * tombstone-on-erase, there may be tombstoned entries at the head
+   * of the tree that begin() has skipped over; we still need to pop
+   * the live element they were hiding.
+   *
+   * pop does NOT tombstone the popped entry (unlike erase).  Its purpose
+   * is to transfer ownership of the LObject (and its polys) to the
+   * caller (typically strat->P).  The physical tree entry is removed
+   * via writable_set<>::erase, which deallocates the LObject struct but
+   * not the polys — those are shared with the caller's copy.
+   *
+   * pop_skip_count_ is incremented by the exact number of leading
+   * tombstones begin() had to step over to reach the first live entry.
+   * Counted via raw_begin() (non-skipping) so that deleted_count_ can be
+   * used as the diagnostic for tombstone pile-up under parallel
+   * enterpairs (task prompt).
    */
+  if (deleted_count_ > 0) {
+    long skip = 0;
+    iterator raw = raw_begin();
+    iterator last = raw_end();
+    while (raw != last && raw->deleted) {
+      ++skip;
+      ++raw;  // raw_begin's single-arg ctor disables skip, so ++ advances one step
+    }
+    pop_skip_count_ += skip;
+  }
+
   iterator it = begin();
   const LObject& Lp = *it;
   if (Lp.p1 != NULL && Lp.p2 != NULL) {
@@ -1016,11 +1041,13 @@ KINLINE void LSet::pop(void) {
   }
   // Mark sev_flat_ entry as sentinel (0) so cache-friendly scans skip it
   if (Lp.flat_index < sev_flat_.size()) sev_flat_[Lp.flat_index] = 0;
+  if (Lp.flat_index < sevSig_flat_.size()) sevSig_flat_[Lp.flat_index] = 0;
   writable_set<LObject, CompareLObject>::erase(it);
+  --live_count_;
 }
 
 KINLINE void LSet::pop_and_erase(void) {
-  /* In this case, we deallocate the LObject using the erase() method in kutil.cc */
+  /* Tombstone-erase the first live element (polys freed at compact time). */
   erase(begin());
 }
 

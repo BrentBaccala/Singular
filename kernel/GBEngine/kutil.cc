@@ -1277,127 +1277,202 @@ static BOOLEAN is_shifted_p1(const kStrategy strat)
 }
 #endif
 
-LSet::iterator LSet::erase(LSet::iterator it) {
-  LObject& Lp = *it;
-  const kStrategy strat = key_comp().strat;
-
-  // Remove from pair_index
-  if (Lp.p1 != NULL && Lp.p2 != NULL) {
-    auto key = canonicalize_pair(Lp.p1, Lp.p2);
-    pair_index.erase(key);
-  }
-
-  if (Lp.lcm!=NULL)
-  {
+// Free the polynomials referenced by an LObject (lcm, sig, p) using the
+// same cleanup rules as the legacy LSet::erase: lcm via kDeleteLcm, sig
+// via pLmDelete/pLmFree depending on coeff, p via pLmDelete/pLmFree when
+// attached to strat->tail or via Lp.Delete() when not found in T.
+// Shared between erase (called at chainCritNormal / tombstone time) and
+// compact (called to flush accumulated tombstones).
+// NB: deliberately does not null the poly fields; for tombstone-on-erase
+// we defer physical removal from the multiset tree until compact(), and
+// the tree comparator must continue to see consistent Lp.p / Lp.lcm /
+// Lp.p1 / Lp.p2 pointers for any live entry that happens to be compared
+// against this tombstone during subsequent inserts.  compact() is the
+// one caller that actually removes the entry from the tree, at which
+// point poly pointers become moot.
+static void kLSet_free_polys(LObject& Lp, kStrategy strat) {
+  if (Lp.lcm != NULL) {
     kDeleteLcm(&Lp);
   }
-  if (Lp.sig!=NULL)
-  {
+  if (Lp.sig != NULL) {
     if (pGetCoeff(Lp.sig) != NULL)
       pLmDelete(Lp.sig);
     else
       pLmFree(Lp.sig);
+    Lp.sig = NULL;
   }
-  if (Lp.p!=NULL)
-  {
-    if (pNext(Lp.p) == strat->tail)
-    {
+  if (Lp.p != NULL) {
+    if (pNext(Lp.p) == strat->tail) {
       if (pGetCoeff(Lp.p) != NULL)
         pLmDelete(Lp.p);
       else
         pLmFree(Lp.p);
+      Lp.p = NULL;
       /*- tail belongs to several int spolys -*/
-    }
-    else
-    {
-      // search p in T, if it is there, do not delete it
-      if (rHasGlobalOrdering(currRing) || (kFindInT(Lp.p, strat) < 0))
-      {
-        // assure that for global orderings kFindInT fails
-        //assume((rHasLocalOrMixedOrdering(currRing)) && (kFindInT(set[j].p, strat) >= 0));
+    } else {
+      // search p in T; if it is there, do not delete it
+      if (rHasGlobalOrdering(currRing) || (kFindInT(Lp.p, strat) < 0)) {
         Lp.Delete();
       }
     }
   }
   #ifdef HAVE_SHIFTBBA
   /* this logic was added in commit 95b7138 to fix a memory leak */
-  if (is_shifted_p1(/*strat->P.p1,*/strat))
-  {
+  if (is_shifted_p1(/*strat->P.p1,*/strat)) {
     // clean up strat->P.p1: may be shifted
     pLmDelete(strat->P.p1);
-    strat->P.p1=NULL;
+    strat->P.p1 = NULL;
   }
   #endif
+}
+
+// Tombstone an L entry: record the erase, mark the LObject as deleted,
+// remove from the dedup pair_index, and zero sev_flat_/sevSig_flat_ so
+// the cache-friendly unordered and filtered scans skip the slot.  Does
+// NOT touch the multiset tree and does NOT free polys — compact() will
+// do both in one pass when the pile-up gets inconvenient.
+LSet::iterator LSet::erase(LSet::iterator it) {
+  LObject& Lp = *it;
+  if (Lp.deleted) {
+    // Idempotent: a second erase of the same tombstone is a no-op.
+    ++it;
+    return it;
+  }
+  // Remove from pair_index
+  if (Lp.p1 != NULL && Lp.p2 != NULL) {
+    auto key = canonicalize_pair(Lp.p1, Lp.p2);
+    pair_index.erase(key);
+  }
   // Mark the sev_flat_ and sevSig_flat_ entries as sentinel (0)
   if (Lp.flat_index < sev_flat_.size()) sev_flat_[Lp.flat_index] = 0;
   if (Lp.flat_index < sevSig_flat_.size()) sevSig_flat_[Lp.flat_index] = 0;
-  return writable_set<LObject, CompareLObject>::erase(it);
+  Lp.deleted = true;
+  ++erase_call_count_;
+  ++deleted_count_;
+  if (deleted_count_ > peak_deleted_count_)
+    peak_deleted_count_ = deleted_count_;
+  --live_count_;
+  // Advance to the next live entry (skip_deleted_forward is triggered
+  // by operator++ on the ordered iterator).
+  ++it;
+  return it;
 }
 
 LSet::unordered_iterator LSet::erase(LSet::unordered_iterator it) {
   LObject& Lp = *it;
-  const kStrategy strat = key_comp().strat;
-
-  // Remove from pair_index
+  if (Lp.deleted) {
+    ++it;  // skip_deleted() inside will advance past it
+    return it;
+  }
   if (Lp.p1 != NULL && Lp.p2 != NULL) {
     auto key = canonicalize_pair(Lp.p1, Lp.p2);
     pair_index.erase(key);
   }
-
-  if (Lp.lcm!=NULL)
-  {
-    kDeleteLcm(&Lp);
-  }
-  if (Lp.sig!=NULL)
-  {
-    if (pGetCoeff(Lp.sig) != NULL)
-      pLmDelete(Lp.sig);
-    else
-      pLmFree(Lp.sig);
-  }
-  if (Lp.p!=NULL)
-  {
-    if (pNext(Lp.p) == strat->tail)
-    {
-      if (pGetCoeff(Lp.p) != NULL)
-        pLmDelete(Lp.p);
-      else
-        pLmFree(Lp.p);
-      /*- tail belongs to several int spolys -*/
-    }
-    else
-    {
-      // search p in T, if it is there, do not delete it
-      if (rHasGlobalOrdering(currRing) || (kFindInT(Lp.p, strat) < 0))
-      {
-        Lp.Delete();
-      }
-    }
-  }
-  #ifdef HAVE_SHIFTBBA
-  /* this logic was added in commit 95b7138 to fix a memory leak */
-  if (is_shifted_p1(/*strat->P.p1,*/strat))
-  {
-    // clean up strat->P.p1: may be shifted
-    pLmDelete(strat->P.p1);
-    strat->P.p1=NULL;
-  }
-  #endif
-  // Mark the sev_flat_ and sevSig_flat_ entries as sentinel (0)
   if (Lp.flat_index < sev_flat_.size()) sev_flat_[Lp.flat_index] = 0;
   if (Lp.flat_index < sevSig_flat_.size()) sevSig_flat_[Lp.flat_index] = 0;
-  return writable_set<LObject, CompareLObject>::erase(it);
+  Lp.deleted = true;
+  ++erase_call_count_;
+  ++deleted_count_;
+  if (deleted_count_ > peak_deleted_count_)
+    peak_deleted_count_ = deleted_count_;
+  --live_count_;
+  ++it;
+  return it;
 }
 
 LSet::filtered_iterator LSet::erase(LSet::filtered_iterator fit) {
-  // Delegate cleanup to the unordered_iterator erase, then rebuild
-  // a filtered_iterator at the next position.
-  size_t pos = fit.pos_;
-  unsigned long sev1 = fit.sev1_;
-  unsigned long sev2 = fit.sev2_;
-  const std::vector<unsigned long>* sev_array = fit.sev_array_;
-  erase(writable_set<LObject, CompareLObject>::uiter_at(pos));
-  return filtered_iterator(this, pos, sev1, sev2, sev_array);
+  LObject* lp = flat_ptr(fit.pos_);
+  if (lp != nullptr && !lp->deleted) {
+    if (lp->p1 != NULL && lp->p2 != NULL) {
+      auto key = canonicalize_pair(lp->p1, lp->p2);
+      pair_index.erase(key);
+    }
+    if (fit.pos_ < sev_flat_.size()) sev_flat_[fit.pos_] = 0;
+    if (fit.pos_ < sevSig_flat_.size()) sevSig_flat_[fit.pos_] = 0;
+    lp->deleted = true;
+    ++erase_call_count_;
+    ++deleted_count_;
+    --live_count_;
+  }
+  // Build a new filtered_iterator from the advanced position — the
+  // filtered_iterator::advance inside the ctor handles tombstone/sev
+  // skip-forward.
+  return filtered_iterator(this, fit.pos_ + 1, fit.sev1_, fit.sev2_, fit.sev_array_);
+}
+
+// compact(): physically remove all tombstoned entries from the multiset
+// tree, free their polys, and rebuild sev_flat_/sevSig_flat_/pair_index
+// / flat_index against the compacted tree.  Invalidates ALL outstanding
+// iterators.  Fast path: if deleted_count_ == 0, update peak and return.
+void LSet::compact() {
+  ++compact_call_count_;
+  if (deleted_count_ > peak_deleted_count_)
+    peak_deleted_count_ = deleted_count_;
+  if (deleted_count_ == 0) return;
+
+  const kStrategy strat = key_comp().strat;
+
+  // Walk the flat_ array (physical order).  For each tombstoned entry,
+  // free polys and remove its underlying multiset iterator (dealloc
+  // the LObject).  Use writable_set<>::erase on each to go through the
+  // base-class cleanup (flat_[fi] = data_.end(); delete *it; data_.erase).
+  //
+  // We collect the unordered_iterator positions of tombstoned entries
+  // first, then erase them.  This avoids iterator-invalidation issues
+  // while walking flat_ (erase() does flat_[fi] = end() at the iteration
+  // index — safe — but for clarity we batch).
+  size_t n = flat_size();
+  std::vector<size_t> tomb_positions;
+  tomb_positions.reserve(deleted_count_);
+  for (size_t i = 0; i < n; i++) {
+    LObject* lp = flat_ptr(i);
+    if (lp != nullptr && lp->deleted) {
+      tomb_positions.push_back(i);
+    }
+  }
+  for (size_t pos : tomb_positions) {
+    // flat_ptr may have been cleared by a previous erase (if two
+    // tombstones happened to share a flat index, which shouldn't
+    // happen, but be defensive).
+    LObject* lp = flat_ptr(pos);
+    if (lp == nullptr) continue;
+    kLSet_free_polys(*lp, strat);
+    // Use erase_at (raw, no skip) — uiter_at + erase(unordered) would
+    // first call skip_deleted which advances past our tombstone to a
+    // live entry, and we'd erase the wrong slot.
+    writable_set<LObject, CompareLObject>::erase_at(pos);
+  }
+
+  // Rebuild flat_index for remaining entries.  writable_set stores
+  // multiset iterators in flat_; we need to rebuild sev_flat_ /
+  // sevSig_flat_ / pair_index.  After the erase above, flat_[pos] is
+  // data_.end() (i.e. flat_ptr(pos) returns nullptr) for tombstones.
+  // We repack flat_ so only live entries remain, updating each live
+  // LObject's flat_index to its new position.
+  //
+  // We do this by calling reorder-ish code directly.  writable_set
+  // exposes a reorder() that rebuilds flat_ from data_; reuse that.
+  // But reorder() also invalidates comparator-ordered positions — fine
+  // here because no tree keys changed, we just need the flat_index
+  // repacked.  writable_set::reorder does: data_.swap(old) then
+  // re-insert pointers; flat_ cleared and rebuilt.  That's overkill
+  // since we don't need to re-sort the tree — but it's correct and
+  // cheap (tree has log-n inserts).
+  //
+  // Alternative: implement a tighter repack.  For clarity/correctness
+  // we just delegate to the base reorder.  Note: that is safe because
+  // CompareLObject is deterministic given the same (p, lcm, p1, p2,
+  // ecart, length, seq) — pointers in tree still compare the same
+  // way after reorder.
+  writable_set<LObject, CompareLObject>::reorder();
+  deleted_count_ = 0;
+
+  // Rebuild sev_flat_, sevSig_flat_, pair_index against the compacted
+  // flat_ layout.  Live entries now sit at contiguous positions
+  // 0..physical_size()-1 with flat_index set correctly.
+  rebuild_sev_flat();
+  rebuild_sevSig_flat();
+  rebuild_pair_index();
 }
 
 /*2
@@ -9290,6 +9365,16 @@ void initBuchMora (ideal F,ideal Q,kStrategy strat)
 void exitBuchMora (kStrategy strat)
 {
   /*- release temp data -*/
+  // Dump L tombstone stats if requested (SINGULAR_LSET_STATS=1).  This is
+  // the analogue of SINGULAR_SBASIS_STATS from task 503.
+  if (getenv("SINGULAR_LSET_STATS")) {
+    strat->L.debug_print_stats("exitBuchMora");
+    strat->B.debug_print_stats("exitBuchMora.B");
+  }
+  // Compact L before tearing down: forces poly cleanup on any tombstoned
+  // entries left over from the last batch of chain-criterion erases.
+  strat->L.compact();
+  strat->B.compact();
   cleanT(strat);
   strat->T.free_all();
   strat->R.free_all();

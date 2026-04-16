@@ -824,6 +824,14 @@ public:
                       // deleted
   int fromQ = 0;      // from quotient ideal; copied into SElement.fromQ by
                       // sBasisSet::enter_bba / enter_sba.
+  bool deleted = false; // Lazy-erase tombstone flag (LSet tombstone-on-erase).
+                      // Set by LSet::erase(); LSet iterators (ordered,
+                      // unordered, filtered) skip entries with deleted==true.
+                      // Cleanup of the LObject's polys (lcm/sig/p), pair_index
+                      // and sev_flat_ sentinels all happen at erase time;
+                      // compact() removes the tombstoned entry from the
+                      // multiset tree and deallocates the LObject.
+                      // Initialized to false by sLObject::Init() via memset.
 
   // initialization
   KINLINE void Init(ring tailRing = currRing);
@@ -890,6 +898,14 @@ public:
   KINLINE void HeadNormalize();
 };
 
+// Specialize writable_set's tombstone predicate for LObject.  writable_set
+// iterators (ordered + unordered) check this to skip tombstoned entries.
+// Inlined so that the hot iteration loops remain cheap.
+template<>
+inline bool writable_set_is_deleted<LObject>(const LObject& o) {
+  return o.deleted;
+}
+
 EXTERN_VAR int HCord;
 
 /** @class LSet
@@ -938,6 +954,18 @@ private:
   // the array contains junk that is never queried.
   std::vector<unsigned long> sevSig_flat_;
 
+  // --- Tombstone / erase instrumentation ---
+  // live_count_: number of non-tombstoned entries (i.e. size()).
+  // deleted_count_: number of currently-tombstoned entries (decremented on
+  // compact()).  peak_deleted_count_: high-water mark of deleted_count_ seen
+  // before a compact.  erase_/compact_/pop_skip_ counters are cumulative.
+  int live_count_ = 0;
+  int deleted_count_ = 0;
+  int peak_deleted_count_ = 0;
+  long erase_call_count_ = 0;
+  long compact_call_count_ = 0;
+  long pop_skip_count_ = 0;  // cumulative tombstones skipped by pop()
+
 public:
   std::unordered_map<std::pair<poly, poly>, iterator, PolyPairHash> pair_index;
 
@@ -952,12 +980,41 @@ public:
   using writable_set<LObject, CompareLObject>::rbegin;
   using writable_set<LObject, CompareLObject>::rend;
   using writable_set<LObject, CompareLObject>::key_comp;
-  using writable_set<LObject, CompareLObject>::empty;
-  using writable_set<LObject, CompareLObject>::size;
   using writable_set<LObject, CompareLObject>::size_type;
   using writable_set<LObject, CompareLObject>::unordered_iterator;
   using writable_set<LObject, CompareLObject>::ubegin;
   using writable_set<LObject, CompareLObject>::uend;
+
+  // size()/empty() return LIVE-element counts (excluding tombstones), which
+  // is what all downstream GB-engine callers expect.  Physical storage
+  // (including tombstones) is exposed via physical_size() / sev_flat_size().
+  size_type size() const { return static_cast<size_type>(live_count_); }
+  bool empty() const { return live_count_ == 0; }
+
+  // --- Tombstone statistics / diagnostics (not thread-safe) ---
+  int deleted_count() const { return deleted_count_; }
+  int peak_deleted_count() const { return peak_deleted_count_; }
+  long erase_call_count() const { return erase_call_count_; }
+  long compact_call_count() const { return compact_call_count_; }
+  long pop_skip_count() const { return pop_skip_count_; }
+  size_type physical_size() const {
+    return writable_set<LObject, CompareLObject>::size();
+  }
+  void debug_print_stats(const char *tag = NULL) const {
+    fprintf(stderr,
+            "LSet[%s] live=%d physical=%zu deleted=%d peak_deleted=%d "
+            "erase_calls=%ld compact_calls=%ld pop_skips=%ld\n",
+            tag ? tag : "", live_count_, physical_size(),
+            deleted_count_, peak_deleted_count_,
+            erase_call_count_, compact_call_count_, pop_skip_count_);
+  }
+
+  // compact(): remove tombstoned entries from the multiset tree, free
+  // polys/pair_index entries that were left in-place by lazy erase, and
+  // repack sev_flat_ / sevSig_flat_ / flat_index.  Called at cleanup
+  // points (completeReduce, end of bba, cleanL).  Invalidates ALL
+  // outstanding iterators.
+  void compact();
 
   // Filtered unordered iterator: scans a contiguous sev array
   // for cache-friendly pre-filtering, only visiting elements whose sev
@@ -980,11 +1037,15 @@ public:
       // Use sev_array_ (which may be sev_flat_ or sevSig_flat_) for the
       // actual filter check. This avoids the problem that sevSig can
       // legitimately be 0, which would be confused with the deleted sentinel.
+      // Also skip over logically-deleted entries (LObject.deleted==true),
+      // which happens on tombstone-on-erase before compact() has run.
       const unsigned long* del = owner_->sev_flat_.data();
       const unsigned long* sev = sev_array_->data();
       const size_t sz = sev_array_->size();
       while (pos_ < sz) {
         if (del[pos_] == 0) { ++pos_; continue; }     // deleted sentinel
+        LObject* lp = owner_->flat_ptr(pos_);
+        if (lp == nullptr || lp->deleted) { ++pos_; continue; }
         unsigned long s = sev[pos_];
         if (sev2_ == 0) {
           if (sev1_ & ~s) { ++pos_; continue; }       // divisibility: skip
@@ -1055,19 +1116,32 @@ public:
 
   // Copy constructor: base class copy rebuilds flat_ with new indices,
   // so we must rebuild sev_flat_, sevSig_flat_, and pair_index to match.
+  // The copy ctor uses insert() for each element, so no tombstones are
+  // carried over; live_count_ will match the iterated count.
   LSet(const LSet& other)
-    : writable_set<LObject, CompareLObject>(other), seq(other.seq) {
+    : writable_set<LObject, CompareLObject>(other), seq(other.seq),
+      live_count_(0), deleted_count_(0), peak_deleted_count_(0),
+      erase_call_count_(0), compact_call_count_(0), pop_skip_count_(0) {
     rebuild_sev_flat();
     rebuild_sevSig_flat();
     rebuild_pair_index();
+    // Base class ::insert copies only live entries on construction; count.
+    live_count_ = static_cast<int>(physical_size());
   }
 
   // Move constructor: base class move rebuilds flat_ with new indices.
   LSet(LSet&& other) noexcept
-    : writable_set<LObject, CompareLObject>(std::move(other)), seq(other.seq) {
+    : writable_set<LObject, CompareLObject>(std::move(other)), seq(other.seq),
+      live_count_(other.live_count_), deleted_count_(other.deleted_count_),
+      peak_deleted_count_(other.peak_deleted_count_),
+      erase_call_count_(other.erase_call_count_),
+      compact_call_count_(other.compact_call_count_),
+      pop_skip_count_(other.pop_skip_count_) {
     rebuild_sev_flat();
     rebuild_sevSig_flat();
     rebuild_pair_index();
+    other.live_count_ = 0;
+    other.deleted_count_ = 0;
   }
 
   // Copy assignment: same issue — base class rebuilds flat_ from scratch.
@@ -1075,6 +1149,12 @@ public:
     if (this != &other) {
       writable_set<LObject, CompareLObject>::operator=(other);
       seq = other.seq;
+      live_count_ = static_cast<int>(physical_size());
+      deleted_count_ = 0;
+      peak_deleted_count_ = 0;
+      erase_call_count_ = 0;
+      compact_call_count_ = 0;
+      pop_skip_count_ = 0;
       rebuild_sev_flat();
       rebuild_sevSig_flat();
       rebuild_pair_index();
@@ -1087,6 +1167,14 @@ public:
     if (this != &other) {
       writable_set<LObject, CompareLObject>::operator=(std::move(other));
       seq = other.seq;
+      live_count_ = other.live_count_;
+      deleted_count_ = other.deleted_count_;
+      peak_deleted_count_ = other.peak_deleted_count_;
+      erase_call_count_ = other.erase_call_count_;
+      compact_call_count_ = other.compact_call_count_;
+      pop_skip_count_ = other.pop_skip_count_;
+      other.live_count_ = 0;
+      other.deleted_count_ = 0;
       rebuild_sev_flat();
       rebuild_sevSig_flat();
       rebuild_pair_index();
@@ -1097,6 +1185,7 @@ public:
   // Override insert to maintain pair_index, sev_flat_, and sevSig_flat_
   iterator insert(const LObject& lobject) {
     iterator it = writable_set<LObject, CompareLObject>::insert(lobject);
+    live_count_++;
     sev_flat_.push_back(it->sev_lcm);
     sevSig_flat_.push_back(it->sevSig);
     if (it->p1 != NULL && it->p2 != NULL) {
@@ -1112,10 +1201,15 @@ public:
     sev_flat_.clear();
     sevSig_flat_.clear();
     writable_set<LObject, CompareLObject>::clear();
+    live_count_ = 0;
+    deleted_count_ = 0;
   }
 
   // Override reorder to rebuild pair_index, sev_flat_, and sevSig_flat_
+  // reorder() compacts first — tombstones are pruned then rebuilt.
   void reorder() {
+    // Compact tombstones first so reorder sees a clean array.
+    if (deleted_count_ > 0) compact();
     writable_set<LObject, CompareLObject>::reorder();
     // After reorder, flat_ has no gaps and flat_index is reassigned 0..size()-1
     rebuild_sev_flat();
