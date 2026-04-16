@@ -139,7 +139,9 @@ static inline void kt_S_lock_shared(SweepContext *ctx, int thread_id)
   }
 }
 
-/* Phase-2 L exclusive lock: B-into-L merge. */
+/* L exclusive lock held during phase 1 (chainCritNormal merges local B
+ * into strat->L).  Records wait time in phase1_l_wait_ns (renamed from
+ * phase2_wait_ns in task 508 — phase 2 no longer exists). */
 static inline void kt_L_lock_phase2(SweepContext *ctx, int thread_id)
 {
   if (KT_STATS(ctx))
@@ -148,7 +150,7 @@ static inline void kt_L_lock_phase2(SweepContext *ctx, int thread_id)
     pthread_mutex_lock(&ctx->L_lock);
     long dt = kt_now_ns() - t0;
     ThreadStats &ts = KT_TS(ctx, thread_id);
-    ts.phase2_wait_ns += dt;
+    ts.phase1_l_wait_ns += dt;
   }
   else
   {
@@ -1104,7 +1106,20 @@ static void process_survivor_lobject(SweepContext *ctx, LObject *P, int thread_i
 
 #ifdef KTHREAD_INSTRUMENT
     long p1_t0 = KT_STATS(ctx) ? kt_now_ns() : 0;
+    long p1_l_t0 = p1_t0;  // L-lock held from here until unlock below
     long ep0 = KT_STATS(ctx) ? kt_now_ns() : 0;
+    // Sample how many drainers are concurrently in phase 1 right now.
+    // enterpairs_active counts drain_survivor_queue callers; this is an
+    // upper bound on phase-1 concurrency (each caller passes through
+    // phase 0 then phase 1).  Not all of these are necessarily in
+    // phase 1 at the same instant, but the sample gives a reasonable
+    // "peer count" indicator.
+    if (KT_STATS(ctx))
+    {
+      long n = ctx->enterpairs_active.load(std::memory_order_relaxed);
+      ThreadStats &ts = KT_TS(ctx, thread_id);
+      if (n > ts.phase1_concurrent_max) ts.phase1_concurrent_max = n;
+    }
 #endif
 
     // pos_it captured in phase 0 remains valid because (a) SORDER_STANDARD
@@ -1118,8 +1133,15 @@ static void process_survivor_lobject(SweepContext *ctx, LObject *P, int thread_i
       enterpairs(P->p, strat->S.size()-1, P->ecart, pos_it, strat, strat->T.size()-1);
 
 #ifdef KTHREAD_INSTRUMENT
-    if (KT_STATS(ctx)) enterpairs_accum += kt_now_ns() - ep0;
-    if (KT_STATS(ctx)) phase1_work = kt_now_ns() - p1_t0;
+    if (KT_STATS(ctx))
+    {
+      long now = kt_now_ns();
+      enterpairs_accum += now - ep0;
+      phase1_work = now - p1_t0;
+      long p1_l_dt = now - p1_l_t0;
+      ThreadStats &ts = KT_TS(ctx, thread_id);
+      ts.phase1_l_ns += p1_l_dt;
+    }
 #endif
 
     // Safety: clear any residual local B / pairtest entries before
@@ -1161,7 +1183,9 @@ static void process_survivor_lobject(SweepContext *ctx, LObject *P, int thread_i
 
     ts.phase0_ns += phase0_work;
     ts.phase1_ns += phase1_work;
-    // phase2 no longer exists; leave ts.phase2_ns untouched.
+    // phase1_l_ns: time with L-lock held during phase 1 (formerly
+    // "phase2").  Accumulated via the lambda below — see the
+    // in-phase-1 block above.
     ts.phase_survivors++;
   }
 #endif
@@ -1574,17 +1598,24 @@ parallel_shutdown:
               ctx->tstats[i].enterpairs_trylock_count);
     fprintf(stderr, "\n");
 
-    // Phase breakdown (task 507 enterpairs-parallel-measure).
-    fprintf(stderr, "[kthread-stats] %-4s %14s %14s %14s %14s %14s %14s %10s %10s %10s\n",
+    // Phase breakdown (task 507 enterpairs-parallel-measure +
+    // task 508 enterpairs-parallel-phase1).  phase2_* renamed to
+    // phase1_l_* (L-lock wait/held during phase 1, not a separate
+    // phase).  ph1_cmax is the peak value of ctx->enterpairs_active
+    // sampled by this thread on phase-1 entry (how many drainers
+    // were concurrently in phase 1).
+    fprintf(stderr, "[kthread-stats] %-4s %14s %14s %14s %14s %14s %14s %10s %10s %10s %10s\n",
             "tid", "phase0_wait", "phase0_ns", "phase1_wait", "phase1_ns",
-            "phase2_wait", "phase2_ns", "ph_surv", "ph_s_cas", "ph_l_cas");
+            "phase1_l_wait", "phase1_l_ns", "ph_surv", "ph_s_cas", "ph_l_cas",
+            "ph1_cmax");
     for (int i = 0; i < tt; i++)
     {
       ThreadStats &ts = ctx->tstats[i];
-      fprintf(stderr, "[kthread-stats] p%-3d %14ld %14ld %14ld %14ld %14ld %14ld %10ld %10ld %10ld\n",
+      fprintf(stderr, "[kthread-stats] p%-3d %14ld %14ld %14ld %14ld %14ld %14ld %10ld %10ld %10ld %10ld\n",
               i, ts.phase0_wait_ns, ts.phase0_ns, ts.phase1_wait_ns, ts.phase1_ns,
-              ts.phase2_wait_ns, ts.phase2_ns, ts.phase_survivors,
-              ts.phase_s_cas_fail, ts.phase_l_cas_fail);
+              ts.phase1_l_wait_ns, ts.phase1_l_ns, ts.phase_survivors,
+              ts.phase_s_cas_fail, ts.phase_l_cas_fail,
+              ts.phase1_concurrent_max);
     }
 
     // CSV output for per-round records

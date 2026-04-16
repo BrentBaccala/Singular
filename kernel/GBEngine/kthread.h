@@ -75,22 +75,29 @@ struct ThreadStats
   long ps_enterS_ns;        // ns inside strat->enterS
   long ps_other_ns;         // remainder of process_survivor
 
-  // Phase-split instrumentation (task 506 enterpairs-parallel).
-  //   phase0: short S-exclusive for enterS(h) + my_idx capture
-  //   phase1: S-shared for enterpairs iteration + chainCrit + clearS
-  //   phase2: L-exclusive for B-into-L merge
-  // Current (initial) implementation runs phases 1+2 under exclusive
-  // S-lock; future work splits them.  Fields are emitted regardless
-  // so measurement is possible from the first landing.
+  // Phase-split instrumentation (task 506 enterpairs-parallel /
+  // task 508 enterpairs-parallel-phase1).
+  //   phase0: S-exclusive for setup + enterT + enterS
+  //   phase1: S-shared + L-exclusive for enterpairs iteration +
+  //           chainCrit (merges local B into strat->L) + clearS
+  // As of task 508, phase 2 no longer exists (chainCritNormal does the
+  // B-into-L merge inline under L-lock).  The phase2_* fields are
+  // retained for ABI compatibility with the post-506 dump format but
+  // renamed semantically.
   long phase0_wait_ns;      // blocked on S exclusive lock (phase 0)
   long phase0_ns;           // work inside phase 0
   long phase1_wait_ns;      // blocked on S shared lock (phase 1)
   long phase1_ns;           // iteration + chainCrit + clearS + B construction
-  long phase2_wait_ns;      // blocked on L exclusive lock (phase 2)
-  long phase2_ns;           // merge into L
+  long phase1_l_wait_ns;    // blocked on L-exclusive during phase 1
+                            // (formerly phase2_wait_ns)
+  long phase1_l_ns;         // time under L-exclusive during phase 1
+                            // (formerly phase2_ns)
   long phase_survivors;     // survivors passed through the phased path
   long phase_s_cas_fail;    // S tombstone CAS failures (peer drainer won)
   long phase_l_cas_fail;    // L tombstone CAS failures (peer drainer won)
+  long phase1_concurrent_max;  // peak observed value of
+                               // ctx->enterpairs_active during this
+                               // thread's phase 1 (sampled at entry).
 
   long round_start_ns;      // timestamp at start of current round
 };
