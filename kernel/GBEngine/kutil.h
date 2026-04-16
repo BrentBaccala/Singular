@@ -166,6 +166,20 @@ struct denominator_list_s{number n; denominator_list next;};
 EXTERN_VAR denominator_list DENOMINATOR_LIST;
 
 // SElement: one element of the S set (standard basis).
+//
+// The `deleted` field is a plain bool but is accessed via atomic ops
+// from the parallel phase-1 drain path (task 506).  Writers in phase 1
+// hold only a shared lock on the enclosing sBasisSet, so concurrent
+// writers must CAS to claim "tombstone ownership" (the winning thread
+// is responsible for any owner-side cleanup such as freeing polys).
+// Readers under shared lock use a relaxed load; a stale `false` read
+// is benign (the walk just considers the entry live a little longer).
+//
+// Helper functions provide the atomic ops while keeping the struct
+// copyable (std::atomic<bool> is not copy-assignable, which would
+// break existing code that assigns SElements by value during
+// reorder/compact/shift).  See deleted_atomic_load / cas helpers
+// below the struct.
 struct SElement {
   poly p;              // the polynomial
   int ecart;           // ecart
@@ -176,12 +190,30 @@ struct SElement {
   int fromQ;           // from quotient ideal
   poly sig;            // signature (sba only)
   unsigned long sevSig;// short exponent vector of signature (sba only)
-  bool deleted;              // lazy-delete flag for parallel phase
+  bool deleted;              // lazy-delete flag for parallel phase (atomic access)
   mutable bool pairtest;     // transient: true if spoly(this, h)==0 during enterOnePair
 
   SElement() : p(NULL), ecart(0), sev(0), s_2_r(0), length(0), wlength(0),
                fromQ(0), sig(NULL), sevSig(0), deleted(false), pairtest(false) {}
 };
+
+// Atomic helpers for SElement.deleted.  Serial code can still read/write
+// the field directly; parallel phase-1 drainers must use these.
+static inline bool selement_deleted_load(const SElement &e) {
+  return __atomic_load_n(&e.deleted, __ATOMIC_RELAXED);
+}
+// CAS: attempt to flip deleted from false->true.  Returns true if the
+// caller won the race (is "owner" of cleanup).  Returns false if another
+// thread already tombstoned this element.
+static inline bool selement_deleted_cas(SElement &e) {
+  bool expected = false;
+  return __atomic_compare_exchange_n(&e.deleted, &expected, true,
+                                     /*weak=*/false,
+                                     __ATOMIC_ACQ_REL, __ATOMIC_RELAXED);
+}
+static inline void selement_deleted_clear(SElement &e) {
+  __atomic_store_n(&e.deleted, false, __ATOMIC_RELAXED);
+}
 
 /**
  * @class sBasisSet
@@ -267,11 +299,14 @@ public:
     int pos_;
     friend class sBasisSet;
 
+    // Uses atomic load on SElement.deleted so phase-1 readers under
+    // shared lock see a consistent value even while peer drainers
+    // CAS-tombstone entries (task 506).
     void skip_deleted_forward() {
-      while (pos_ < set_->count && set_->elem(pos_).deleted) pos_++;
+      while (pos_ < set_->count && selement_deleted_load(set_->elem(pos_))) pos_++;
     }
     void skip_deleted_backward() {
-      while (pos_ > 0 && set_->elem(pos_).deleted) pos_--;
+      while (pos_ > 0 && selement_deleted_load(set_->elem(pos_))) pos_--;
     }
 
     iterator(sBasisSet* s, int pos) : set_(s), pos_(pos) { }
@@ -317,7 +352,7 @@ public:
     friend class sBasisSet;
 
     void skip_deleted_forward() {
-      while (pos_ < set_->count && set_->elem(pos_).deleted) pos_++;
+      while (pos_ < set_->count && selement_deleted_load(set_->elem(pos_))) pos_++;
     }
 
     const_iterator(const sBasisSet* s, int pos) : set_(s), pos_(pos) { }
@@ -349,24 +384,34 @@ public:
   sBasisSet() : order_(SORDER_STANDARD), live_count_(0), pairtest_any_(false),
                 deleted_count_(0), peak_deleted_count_(0),
                 erase_call_count_(0), compact_call_count_(0) {
-    pthread_mutex_init(&mutex_, NULL);
+    pthread_rwlock_init(&rwlock_, NULL);
   }
   ~sBasisSet() {
-    pthread_mutex_destroy(&mutex_);
+    pthread_rwlock_destroy(&rwlock_);
   }
-  // Non-copyable / non-movable to keep mutex identity stable.
+  // Non-copyable / non-movable to keep rwlock identity stable.
   sBasisSet(const sBasisSet&) = delete;
   sBasisSet& operator=(const sBasisSet&) = delete;
 
-  // --- Parallel locking ---
-  // Used by the parallel survivor-drain path to serialize iteration
-  // and mutation of S across drain workers. The serial code paths
-  // (THREADS=1, bba(), sba(), slimgb(), etc.) never acquire this
+  // --- Parallel locking (task 506 enterpairs-parallel) ---
+  // Replaced the prior pthread_mutex with a pthread_rwlock to support the
+  // phase-0/1/2 drain design: phase-0 writers (enterS append) take
+  // lock_exclusive(); phase-1 readers (iteration + tombstone writes via
+  // atomic CAS on SElement.deleted) take lock_shared().  The serial code
+  // paths (THREADS=1, bba(), sba(), slimgb(), etc.) never acquire this
   // lock; they are single-threaded so there is no contention.
+  //
+  // The legacy lock()/unlock() names map to exclusive mode so callers that
+  // were using the mutex prior to task 506 continue to get the same
+  // serialisation semantics unchanged.
   // See ~/project/docs/parallel-bba-thread-safety-report.md for rationale.
-  void lock() { pthread_mutex_lock(&mutex_); }
-  void unlock() { pthread_mutex_unlock(&mutex_); }
-  pthread_mutex_t* raw_mutex() { return &mutex_; }
+  void lock()            { pthread_rwlock_wrlock(&rwlock_); }
+  void unlock()          { pthread_rwlock_unlock(&rwlock_); }
+  void lock_exclusive()  { pthread_rwlock_wrlock(&rwlock_); }
+  void unlock_exclusive(){ pthread_rwlock_unlock(&rwlock_); }
+  void lock_shared()     { pthread_rwlock_rdlock(&rwlock_); }
+  void unlock_shared()   { pthread_rwlock_unlock(&rwlock_); }
+  pthread_rwlock_t* raw_rwlock() { return &rwlock_; }
 
   SOrderMode order() const { return order_; }
   void set_order(SOrderMode m) { order_ = m; }
@@ -424,16 +469,24 @@ public:
   //   MONFIRST is only used by sba() over rings and is uncommon; keeping
   //   shift avoids touching the binary-search assumptions of the
   //   monfirst-count logic in find_pos_monfirst.
+  //
+  // Parallel (task 506): phase-1 drainers may call erase() under shared
+  // S-lock concurrently.  The CAS on SElement.deleted ensures only one
+  // thread succeeds; only the winning thread decrements live_count_ and
+  // bumps deleted_count_.  live_count_ / deleted_count_ / erase_call_count_
+  // are atomically incremented so serial readers stay consistent with
+  // the parallel writers.
   void erase(iterator it) {
-    erase_call_count_++;
     if (order_ == SORDER_MONFIRST) {
+      __atomic_add_fetch(&erase_call_count_, 1, __ATOMIC_RELAXED);
       BlockArray<SElement>::erase(it.pos_);
       live_count_--;
     } else {
-      if (!elem(it.pos_).deleted) {
-        elem(it.pos_).deleted = true;
-        deleted_count_++;
-        live_count_--;
+      // CAS-based tombstone: only the winning thread mutates counters.
+      if (selement_deleted_cas(elem(it.pos_))) {
+        __atomic_add_fetch(&erase_call_count_, 1, __ATOMIC_RELAXED);
+        __atomic_add_fetch(&deleted_count_, 1, __ATOMIC_RELAXED);
+        __atomic_sub_fetch(&live_count_, 1, __ATOMIC_RELAXED);
       }
     }
   }
@@ -643,7 +696,7 @@ private:
   SOrderMode order_;
   int live_count_;
   bool pairtest_any_;  // sentinel: true if any SElement.pairtest was set
-  pthread_mutex_t mutex_;  // parallel drain path serialization
+  pthread_rwlock_t rwlock_;  // parallel drain path serialization (task 506)
 
   // Erase / compact instrumentation (cumulative across the lifetime of
   // the sBasisSet). deleted_count_ is the current tombstone population
@@ -832,6 +885,13 @@ public:
                       // compact() removes the tombstoned entry from the
                       // multiset tree and deallocates the LObject.
                       // Initialized to false by sLObject::Init() via memset.
+                      //
+                      // Parallel phase-1 (task 506): accessed via atomic ops.
+                      // Writers under shared S-lock CAS deleted false->true
+                      // to claim cleanup ownership; readers use a relaxed
+                      // load.  Helper functions below (lobject_deleted_load,
+                      // lobject_deleted_cas) perform these ops while keeping
+                      // the struct copyable.
 
   // initialization
   KINLINE void Init(ring tailRing = currRing);
@@ -898,12 +958,32 @@ public:
   KINLINE void HeadNormalize();
 };
 
+// Atomic helpers for LObject.deleted.  Serial code can read/write the
+// field directly; parallel phase-1 drainers must use these.
+static inline bool lobject_deleted_load(const LObject &o) {
+  return __atomic_load_n(&o.deleted, __ATOMIC_RELAXED);
+}
+// CAS: attempt to flip deleted from false->true.  Returns true if the
+// caller won the race (is "owner" of cleanup).  Returns false if another
+// thread already tombstoned this element.
+static inline bool lobject_deleted_cas(LObject &o) {
+  bool expected = false;
+  return __atomic_compare_exchange_n(&o.deleted, &expected, true,
+                                     /*weak=*/false,
+                                     __ATOMIC_ACQ_REL, __ATOMIC_RELAXED);
+}
+static inline void lobject_deleted_clear(LObject &o) {
+  __atomic_store_n(&o.deleted, false, __ATOMIC_RELAXED);
+}
+
 // Specialize writable_set's tombstone predicate for LObject.  writable_set
 // iterators (ordered + unordered) check this to skip tombstoned entries.
-// Inlined so that the hot iteration loops remain cheap.
+// Inlined so that the hot iteration loops remain cheap.  Uses atomic load
+// so phase-1 readers under shared lock see a consistent value even while
+// peer drainers CAS-tombstone entries.
 template<>
 inline bool writable_set_is_deleted<LObject>(const LObject& o) {
-  return o.deleted;
+  return __atomic_load_n(&o.deleted, __ATOMIC_RELAXED);
 }
 
 EXTERN_VAR int HCord;
@@ -1045,7 +1125,7 @@ public:
       while (pos_ < sz) {
         if (del[pos_] == 0) { ++pos_; continue; }     // deleted sentinel
         LObject* lp = owner_->flat_ptr(pos_);
-        if (lp == nullptr || lp->deleted) { ++pos_; continue; }
+        if (lp == nullptr || lobject_deleted_load(*lp)) { ++pos_; continue; }
         unsigned long s = sev[pos_];
         if (sev2_ == 0) {
           if (sev1_ & ~s) { ++pos_; continue; }       // divisibility: skip
