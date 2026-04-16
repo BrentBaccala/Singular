@@ -232,6 +232,41 @@ extern __thread LSet* t_local_B_override;
 // skStrategy as an inline function (needs both LSet and skStrategy
 // complete).
 
+// Thread-local "my arrival" for the parallel phase-1 drain
+// (task 508 enterpairs-parallel-phase1).
+//
+// When set to a value != UINT64_MAX, the enterpairs / initenterpairs /
+// chainCrit family filter their S-iteration to entries with
+// arrival_id < t_local_my_arrival.  This realises the "iterate entries
+// that arrived before h" semantics needed under SORDER_STANDARD —
+// because enterS places h at a sorted position, the insertion index
+// does not reflect arrival order.
+//
+// Default UINT64_MAX = no filter (serial path; arrival_id < UINT64_MAX
+// is trivially true for every finite arrival_id ever stamped).
+extern __thread uint64_t t_local_my_arrival;
+
+// Thread-local pairtest-hit list (task 508 enterpairs-parallel-phase1).
+//
+// In serial mode SElement.pairtest is used: enterOnePair sets it for
+// S[i] whose spoly with h is zero, chainCritNormal scans S for pairtest
+// entries, clear_pairtest clears them all.  This pattern races across
+// concurrent drainers: drainer A setting pairtest[i] (because
+// spoly(S[i], h_A) == 0) could be observed by drainer B's
+// chainCritNormal and applied to B's (S[*], h_B) pairs — but the
+// theoretical justification only holds for h_A.
+//
+// To avoid the race under parallel phase 1, drainers push the
+// SElement* of every pairtest-hit into a thread-local vector instead
+// of setting SElement.pairtest.  chainCritNormal iterates this vector
+// when t_local_my_arrival != UINT64_MAX; the SElement.pairtest field
+// is left alone.  The vector is cleared at the start of each phase 1
+// and again at the end (defence in depth).
+//
+// Serial callers (t_local_my_arrival == UINT64_MAX) keep the existing
+// SElement.pairtest behaviour unchanged.
+extern __thread std::vector<SElement*>* t_local_pairtest_hits;
+
 // Atomic helpers for SElement.deleted.  Serial code can still read/write
 // the field directly; parallel phase-1 drainers must use these.
 static inline bool selement_deleted_load(const SElement &e) {

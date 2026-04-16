@@ -84,6 +84,39 @@ VAR denominator_list DENOMINATOR_LIST=NULL;
 // each build their own B.  See kutil.h for full rationale.
 __thread LSet* t_local_B_override = NULL;
 
+// Thread-local "my arrival" filter for the parallel phase-1 drain.
+// UINT64_MAX in serial mode (no filter); set to the drainer's
+// my_arrival before phase 1 so S-iteration skips entries with
+// arrival_id >= my_arrival.  See kutil.h for rationale.
+__thread uint64_t t_local_my_arrival = UINT64_MAX;
+
+// Thread-local pairtest-hit list.  NULL in serial mode (falls back to
+// SElement.pairtest); set by the parallel drain to a stack-allocated
+// vector before phase 1.  See kutil.h for rationale.
+__thread std::vector<SElement*>* t_local_pairtest_hits = NULL;
+
+// Arrival-id filter for S iteration during the parallel phase-1 drain.
+// Returns true if the entry should be processed (its arrival_id is
+// strictly less than the current drainer's my_arrival).  In serial mode
+// t_local_my_arrival == UINT64_MAX so this is always true.
+static inline bool arrival_id_ok(const SElement &s) {
+  return s.arrival_id < t_local_my_arrival;
+}
+
+// Record a pairtest hit.  In serial mode, sets SElement.pairtest
+// (existing behaviour).  In parallel phase-1 mode, pushes the
+// SElement* onto the thread-local hit list so that chainCritNormal
+// can iterate the current drainer's hits only, without racing on
+// SElement.pairtest across drainers.
+static inline void record_pairtest_hit(const SElement &si, kStrategy strat) {
+  if (t_local_pairtest_hits != NULL) {
+    t_local_pairtest_hits->push_back(const_cast<SElement*>(&si));
+  } else {
+    selement_pairtest_set(si);
+    strat->S.set_pairtest_any();
+  }
+}
+
 
 #ifdef ENTER_USE_MYMEMMOVE
 inline void _my_memmove_d_gt_s(unsigned long* d, unsigned long* s, long l)
@@ -1661,7 +1694,7 @@ static void enterOnePairRing (const SElement &si,poly p,int /*ecart*/, int isFro
         h.lcm=NULL;
       }
       h.Clear();
-      selement_pairtest_set(si); strat->S.set_pairtest_any();
+      record_pairtest_hit(si, strat);
       return;
     }
     else
@@ -1692,7 +1725,7 @@ static void enterOnePairRing (const SElement &si,poly p,int /*ecart*/, int isFro
   h.i_r = -1;
   if(h.p == NULL)
   {
-    selement_pairtest_set(si); strat->S.set_pairtest_any();
+    record_pairtest_hit(si, strat);
     return;
   }
   h.tailRing = strat->tailRing;
@@ -2330,7 +2363,7 @@ void enterOnePairNormal (const SElement &si,poly p,int ecart, int isFromQ,kStrat
   if (Lp.p == NULL)
   {
     /*- the case that the s-poly is 0 -*/
-    selement_pairtest_set(si); strat->S.set_pairtest_any();
+    record_pairtest_hit(si, strat);
     /*hint for spoly(S[i],p) == 0 for some i,0 <= i <= sl*/
     /*
     *suppose we have (s,r),(r,p),(s,p) and spoly(s,p) == 0 and (r,p) is
@@ -2560,7 +2593,7 @@ static void enterOnePairLift (const SElement &si,poly p,int ecart, int isFromQ,k
   if (Lp.p == NULL)
   {
     /*- the case that the s-poly is 0 -*/
-    selement_pairtest_set(si); strat->S.set_pairtest_any();
+    record_pairtest_hit(si, strat);
     /*hint for spoly(S[i],p) == 0 for some i,0 <= i <= sl*/
     /*
     *suppose we have (s,r),(r,p),(s,p) and spoly(s,p) == 0 and (r,p) is
@@ -3400,8 +3433,50 @@ void chainCritNormal (poly p,int ecart,kStrategy strat)
   *pairtest[i] is TRUE if spoly(S[i],p) == 0.
   *In this case all elements in B such
   *that their lcm is divisible by the leading term of S[i] can be canceled
+  *
+  * Parallel phase-1 mode: iterate the thread-local pairtest_hits
+  * vector (populated by this drainer's enterOnePair calls) so we don't
+  * cross-contaminate with peer drainers' pairtest hits.  Serial mode
+  * (t_local_pairtest_hits == NULL): use the historical S-scan + clear.
   */
-  if (strat->S.has_pairtest())
+  if (t_local_pairtest_hits != NULL)
+  {
+#ifdef HAVE_SHIFTBBA
+    if (rIsLPRing(currRing))
+    {
+      for (SElement *sit : *t_local_pairtest_hits)
+      {
+        for (auto it = strat_B(strat).ubegin(); it != strat_B(strat).uend(); )
+        {
+          if (pLPDivisibleBy(sit->p, it->lcm))
+          {
+            it = strat_B(strat).erase(it);
+            strat->c3++;
+          }
+          else ++it;
+        }
+      }
+    }
+    else
+#endif
+    {
+      for (SElement *sit : *t_local_pairtest_hits)
+      {
+        for (auto it = strat_B(strat).ubegin(); it != strat_B(strat).uend(); )
+        {
+          if (!(sit->sev & ~it->sev_lcm)
+              && pDivisibleBy(sit->p, it->lcm))
+          {
+            it = strat_B(strat).erase(it);
+            strat->c3++;
+          }
+          else ++it;
+        }
+      }
+    }
+    t_local_pairtest_hits->clear();
+  }
+  else if (strat->S.has_pairtest())
   {
 #ifdef HAVE_SHIFTBBA
     // only difference is pLPDivisibleBy instead of pDivisibleBy
@@ -3726,8 +3801,28 @@ void chainCritPart (poly p,int ecart,kStrategy strat)
   *pairtest[i] is TRUE if spoly(S[i],p) == 0.
   *In this case all elements in B such
   *that their lcm is divisible by the leading term of S[i] can be canceled
+  *
+  * Parallel phase-1: iterate thread-local hits (if set).
   */
-  if (strat->S.has_pairtest())
+  if (t_local_pairtest_hits != NULL)
+  {
+    for (SElement *sit : *t_local_pairtest_hits)
+    {
+      for (auto it = strat_B(strat).ubegin(); it != strat_B(strat).uend(); )
+      {
+        if (_p_LmDivisibleByPart(sit->p,currRing,
+           it->lcm,currRing,
+           currRing->real_var_start,currRing->real_var_end))
+        {
+          it = strat_B(strat).erase(it);
+          strat->c3++;
+        }
+        else ++it;
+      }
+    }
+    t_local_pairtest_hits->clear();
+  }
+  else if (strat->S.has_pairtest())
   {
     /*- i.e. there is an i with pairtest[i]==TRUE -*/
     for (auto sit = strat->S.begin(); sit != strat->S.end(); ++sit)
@@ -4032,6 +4127,7 @@ void initenterpairs (poly h,int k,int ecart,int isFromQ,kStrategy strat, int atR
       {
         for (auto sit=strat->S.begin(); sit!=strat->S.end(); ++sit)
         {
+          if (!arrival_id_ok(*sit)) continue; // skip h and peer-drain survivors
           if (!sit->fromQ)
           {
             new_pair=TRUE;
@@ -4045,6 +4141,7 @@ void initenterpairs (poly h,int k,int ecart,int isFromQ,kStrategy strat, int atR
         new_pair=TRUE;
         for (auto sit=strat->S.begin(); sit!=strat->S.end(); ++sit)
         {
+          if (!arrival_id_ok(*sit)) continue; // skip h and peer-drain survivors
           strat->enterOnePair(*sit,h,ecart,isFromQ,strat, atR);
           //Print("j:%d, L.size():%d\n",sit.index(),(int)strat->L.size());
         }
@@ -4054,6 +4151,7 @@ void initenterpairs (poly h,int k,int ecart,int isFromQ,kStrategy strat, int atR
     {
       for (auto sit=strat->S.begin(); sit!=strat->S.end(); ++sit)
       {
+        if (!arrival_id_ok(*sit)) continue; // skip h and peer-drain survivors
         if ((pGetComp(h)==pGetComp(sit->p))
         || (pGetComp(sit->p)==0))
         {
@@ -4210,8 +4308,27 @@ void chainCritRing (poly p,int, kStrategy strat)
   *pairtest[i] is TRUE if spoly(S[i],p) == 0.
   *In this case all elements in B such
   *that their lcm is divisible by the leading term of S[i] can be canceled
+  *
+  * Parallel phase-1: iterate thread-local hits.
   */
-  if (strat->S.has_pairtest())
+  if (t_local_pairtest_hits != NULL)
+  {
+    for (SElement *sit : *t_local_pairtest_hits)
+    {
+      for (auto it = strat_B(strat).ubegin(); it != strat_B(strat).uend(); )
+      {
+        if (pDivisibleBy(sit->p, it->lcm)
+            && n_DivBy(pGetCoeff(it->lcm), pGetCoeff(sit->p), currRing->cf))
+        {
+          it = strat_B(strat).erase(it);
+          strat->c3++;
+        }
+        else ++it;
+      }
+    }
+    t_local_pairtest_hits->clear();
+  }
+  else if (strat->S.has_pairtest())
   {
     {
       /*- i.e. there is an i with pairtest[i]==TRUE -*/
@@ -4358,6 +4475,7 @@ void initenterstrongPairs (poly h,int k,int ecart,int isFromQ,kStrategy strat, i
       {
         for (auto sjt = strat->S.begin(); sjt != strat->S.end(); ++sjt)
         {
+          if (!arrival_id_ok(*sjt)) continue; // parallel phase-1 filter
           if (!sjt->fromQ)
           {
             new_pair=TRUE;
@@ -4370,6 +4488,7 @@ void initenterstrongPairs (poly h,int k,int ecart,int isFromQ,kStrategy strat, i
         new_pair=TRUE;
         for (auto sjt = strat->S.begin(); sjt != strat->S.end(); ++sjt)
         {
+          if (!arrival_id_ok(*sjt)) continue; // parallel phase-1 filter
           enterOneStrongPoly(*sjt,h,ecart,isFromQ,strat, atR, FALSE);
         }
       }
@@ -4378,6 +4497,7 @@ void initenterstrongPairs (poly h,int k,int ecart,int isFromQ,kStrategy strat, i
     {
       for (auto sjt = strat->S.begin(); sjt != strat->S.end(); ++sjt)
       {
+        if (!arrival_id_ok(*sjt)) continue; // parallel phase-1 filter
         if ((pGetComp(h)==pGetComp(sjt->p))
         || (pGetComp(sjt->p)==0))
         {
@@ -4622,11 +4742,17 @@ void clearSbatch (poly h,int k,sBasisSet::iterator pos,kStrategy strat)
     ||(pGetComp(h)<=strat->syzComp)
   ))
   {
-    // Caller contract: k == strat->S.size()-1 on entry; iterator range is safe.
-    assume(k == strat->S.size() - 1);
+    // In serial mode, enterS has not yet placed h in S when clearSbatch is
+    // called, so k = size() - 1 holds.  In parallel phase-1 mode, enterS
+    // runs in phase 0 (before clearSbatch), so S already contains h; the
+    // arrival_id filter skips h (and concurrent peer survivors) so the
+    // iteration bound is conservative.
     unsigned long h_sev = pGetShortExpVector(h);
     for (auto it = pos; it != strat->S.end(); ++it)
+    {
+      if (!arrival_id_ok(*it)) continue; // skip h and peer-drain survivors
       strat->S.clear_if_divisible(h, h_sev, it, strat);
+    }
   }
 }
 
@@ -4672,11 +4798,15 @@ void enterpairs (poly h,int k,int ecart,sBasisSet::iterator pos,kStrategy strat,
   && ((strat->syzComp==0)
     ||(pGetComp(h)<=strat->syzComp)))
   {
-    // Caller contract: k == strat->S.size()-1 on entry.
-    assume(k == strat->S.size() - 1);
+    // See clearSbatch comment: in parallel phase-1 mode, h is already in S
+    // at `pos`; arrival_id filter skips it.  k may not equal
+    // strat->S.size() - 1 in parallel mode.
     unsigned long h_sev = pGetShortExpVector(h);
     for (auto it = pos; it != strat->S.end(); ++it)
+    {
+      if (!arrival_id_ok(*it)) continue; // skip h and peer-drain survivors
       strat->S.clear_if_divisible(h, h_sev, it, strat);
+    }
   }
 }
 
@@ -4694,11 +4824,14 @@ void enterpairsSig (poly h,poly hSig,int hFrom,int k,int ecart,sBasisSet::iterat
   && ((strat->syzComp==0)
     ||(pGetComp(h)<=strat->syzComp)))
   {
-    // Caller contract: k == strat->S.size()-1 on entry.
-    assume(k == strat->S.size() - 1);
+    // sba() is serial (not reached from the parallel drain); arrival_id
+    // filter is a no-op here but kept for uniformity.
     unsigned long h_sev = pGetShortExpVector(h);
     for (auto it = pos; it != strat->S.end(); ++it)
+    {
+      if (!arrival_id_ok(*it)) continue;
       strat->S.clear_if_divisible(h, h_sev, it, strat);
+    }
   }
 }
 
@@ -11951,7 +12084,7 @@ BOOLEAN enterOnePairShift (poly q, poly p, int ecart, int isFromQ, kStrategy str
     // TODO: currently ifromS is only > 0 if called from enterOnePairWithShifts
     if (ifromS != strat->S.end() && ifromS.index() > 0)
     {
-      selement_pairtest_set(*ifromS); strat->S.set_pairtest_any();/*- hint for spoly(S^[i],p)=0 -*/
+      record_pairtest_hit(*ifromS, strat);/*- hint for spoly(S^[i],p)=0 -*/
     }
       //if (TEST_OPT_DEBUG){Print("!");} // option teach
     /* END _ TEMPORARILY DISABLED FOR SHIFTS */
