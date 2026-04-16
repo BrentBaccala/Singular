@@ -1021,7 +1021,25 @@ KINLINE void LSet::pop(void) {
    * Counted via raw_begin() (non-skipping) so that deleted_count_ can be
    * used as the diagnostic for tombstone pile-up under parallel
    * enterpairs (task prompt).
+   *
+   * Opportunistic compaction: if tombstones are piling up unboundedly
+   * (deleted_count_ > live_count_ and > COMPACT_THRESHOLD), the per-pop
+   * skip-forward cost becomes O(deleted) and the run quickly degrades.
+   * Compact() here to bound pile-up.  Threshold chosen conservatively:
+   * only trigger when there are more tombstones than live entries AND
+   * absolute count exceeds the fixed minimum — so small-L workloads
+   * never hit it.
    */
+  // Compact when tombstones outnumber live entries AND there are enough
+  // tombstones that the skip-walk cost per pop exceeds a small absolute
+  // cap.  Threshold chosen so that small L/B sets never pay compaction
+  // overhead; only loads that generate large tombstone backlogs (typical
+  // for long-running bba computations) trigger the bounded compact.
+  static const int COMPACT_THRESHOLD = 1024;
+  if (deleted_count_ > live_count_ && deleted_count_ > COMPACT_THRESHOLD) {
+    compact();
+  }
+
   if (deleted_count_ > 0) {
     long skip = 0;
     iterator raw = raw_begin();
