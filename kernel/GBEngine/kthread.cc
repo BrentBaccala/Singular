@@ -1535,6 +1535,19 @@ parallel_shutdown:
               ctx->tstats[i].enterpairs_trylock_count);
     fprintf(stderr, "\n");
 
+    // Phase breakdown (task 507 enterpairs-parallel-measure).
+    fprintf(stderr, "[kthread-stats] %-4s %14s %14s %14s %14s %14s %14s %10s %10s %10s\n",
+            "tid", "phase0_wait", "phase0_ns", "phase1_wait", "phase1_ns",
+            "phase2_wait", "phase2_ns", "ph_surv", "ph_s_cas", "ph_l_cas");
+    for (int i = 0; i < tt; i++)
+    {
+      ThreadStats &ts = ctx->tstats[i];
+      fprintf(stderr, "[kthread-stats] p%-3d %14ld %14ld %14ld %14ld %14ld %14ld %10ld %10ld %10ld\n",
+              i, ts.phase0_wait_ns, ts.phase0_ns, ts.phase1_wait_ns, ts.phase1_ns,
+              ts.phase2_wait_ns, ts.phase2_ns, ts.phase_survivors,
+              ts.phase_s_cas_fail, ts.phase_l_cas_fail);
+    }
+
     // CSV output for per-round records
     const char *csv_path = getenv("SINGULAR_KTHREAD_CSV");
     if (csv_path != NULL)
