@@ -75,6 +75,23 @@ struct ThreadStats
   long ps_enterS_ns;        // ns inside strat->enterS
   long ps_other_ns;         // remainder of process_survivor
 
+  // Phase-split instrumentation (task 506 enterpairs-parallel).
+  //   phase0: short S-exclusive for enterS(h) + my_idx capture
+  //   phase1: S-shared for enterpairs iteration + chainCrit + clearS
+  //   phase2: L-exclusive for B-into-L merge
+  // Current (initial) implementation runs phases 1+2 under exclusive
+  // S-lock; future work splits them.  Fields are emitted regardless
+  // so measurement is possible from the first landing.
+  long phase0_wait_ns;      // blocked on S exclusive lock (phase 0)
+  long phase0_ns;           // work inside phase 0
+  long phase1_wait_ns;      // blocked on S shared lock (phase 1)
+  long phase1_ns;           // iteration + chainCrit + clearS + B construction
+  long phase2_wait_ns;      // blocked on L exclusive lock (phase 2)
+  long phase2_ns;           // merge into L
+  long phase_survivors;     // survivors passed through the phased path
+  long phase_s_cas_fail;    // S tombstone CAS failures (peer drainer won)
+  long phase_l_cas_fail;    // L tombstone CAS failures (peer drainer won)
+
   long round_start_ns;      // timestamp at start of current round
 };
 

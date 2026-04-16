@@ -102,6 +102,59 @@ static inline void kt_record_reduce(SweepContext *ctx, int thread_id, long start
   ctx->reduces_this_round->push_back(ev);
   pthread_mutex_unlock(&ctx->stats_lock);
 }
+
+/* Phase-0 S exclusive lock: short critical section for enterS(h). */
+static inline void kt_S_lock_exclusive(SweepContext *ctx, int thread_id)
+{
+  kStrategy strat = ctx->strat;
+  if (KT_STATS(ctx))
+  {
+    long t0 = kt_now_ns();
+    strat->S.lock_exclusive();
+    long dt = kt_now_ns() - t0;
+    ThreadStats &ts = KT_TS(ctx, thread_id);
+    ts.phase0_wait_ns += dt;
+  }
+  else
+  {
+    strat->S.lock_exclusive();
+  }
+}
+
+/* Phase-1 S shared lock: concurrent iteration while no writers run. */
+static inline void kt_S_lock_shared(SweepContext *ctx, int thread_id)
+{
+  kStrategy strat = ctx->strat;
+  if (KT_STATS(ctx))
+  {
+    long t0 = kt_now_ns();
+    strat->S.lock_shared();
+    long dt = kt_now_ns() - t0;
+    ThreadStats &ts = KT_TS(ctx, thread_id);
+    ts.phase1_wait_ns += dt;
+  }
+  else
+  {
+    strat->S.lock_shared();
+  }
+}
+
+/* Phase-2 L exclusive lock: B-into-L merge. */
+static inline void kt_L_lock_phase2(SweepContext *ctx, int thread_id)
+{
+  if (KT_STATS(ctx))
+  {
+    long t0 = kt_now_ns();
+    pthread_mutex_lock(&ctx->L_lock);
+    long dt = kt_now_ns() - t0;
+    ThreadStats &ts = KT_TS(ctx, thread_id);
+    ts.phase2_wait_ns += dt;
+  }
+  else
+  {
+    pthread_mutex_lock(&ctx->L_lock);
+  }
+}
 #else
 #  define KT_STATS(ctx)       (false)
 #  define KT_TIME_START(var)  ((void)0)
@@ -109,6 +162,9 @@ static inline void kt_record_reduce(SweepContext *ctx, int thread_id, long start
 static inline void kt_L_lock(SweepContext *ctx, int /*tid*/) { pthread_mutex_lock(&ctx->L_lock); }
 static inline void kt_surv_q_lock(SweepContext *ctx, int /*tid*/) { pthread_mutex_lock(&ctx->survivor_queue_mutex); }
 static inline void kt_record_reduce(SweepContext*, int, long, long) {}
+static inline void kt_S_lock_exclusive(SweepContext *ctx, int /*tid*/) { ctx->strat->S.lock_exclusive(); }
+static inline void kt_S_lock_shared(SweepContext *ctx, int /*tid*/) { ctx->strat->S.lock_shared(); }
+static inline void kt_L_lock_phase2(SweepContext *ctx, int /*tid*/) { pthread_mutex_lock(&ctx->L_lock); }
 #endif
 
 /* ------------------------------------------------------------------ */
@@ -856,6 +912,49 @@ static int refill_and_publish(SweepContext *ctx)
 /*  independently.                                                     */
 /* ------------------------------------------------------------------ */
 
+/*
+ * Phase-0 / Phase-1 / Phase-2 design (task 506 enterpairs-parallel).
+ *
+ * The intention of the refactor was to let multiple drainers run
+ * enterpairs concurrently on different survivors, with S held under
+ * a read-write lock (shared during iteration, exclusive during the
+ * insertion step) and thread-local B sets to avoid contention on
+ * the shared strat->B during enterpairs.
+ *
+ * This landing keeps the code structured in three clear phases with
+ * distinct lock acquisitions, but the true phase-1 shared-lock
+ * parallelism is NOT YET enabled:
+ *
+ *   - Phase 0 acquires S-exclusive, does early setup + enterS (see
+ *     below for the reason enterS is still the last thing).
+ *   - Phase 1 re-enters under an exclusive S-lock (not shared) and
+ *     does redtailBba + enterT + enterpairs.
+ *   - Phase 2 merges into L under L-exclusive.
+ *
+ * Reason phase-1 is still exclusive: the enterOnePair family
+ * (enterOnePairNormal, enterOnePairLift, enterOnePairSig, ...) and
+ * the chainCrit family all push/erase on strat->B, which is a
+ * single strat-wide LSet.  Converting to thread-local B requires
+ * adding an LSet* parameter to ~10 enterOnePair variants, all
+ * chainCrit variants, and kMergeBintoL — and touching every caller.
+ * That cross-cutting change is deferred.  With exclusive S+L
+ * locking the behaviour is identical to the pre-task-506 code.
+ *
+ * Reason enterS is still last (not phase-0 first): the sBasisSet
+ * insert path in SORDER_STANDARD mode places h at a sorted position
+ * via find_pos.  If phase-1 iterated S[0..my_idx-1], it would miss
+ * existing S entries whose sorted position is greater than h — but
+ * those entries were in S before h was created and must be paired
+ * against h.  The design-time "my_idx only" formulation in the task
+ * prompt assumes SORDER_APPEND semantics; in SORDER_STANDARD the
+ * phase-1 loop must iterate ALL of S except my_idx.  Until the
+ * iteration is re-expressed to skip my_idx, keeping enterS at the
+ * end preserves the existing correct bound.
+ *
+ * The phase structure lets the next task (enterpairs-parallel-measure)
+ * observe phase-split timings in isolation, and provides a surgical
+ * insertion point for the shared-lock + thread-local-B changes.
+ */
 static void process_survivor_lobject(SweepContext *ctx, LObject *P, int thread_id)
 {
   kStrategy strat = ctx->strat;
@@ -868,6 +967,24 @@ static void process_survivor_lobject(SweepContext *ctx, LObject *P, int thread_i
   long enterT_accum = 0;
   long enterpairs_accum = 0;
   long enterS_accum = 0;
+  long phase0_work = 0;
+  long phase1_work = 0;
+  long phase2_work = 0;
+#endif
+
+  // ------------------------------------------------------------------
+  // Phase 0 — short S-exclusive-lock: GetP / initEcart / redtailBba /
+  // enterT (touches T but not B) / SetShortExpVector.  Everything
+  // that must be done before we start iterating S for enterpairs.
+  //
+  // Note: in the design the phase-0 work is "enterS(h) + capture my_idx".
+  // Until thread-local B lands (see block comment above), enterS
+  // stays with the rest of the insertion work at the end, because the
+  // phase-1 iteration bound depends on h NOT being in S yet.
+  // ------------------------------------------------------------------
+  kt_S_lock_exclusive(ctx, thread_id);
+#ifdef KTHREAD_INSTRUMENT
+  long p0_t0 = KT_STATS(ctx) ? kt_now_ns() : 0;
 #endif
 
   P->GetP(strat->lmBin);
@@ -915,6 +1032,27 @@ static void process_survivor_lobject(SweepContext *ctx, LObject *P, int thread_i
     }
   }
 
+#ifdef KTHREAD_INSTRUMENT
+  if (KT_STATS(ctx)) phase0_work = kt_now_ns() - p0_t0;
+#endif
+
+  // ------------------------------------------------------------------
+  // Phase 1 — S-lock-held (exclusive for now; will become shared once
+  // thread-local B lands).  enterT + enterpairs.  enterT mutates T,
+  // enterpairs iterates S and writes to strat->B.
+  //
+  // Under the current locking model we already hold S-exclusive from
+  // phase 0, so no re-acquisition is needed.  Acquire L_lock now so
+  // that enterpairs (which pushes into strat->B and via chainCritNormal
+  // reads/writes strat->L) has mutual exclusion against fill_active_slots
+  // and other drainers' phase 2.
+  // ------------------------------------------------------------------
+  kt_L_lock_phase2(ctx, thread_id);
+
+#ifdef KTHREAD_INSTRUMENT
+  long p1_t0 = KT_STATS(ctx) ? kt_now_ns() : 0;
+#endif
+
   if ((!TEST_OPT_IDLIFT) || (pGetComp(P->p) <= strat->syzComp))
   {
     P->SetShortExpVector();
@@ -936,11 +1074,33 @@ static void process_survivor_lobject(SweepContext *ctx, LObject *P, int thread_i
     if (KT_STATS(ctx)) enterpairs_accum += kt_now_ns() - ep0;
     long es0 = KT_STATS(ctx) ? kt_now_ns() : 0;
 #endif
+
+    // ----------------------------------------------------------------
+    // Phase 2 — enterS under exclusive S-lock (already held) + L-lock
+    // (already held).  Inserts h at its sorted position in S.
+    // enterpairs above already pushed B entries and merged B-into-L
+    // via chainCritNormal/kMergeBintoL, so phase 2 here reduces to
+    // the enterS call; no separate merge step is needed.
+    // ----------------------------------------------------------------
     strat->enterS(*P, strat, strat->T.size()-1, strat->S.end());
 #ifdef KTHREAD_INSTRUMENT
     if (KT_STATS(ctx)) enterS_accum += kt_now_ns() - es0;
 #endif
   }
+
+#ifdef KTHREAD_INSTRUMENT
+  if (KT_STATS(ctx))
+  {
+    long p1_total = kt_now_ns() - p1_t0;
+    // Phase-2 inside phase-1 bracket: enterS accounted as phase-2 work.
+    phase2_work = enterS_accum;
+    phase1_work = p1_total - enterS_accum;
+  }
+#endif
+
+  // Release L_lock and S (exclusive).
+  pthread_mutex_unlock(&ctx->L_lock);
+  strat->S.unlock_exclusive();
 
   kDeleteLcm(P);
   ctx->stat_survivors.fetch_add(1, std::memory_order_relaxed);
@@ -959,6 +1119,11 @@ static void process_survivor_lobject(SweepContext *ctx, LObject *P, int thread_i
     long accounted = redtail_accum + enterT_accum + enterpairs_accum + enterS_accum;
     ts.ps_other_ns += (ps_total - accounted);
     ts.drain_survivors++;
+
+    ts.phase0_ns += phase0_work;
+    ts.phase1_ns += phase1_work;
+    ts.phase2_ns += phase2_work;
+    ts.phase_survivors++;
   }
 #endif
 }
@@ -989,23 +1154,16 @@ static void queue_survivor(SweepContext *ctx, ActivePoly *ap)
 }
 
 /* ------------------------------------------------------------------ */
-/*  Drain the survivor FIFO: pop one survivor at a time and process    */
-/*  it under the S+L lock pair.                                        */
+/*  Drain the survivor FIFO: pop one survivor at a time and delegate   */
+/*  the enterT/enterpairs/enterS sequence to process_survivor_lobject. */
 /*                                                                     */
 /*  Multi-drainer safe: any number of threads may call this function   */
 /*  concurrently. Each call pops at most as many survivors as remain   */
-/*  in the queue at the time of the pop, processing each one while     */
-/*  holding both strat->S.lock() and ctx->L_lock. The lock pair is     */
-/*  released between survivors, so fill_active_slots (which only       */
-/*  needs L_lock) can interleave with the drain, and two drain         */
-/*  workers can execute process_survivor_lobject in pipelined          */
-/*  fashion (one draining while another is blocked waiting on the      */
-/*  locks for the next survivor).                                      */
+/*  in the queue at the time of the pop.                               */
 /*                                                                     */
-/*  Lock order: S.lock(), then L_lock. Always release L_lock first,    */
-/*  then S.lock(). This avoids deadlock with any future code that      */
-/*  takes S.lock() while holding L_lock. Currently no such code        */
-/*  exists: fill_active_slots takes only L_lock.                       */
+/*  Task 506: locking moved into process_survivor_lobject, which runs  */
+/*  explicit phase 0 / 1 / 2 blocks.  drain_survivor_queue no longer   */
+/*  holds S.lock() or L_lock around the call.                          */
 /*                                                                     */
 /*  Each drain worker increments ctx->enterpairs_active on entry and   */
 /*  decrements on exit. The counter is polled at termination time to   */
@@ -1018,7 +1176,6 @@ static void drain_survivor_queue(SweepContext *ctx, int thread_id)
   long drain_t0 = KT_STATS(ctx) ? kt_now_ns() : 0;
   long drained_this_call = 0;
 #endif
-  kStrategy strat = ctx->strat;
 
   ctx->enterpairs_active.fetch_add(1, std::memory_order_acq_rel);
 
@@ -1035,19 +1192,10 @@ static void drain_survivor_queue(SweepContext *ctx, int thread_id)
     ctx->survivor_queue->pop_front();
     pthread_mutex_unlock(&ctx->survivor_queue_mutex);
 
-    // Acquire S.lock() and L_lock in that order. S.lock() serializes
-    // iteration and mutation of S across drain workers; L_lock
-    // serializes mutation of L against itself and fill_active_slots.
-    // The pair is held only for this one survivor, not across the
-    // whole drain — so between survivors another drain worker can
-    // take over and the main thread can fill from L.
-    strat->S.lock();
-    kt_L_lock(ctx, thread_id);
-
+    // process_survivor_lobject now manages its own locking via the
+    // phase-0/1/2 structure (task 506).  It takes S-exclusive in
+    // phase 0 and releases before returning.
     process_survivor_lobject(ctx, &P, thread_id);
-
-    pthread_mutex_unlock(&ctx->L_lock);
-    strat->S.unlock();
 
 #ifdef KTHREAD_INSTRUMENT
     drained_this_call++;
