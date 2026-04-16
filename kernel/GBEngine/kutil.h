@@ -210,6 +210,28 @@ struct SElement {
                deleted(false), pairtest(false) {}
 };
 
+// Thread-local override for strat->B (task 508 enterpairs-parallel-phase1).
+// When non-NULL, the parallel phase-1 drain sets this before calling into
+// enterpairs / initenterpairs; the enterOnePair family and chainCrit family
+// write into *t_local_B_override instead of strat->B.  Serial code leaves
+// this NULL throughout, so the helper strat_B(strat) is a single-pointer
+// compare + branch and falls through to strat->B with no behavioural
+// change.  Using a thread-local pointer (rather than threading an LSet*
+// parameter through ~10 call signatures) keeps the diff surgical while
+// giving phase-1 drainers their own private B.
+//
+// Safety: the pointed-to LSet must outlive every call into enterpairs made
+// while the pointer is set.  The drain allocates the LSet on its own stack
+// in process_survivor_lobject and restores the pointer (to NULL or the
+// previous value) on exit.
+class LSet;  // forward declare (defined later in this header)
+extern __thread LSet* t_local_B_override;
+
+// strat_B(strat) is the LSet enterOnePair/chainCrit should write into.
+// Returns *t_local_B_override if set, else strat->B.  Defined after
+// skStrategy as an inline function (needs both LSet and skStrategy
+// complete).
+
 // Atomic helpers for SElement.deleted.  Serial code can still read/write
 // the field directly; parallel phase-1 drainers must use these.
 static inline bool selement_deleted_load(const SElement &e) {
@@ -1507,6 +1529,12 @@ public:
 
   // S-to-T lookup is now sBasisSet::S_2_T / s_2_t — call via strat->S.
 };
+
+// Inline definition of strat_B.  Returns the thread-local override B if
+// set (parallel phase-1 drain), else the shared strat->B (serial path).
+static inline LSet& strat_B(kStrategy strat) {
+  return t_local_B_override ? *t_local_B_override : strat->B;
+}
 
 int compareL0 (const LObject &lhs, const LObject &rhs, const kStrategy strat);
 int compareL0Ring (const LObject &lhs, const LObject &rhs, const kStrategy strat);
