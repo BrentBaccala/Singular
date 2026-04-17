@@ -1420,13 +1420,12 @@ void bba_parallel_loop(SweepContext *ctx)
     pthread_create(&ctx->threads[t], NULL, worker_thread, wa);
   }
 
-  // Pre-compute pLength for all T entries to avoid lazy init during parallel phase
-  // (must be done BEFORE startup barrier so workers don't race ahead)
-  for (int j = 0; j < strat->T.size(); j++)
-  {
-    if (strat->T[j].pLength <= 0)
-      strat->T[j].pLength = pLength(strat->T[j].p ? strat->T[j].p : strat->T[j].t_p);
-  }
+  // Task 511 t-iterator-migrate-hot-path: the startup-time pLength
+  // pre-population loop is gone.  Every T entry in strat->T was
+  // created by enterT (task 510), which computes pLength inline
+  // before release-publishing the slot.  So by the time
+  // bba_parallel_loop runs, every T[j] already has pLength > 0 and
+  // published = true — no pre-scan needed.
 
   // Wait for all workers to start before entering main loop
   if (ctx->num_workers > 0)
