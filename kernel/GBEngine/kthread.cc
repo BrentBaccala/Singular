@@ -630,6 +630,18 @@ static void close_slot(SweepContext *ctx, int s, int thread_id)
  * Sweep one tile (target slot + slice). Pure read-only access to
  * strat->T up to tl_snapshot; writes only to the worker's private
  * SweepResult.
+ *
+ * Task 511 t-iterator-migrate-hot-path: the K-stride access pattern
+ * visits indices j, j+K, j+2K, ..., which does not fit a sequential
+ * iterator walk.  Instead we keep the integer j loop and add an
+ * explicit tobject_published_load gate before dereferencing T[j]
+ * fields.  sevT[j] is written by enterT before tobject_publish(T[j]),
+ * so sev pre-filtering is safe on an in-flight slot (worst case the
+ * read observes the old sev=0 and we fall through to the published
+ * gate).  The acquire-load on published synchronises-with enterT's
+ * release-publish on any concurrent drainer (future worker-side drain
+ * task), so T[j].p / .ecart / .pLength are guaranteed visible once
+ * the gate returns true.
  */
 static void sweep_one_tile(SweepContext *ctx, int thread_id,
                            int s, int slice, int tl_snapshot)
@@ -653,6 +665,10 @@ static void sweep_one_tile(SweepContext *ctx, int thread_id,
   {
     unsigned long sev_j = strat->sevT[j];
     if (sev_j & not_sev_s) continue;
+    // Acquire-load gate: only after observing published=true are the
+    // T[j] field reads below guaranteed to synchronise-with the
+    // release-store in enterT.
+    if (!tobject_published_load(strat->T[j])) continue;
     if (!p_LmDivisibleBy(strat->T[j].p, ap->P.p, currRing))
       continue;
 
