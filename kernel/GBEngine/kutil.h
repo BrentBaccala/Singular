@@ -981,6 +981,128 @@ static inline void tobject_unpublish(sTObject &t) {
   __atomic_store_n(&t.published, false, __ATOMIC_RELAXED);
 }
 
+// Skipping iterator for BlockArray<TObject> (task 510 t-iterator-published).
+//
+// Mirrors the sBasisSet iterator's skip_deleted_forward shape, but T is
+// append-only (no tombstones), so the iterator only needs to skip
+// unpublished slots.  operator++ advances, then acquire-loads
+// published on each slot until it finds a published one or reaches end.
+//
+// Usage (future worker-side drain):
+//   for (auto it = begin_T(strat->T); it != end_T(strat->T); ++it) {
+//       TObject& t = *it;
+//       ...
+//   }
+//
+// In this task only the infrastructure is added; no readers migrated.
+// Serial code continues to use strat->T[i] / strat->T.size() unchanged.
+//
+// Iterators are stable across BlockArray growth (blocks never move), so
+// a saved iterator remains valid across concurrent enterT appends.  An
+// iterator captured at end_T() advances naturally once the appended
+// slot publishes (matches the sBasisSet cbegin()/cend() contract).
+class TObjectIterator {
+  BlockArray<TObject>* set_;
+  int pos_;
+
+  // Acquire-load on published — pairs with tobject_publish's release
+  // store in enterT.  Once a reader observes published=true, all other
+  // field writes that preceded the publish are visible.
+  void skip_unpublished_forward() {
+    while (pos_ < set_->size()
+           && !tobject_published_load((*set_)[pos_])) pos_++;
+  }
+
+public:
+  TObjectIterator() : set_(NULL), pos_(0) {}
+  TObjectIterator(BlockArray<TObject>* s, int pos) : set_(s), pos_(pos) {
+    skip_unpublished_forward();
+  }
+
+  TObject& operator*()  const { return (*set_)[pos_]; }
+  TObject* operator->() const { return &(*set_)[pos_]; }
+
+  // Raw index — available for interoperability with integer-based APIs
+  // (posInT family, R[i_r] lookups, etc.).  Prefer iterator-based
+  // access in new code.
+  int index() const { return pos_; }
+
+  TObjectIterator& operator++() {
+    pos_++;
+    skip_unpublished_forward();
+    return *this;
+  }
+  TObjectIterator operator++(int) {
+    TObjectIterator tmp = *this;
+    ++(*this);
+    return tmp;
+  }
+
+  bool operator==(const TObjectIterator& o) const { return pos_ == o.pos_; }
+  bool operator!=(const TObjectIterator& o) const { return pos_ != o.pos_; }
+};
+
+class ConstTObjectIterator {
+  const BlockArray<TObject>* set_;
+  int pos_;
+
+  void skip_unpublished_forward() {
+    while (pos_ < set_->size()
+           && !tobject_published_load((*set_)[pos_])) pos_++;
+  }
+
+public:
+  ConstTObjectIterator() : set_(NULL), pos_(0) {}
+  ConstTObjectIterator(const BlockArray<TObject>* s, int pos)
+      : set_(s), pos_(pos) {
+    skip_unpublished_forward();
+  }
+
+  const TObject& operator*()  const { return (*set_)[pos_]; }
+  const TObject* operator->() const { return &(*set_)[pos_]; }
+
+  int index() const { return pos_; }
+
+  ConstTObjectIterator& operator++() {
+    pos_++;
+    skip_unpublished_forward();
+    return *this;
+  }
+  ConstTObjectIterator operator++(int) {
+    ConstTObjectIterator tmp = *this;
+    ++(*this);
+    return tmp;
+  }
+
+  bool operator==(const ConstTObjectIterator& o) const { return pos_ == o.pos_; }
+  bool operator!=(const ConstTObjectIterator& o) const { return pos_ != o.pos_; }
+};
+
+// Free-function helpers: match begin()/end()/iterator_at(i) style of
+// sBasisSet.  Taking BlockArray<TObject>& (rather than adding methods
+// to the BlockArray template) keeps the TObject-specific iteration
+// policy out of the generic BlockArray used for sevT
+// (BlockArray<unsigned long>) and R (BlockArray<TObject*>), which
+// don't have a published flag.
+static inline TObjectIterator begin_T(BlockArray<TObject>& T) {
+  return TObjectIterator(&T, 0);
+}
+static inline TObjectIterator end_T(BlockArray<TObject>& T) {
+  return TObjectIterator(&T, T.size());
+}
+static inline TObjectIterator iterator_at_T(BlockArray<TObject>& T, int i) {
+  return TObjectIterator(&T, i);
+}
+static inline ConstTObjectIterator begin_T(const BlockArray<TObject>& T) {
+  return ConstTObjectIterator(&T, 0);
+}
+static inline ConstTObjectIterator end_T(const BlockArray<TObject>& T) {
+  return ConstTObjectIterator(&T, T.size());
+}
+static inline ConstTObjectIterator iterator_at_T(const BlockArray<TObject>& T, int i) {
+  return ConstTObjectIterator(&T, i);
+}
+
 EXTERN_VAR int strat_nr;
 
 class sLObject : public sTObject
