@@ -99,6 +99,23 @@ struct ThreadStats
                                // ctx->enterpairs_active during this
                                // thread's phase 1 (sampled at entry).
 
+  // Worker-side drain participation (task 512 worker-side-drain).
+  //
+  // drain_survivors (above) already records the number of survivors this
+  // thread processed through its drain call — tid > 0 values become
+  // non-zero when worker-side drain is enabled.  The two fields below
+  // capture how much time workers spend draining (as opposed to sweeping)
+  // and how often they hop from tile-idle into drain.
+  //
+  //   worker_drain_idle_ns    : time spent in drain_survivor_queue calls
+  //                             initiated from the tile-idle branch of
+  //                             tile_pull_loop.  Includes the S-exclusive
+  //                             wait in phase 0 if a peer drainer is
+  //                             ahead.
+  //   worker_drain_idle_count : number of such drain hops.
+  long worker_drain_idle_ns;
+  long worker_drain_idle_count;
+
   long round_start_ns;      // timestamp at start of current round
 };
 

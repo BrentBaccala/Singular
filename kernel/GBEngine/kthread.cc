@@ -334,7 +334,15 @@ void sweep_context_destroy(SweepContext *ctx)
 /*  Caller must hold L_lock. Returns true if slot filled.              */
 /* ------------------------------------------------------------------ */
 
-static BOOLEAN pop_and_prepare(SweepContext *ctx, ActivePoly *ap)
+/*
+ * pop_and_prepare — pop next LObject from strat->L and set up ap for
+ * reduction.  Caller holds ctx->L_lock.  The `sl_snapshot` parameter
+ * is the T-size bound captured BEFORE taking L_lock (task 512
+ * worker-side-drain); this avoids taking S-shared while holding L_lock,
+ * which would invert the drainer's S → L order and risk deadlock.
+ */
+static BOOLEAN pop_and_prepare(SweepContext *ctx, ActivePoly *ap,
+                               int sl_snapshot_arg)
 {
   kStrategy strat = ctx->strat;
 
@@ -413,10 +421,15 @@ static BOOLEAN pop_and_prepare(SweepContext *ctx, ActivePoly *ap)
     ap->best_good = -1;
 
     // Task 280 milestone (a): record current T bound for this slot.
-    // At this stage the sweep still reads the global strat->T.size()-1,
-    // but we capture per-slot sl_snapshot so later milestones can tile
-    // against it without reading a moving global bound.
-    ap->sl_snapshot = strat->T.size() - 1;
+    // Task 512 worker-side-drain: sl_snapshot_arg was captured in the
+    // caller BEFORE L_lock was taken, under S-shared — ensures a
+    // consistent view of T.size() without inverting the lock order
+    // (phase-1 drainers take S-shared then L-exclusive; main acquires
+    // S-shared briefly and releases before L_lock).  The captured
+    // value may be slightly stale by the time we use it, but enterT
+    // only grows T monotonically and any entries added post-capture
+    // are picked up in the next refill pass.
+    ap->sl_snapshot = sl_snapshot_arg;
 
     ap->P.PrepareRed(strat->use_buckets);
     return TRUE;
@@ -700,6 +713,10 @@ static void sweep_one_tile(SweepContext *ctx, int thread_id,
  * returns as soon as the cursor is caught up, so it can go back to
  * refilling / draining.
  */
+// Forward declaration — workers in tile_pull_loop check this between
+// tile batches.  Defined later in this file.
+static void drain_survivor_queue(SweepContext *ctx, int thread_id);
+
 static void tile_pull_loop(SweepContext *ctx, int thread_id, bool block)
 {
   int K = ctx->tiles_K;
@@ -713,6 +730,36 @@ static void tile_pull_loop(SweepContext *ctx, int thread_id, bool block)
     {
       if (!block) return;
       if (ctx->done.load(std::memory_order_acquire)) return;
+      // Task 512 worker-side-drain: before going to sleep, check whether
+      // the survivor queue has work.  If so, drain instead of cond_wait.
+      // Only workers do this (block=true); main has its own drain pass
+      // in bba_parallel_loop and calls tile_pull_loop with block=false.
+      //
+      // Gating: skip the drain hop if the queue is observably empty
+      // (snapshot under its own mutex so we don't race with a concurrent
+      // push).  The cost of the lock is negligible vs the wait.
+      {
+        bool queue_has_work;
+        kt_surv_q_lock(ctx, thread_id);
+        queue_has_work = !ctx->survivor_queue->empty();
+        pthread_mutex_unlock(&ctx->survivor_queue_mutex);
+        if (queue_has_work)
+        {
+#ifdef KTHREAD_INSTRUMENT
+          long idle_t0 = KT_STATS(ctx) ? kt_now_ns() : 0;
+#endif
+          drain_survivor_queue(ctx, thread_id);
+#ifdef KTHREAD_INSTRUMENT
+          if (KT_STATS(ctx))
+          {
+            ThreadStats &ts = KT_TS(ctx, thread_id);
+            ts.worker_drain_idle_ns += kt_now_ns() - idle_t0;
+            ts.worker_drain_idle_count++;
+          }
+#endif
+          continue;
+        }
+      }
       // Wait for more tiles or shutdown.
       pthread_mutex_lock(&ctx->publish_lock);
       // Re-check under lock.
@@ -891,9 +938,16 @@ static int refill_and_publish(SweepContext *ctx)
 
     if (st == SLOT_EMPTY)
     {
+      // Task 512 worker-side-drain: capture sl_snapshot under S-shared
+      // BEFORE taking L_lock, to avoid inverting the worker drainer's
+      // S → L lock order.
+      kt_S_lock_shared(ctx, 0);
+      int sl_snapshot = ctx->strat->T.size() - 1;
+      ctx->strat->S.unlock_shared();
+
       // Try to fill from L.
       kt_L_lock(ctx, 0);
-      BOOLEAN got = pop_and_prepare(ctx, ap);
+      BOOLEAN got = pop_and_prepare(ctx, ap, sl_snapshot);
       pthread_mutex_unlock(&ctx->L_lock);
       if (got)
       {
@@ -908,8 +962,11 @@ static int refill_and_publish(SweepContext *ctx)
     if (ap->needs_republish.load(std::memory_order_acquire))
     {
       // Closer-reduce left this slot needing another sweep pass.
-      // Re-snapshot tl here, in case T has grown since last pass.
+      // Re-snapshot tl under S-shared; no L_lock held here, so no
+      // inversion risk.
+      kt_S_lock_shared(ctx, 0);
       ap->sl_snapshot = ctx->strat->T.size() - 1;
+      ctx->strat->S.unlock_shared();
       publish_slot_tiles(ctx, s);
     }
     in_pipeline++;
@@ -1435,10 +1492,13 @@ void bba_parallel_loop(SweepContext *ctx)
   //
   // Each iteration:
   //   1. If siCntrlc: shutdown path.
-  //   2. Drain any survivors from the FIFO (serially, on main).
+  //   2. Drain any survivors from the FIFO.  Main still takes a drain
+  //      pass here (important when workers are all busy on tiles); in
+  //      addition, workers now drain from their tile-idle branch
+  //      (task 512 worker-side-drain).
   //      enterT (invoked from drain_survivor_queue) computes pLength
   //      inline and release-publishes T slots, so no post-drain
-  //      refresh is needed (task 511, previously step 3).
+  //      refresh is needed (task 511).
   //   3. Refill empty slots from L and (re)publish tiles for any slot
   //      that closer-reduce marked needs_republish.
   //   4. If nothing to do (all slots empty, L empty, queue empty):
@@ -1447,23 +1507,66 @@ void bba_parallel_loop(SweepContext *ctx)
   //        b. If still idle after that, break out — we are done.
   //   5. Else, wait briefly on slot_freed_cv so closers can wake us.
   //
-  // Main only runs the drain; workers never touch strat->T / strat->S
-  // / strat->L (except the L_lock for pop_and_prepare, which happens
-  // only on the main thread via refill_and_publish).
+  // Task 512 worker-side-drain lifted the main-only-drain architectural
+  // invariant.  Workers in tile_pull_loop, when tile_cursor catches up
+  // to tile_end, peek at the survivor queue and call drain_survivor_queue
+  // if non-empty.  process_survivor_lobject's phase 0 (S-exclusive)
+  // serialises peer drainers; phase 1 (S-shared + L-exclusive +
+  // thread-local B) allows concurrent peer drainers to run enterpairs
+  // in parallel.  Main's own drain pass remains for responsiveness
+  // when all workers are busy on tiles (or, at the end of a run, when
+  // workers are parked on tiles_avail_cv waiting for tiles but the
+  // survivor queue is non-empty).
+  //
+  // T/L access audit for main outside drain (task 512):
+  //   - pop_and_prepare: reads strat->L.{top,pop,empty,size} under
+  //     L_lock (refill_and_publish acquires it); safe vs worker
+  //     chainCritNormal which takes L_lock inside phase 1.
+  //   - pop_and_prepare also reads strat->T.size()-1 to snapshot
+  //     ap->sl_snapshot; this is a plain int load, monotonic (enterT
+  //     only grows it).  Worst case the snapshot misses T entries a
+  //     peer drainer is publishing right now; those entries show up
+  //     in the next refill pass.  No lock needed.
+  //   - refill_and_publish's republish path re-snapshots T.size()-1;
+  //     same reasoning.
+  //   - Termination check reads strat->L.empty() without L_lock.
+  //     Safe iff no worker is actively modifying L.  Workers modify L
+  //     only inside chainCritNormal (under L_lock) reached from
+  //     process_survivor_lobject's phase 1.  Phase 1 entry requires
+  //     a survivor in the queue.  If our check finds queue_empty AND
+  //     no slot FILLED, no closer is running, so no survivor will be
+  //     queued, so no worker will enter drain.  The L.empty() read is
+  //     safe under this precondition.  (The shutdown paths at
+  //     siCntrlc / overflow ARE racy: handled separately below.)
+  //   - strat->T[i] accesses on main outside drain: none.
+  //     sweep_one_tile runs through acquire-loaded published gate
+  //     (task 511) and is called from tile_pull_loop which main
+  //     invokes with block=false — main is a tile reader at the same
+  //     terms as workers.
+  //   - strat->B: accessed via strat_B(strat) which returns the
+  //     thread-local override inside phase 1, and strat->B elsewhere.
+  //     Main outside drain never touches strat->B (only serial code
+  //     before / after bba_parallel_loop does).
+  // Error-path L-clear flags (set here, acted on after workers join).
+  // Task 512 worker-side-drain: we cannot touch strat->L while workers
+  // may be inside chainCritNormal (which takes L_lock from phase 1).
+  // Defer L mutation until after ctx->done + pthread_join below.
+  bool clear_L_after_join = false;
+  bool clear_slots_after_join = false;
+
   while (true)
   {
     if (siCntrlc)
     {
-      while (!strat->L.empty()) strat->L.pop_and_erase();
+      clear_L_after_join = true;
       strat->noClearS = TRUE;
       goto parallel_shutdown;
     }
 
     if (strat->overflow || errorreported)
     {
-      while (!strat->L.empty()) strat->L.pop_and_erase();
-      for (int i = 0; i < ctx->max_active; i++)
-        ctx->active[i].occupied = false;
+      clear_L_after_join = true;
+      clear_slots_after_join = true;
       goto parallel_shutdown;
     }
 
@@ -1495,7 +1598,12 @@ void bba_parallel_loop(SweepContext *ctx)
       kt_surv_q_lock(ctx, 0);
       bool queue_empty = ctx->survivor_queue->empty();
       pthread_mutex_unlock(&ctx->survivor_queue_mutex);
-      if (queue_empty && strat->L.empty())
+      // Task 512 worker-side-drain: L.empty() must be read under L_lock
+      // to avoid racing with worker drainers' chainCritNormal pushes.
+      kt_L_lock(ctx, 0);
+      bool L_empty = strat->L.empty();
+      pthread_mutex_unlock(&ctx->L_lock);
+      if (queue_empty && L_empty)
         break;
       // Else there is still work (drain produced survivors, or L has
       // new entries) — loop back immediately.
@@ -1545,6 +1653,20 @@ parallel_shutdown:
 
   for (int t = 0; t < ctx->num_workers; t++)
     pthread_join(ctx->threads[t], NULL);
+
+  // Now workers are joined — safe to mutate strat->L and slots.
+  // (Task 512 worker-side-drain: chainCritNormal from worker drain is
+  // the only writer of L outside main; joined workers cannot be inside
+  // that critical section any longer.)
+  if (clear_L_after_join)
+  {
+    while (!strat->L.empty()) strat->L.pop_and_erase();
+  }
+  if (clear_slots_after_join)
+  {
+    for (int i = 0; i < ctx->max_active; i++)
+      ctx->active[i].occupied = false;
+  }
 
   strat->posInT = ctx->saved_posInT;
   SI_RESTORE_OPT1(ctx->saved_opt1);
@@ -1635,6 +1757,25 @@ parallel_shutdown:
               ts.phase1_l_wait_ns, ts.phase1_l_ns, ts.phase_survivors,
               ts.phase_s_cas_fail, ts.phase_l_cas_fail,
               ts.phase1_concurrent_max);
+    }
+
+    // Worker-side drain participation (task 512 worker-side-drain).
+    //   drain_survivors : # of survivors this thread handled
+    //                     (was 0 for tid>0 before task 512; post-task,
+    //                     non-zero on workloads with survivor-queue
+    //                     backpressure).
+    //   idle_drain_ns / idle_drain_count : time & count of drain hops
+    //                     taken from the tile-idle branch of
+    //                     tile_pull_loop.
+    fprintf(stderr, "[kthread-stats] %-4s %14s %14s %14s\n",
+            "tid", "drain_survivors", "wrk_drain_ns", "wrk_drain_cnt");
+    for (int i = 0; i < tt; i++)
+    {
+      ThreadStats &ts = ctx->tstats[i];
+      fprintf(stderr, "[kthread-stats] d%-3d %14ld %14ld %14ld\n",
+              i, ts.drain_survivors,
+              ts.worker_drain_idle_ns,
+              ts.worker_drain_idle_count);
     }
 
     // CSV output for per-round records
