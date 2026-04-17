@@ -8906,6 +8906,18 @@ void enterT(LObject &p, kStrategy strat, int atT)
   else
     strat->T[atT].max_exp = NULL;
 
+  // Compute pLength inline (task 510 t-iterator-published).  Moves the
+  // work that the parallel main-loop used to do in a post-drain refresh
+  // loop (kthread.cc post-drain "pLength <= 0 -> set it") into enterT
+  // itself.  The LObject-to-TObject assignment above copies p.pLength
+  // (often 0 or -1 from sLObject::PrepareRed), so we fill it here if
+  // still unset.  The next task removes the post-drain refresh loop
+  // once all T readers have migrated to the iterator.
+  if (strat->T[atT].pLength <= 0)
+    strat->T[atT].pLength =
+      ::pLength(strat->T[atT].p != NULL ? strat->T[atT].p
+                                         : strat->T[atT].t_p);
+
   // Write sevT, R, and i_r BEFORE incrementing tl, so concurrent
   // readers (parallel bba workers) see fully initialized data when
   // they observe the new tl value.  The compiler barrier prevents
@@ -8915,6 +8927,17 @@ void enterT(LObject &p, kStrategy strat, int atT)
   strat->R[strat->T.size()] = strat->T.addr(atT);
   strat->T[atT].i_r = strat->T.size();
   p.i_r = strat->T.size();  // propagate back so enterS can use it
+
+  // Release-publish the slot (task 510 t-iterator-published).  All
+  // field writes above must complete before any reader observes
+  // published=true via the acquire-loading iterator.  In serial code
+  // (THREADS=1 or main-thread drain) this is a no-op logically —
+  // nobody else is reading — but keeps the invariant "T[i] published
+  // iff T[i] fully initialised".  The existing __asm__ volatile
+  // barrier below already orders this write with the later setsize();
+  // the release store subsumes that ordering for the publish-observing
+  // reader path.
+  tobject_publish(strat->T[atT]);
 
   __asm__ __volatile__("" ::: "memory");  // compiler barrier (x86 has strong HW ordering)
   strat->T.setsize(strat->T.size()+1);
@@ -8989,11 +9012,20 @@ void enterT_strong(LObject &p, kStrategy strat, int atT)
   else
     strat->T[atT].max_exp = NULL;
 
+  // Compute pLength inline (task 510 t-iterator-published) — parallel
+  // with enterT above.
+  if (strat->T[atT].pLength <= 0)
+    strat->T[atT].pLength =
+      ::pLength(strat->T[atT].p != NULL ? strat->T[atT].p
+                                         : strat->T[atT].t_p);
+
   strat->T.setsize(strat->T.size()+1);
   strat->R[strat->T.size()-1] = strat->T.addr(atT);
   strat->T[atT].i_r = strat->T.size()-1;
   assume(p.sev == 0 || pGetShortExpVector(p.p) == p.sev);
   strat->sevT[atT] = (p.sev == 0 ? pGetShortExpVector(p.p) : p.sev);
+  // Release-publish the slot (task 510 t-iterator-published).
+  tobject_publish(strat->T[atT]);
   #if 1
   if(rHasLocalOrMixedOrdering(currRing)
   && !n_IsUnit(p.p->coef, currRing->cf))
