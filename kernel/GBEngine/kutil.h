@@ -855,6 +855,25 @@ public:
   // sig-safeness check
   /*BOOLEAN*/ char is_sigsafe;
 
+  // Publication flag (task t-iterator-published, 510).
+  //
+  // In the parallel worker-side drain (future task), enterT will claim
+  // a T-slot under an S-exclusive lock, fill all fields (p, t_p, sev,
+  // ecart, length, pLength, ...), and then release-store `published`
+  // to true.  Readers on other threads iterate T via a skipping
+  // iterator that acquire-loads `published` and skips unpublished
+  // slots.  This gives writer-filled-fields-visible-to-readers
+  // semantics without a reader-side lock.
+  //
+  // Serial callers (THREADS=1, and the main-thread drain) observe
+  // `published` synchronously: enterT publishes the slot before
+  // returning, so every T reader sees it as published by the time it
+  // matters.  Access is always via tobject_published_load /
+  // tobject_publish helpers (matching SElement.deleted pattern; the
+  // struct stays copyable for the T[i] = T[i-1] shift in enterT and
+  // other copy-assign sites).
+  bool published;
+
 
 #ifdef HAVE_PLURAL
   /*BOOLEAN*/ char is_special; // true, it is a new special S-poly (e.g. for SCA)
@@ -935,6 +954,32 @@ public:
   void wrp();
 #endif
 };
+
+// Atomic helpers for sTObject.published (task 510 t-iterator-published).
+//
+// The published flag transitions at most once from false to true (in
+// enterT, after all other fields of the T-slot are written).  Readers
+// use acquire-load so that every field written before the release-store
+// is visible once the flag is observed true.  Writers use release-store
+// so prior field stores are flushed to other cores before the flag
+// flips.  The field is stored as a plain `bool` (not std::atomic<bool>)
+// so that sTObject remains copy-assignable — enterT performs
+// T[i] = T[i-1] shifts, and BlockArray<TObject>::insert() does the same
+// under the hood, and std::atomic<bool> is not copy-assignable.
+static inline bool tobject_published_load(const sTObject &t) {
+  return __atomic_load_n(&t.published, __ATOMIC_ACQUIRE);
+}
+static inline void tobject_publish(sTObject &t) {
+  __atomic_store_n(&t.published, true, __ATOMIC_RELEASE);
+}
+static inline void tobject_unpublish(sTObject &t) {
+  // Used when shifting slots inside enterT (the slot being overwritten
+  // must revert to unpublished until the new writer publishes it).
+  // Relaxed is sufficient: the caller holds S-exclusive and there is
+  // no reader that could observe the stale published=true between the
+  // shift and the new publish.
+  __atomic_store_n(&t.published, false, __ATOMIC_RELAXED);
+}
 
 EXTERN_VAR int strat_nr;
 
