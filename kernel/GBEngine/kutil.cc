@@ -6786,7 +6786,13 @@ poly redtailBba (LObject* L, sBasisSet::const_iterator end, kStrategy strat, BOO
         int j;
         j = kFindDivisibleByInT(strat, &Ln);
         if (j < 0) break;
-        With = &(strat->T[j]);
+        // Task 511 t-iterator-migrate-hot-path: route the T[j] access
+        // through the skipping iterator.  kFindDivisibleByInT returns
+        // the physical index of a slot it already observed as published
+        // (via iterator walk or tobject_published_load gate), so
+        // iterator_at_T lands directly on T[j] without skipping.
+        auto t_it = iterator_at_T(strat->T, j);
+        With = &(*t_it);
         assume(With->GetpLength()==pLength(With->p != __null ? With->p : With->t_p));
       }
       else
@@ -6895,7 +6901,11 @@ poly redtailBbaBound (LObject* L, sBasisSet::const_iterator end, kStrategy strat
         int j;
         j = kFindDivisibleByInT(strat, &Ln);
         if (j < 0) break;
-        With = &(strat->T[j]);
+        // Task 511 t-iterator-migrate-hot-path: route T[j] access through
+        // the skipping iterator (j is already known published by
+        // kFindDivisibleByInT).
+        auto t_it = iterator_at_T(strat->T, j);
+        With = &(*t_it);
       }
       else
       {
