@@ -196,12 +196,15 @@ static inline int kSevScanSSE4(const unsigned long* sevT, unsigned long not_sev,
 int kFindSameLMInT_Z(const kStrategy strat, const LObject* L, const int start)
 {
   unsigned long not_sev = ~L->sev;
-  int j = start;
   int o = -1;
 
-  const BlockArray<TObject>& T=strat->T;
+  BlockArray<TObject>& T=strat->T;
   const BlockArray<unsigned long>& sevT=strat->sevT;
   number gcd, ogcd;
+  // Iterate via the skipping iterator (task 511 t-iterator-migrate-hot-path):
+  // skips unpublished T slots, acquire-synchronising the slot's field
+  // writes against enterT's release-publish on any concurrent drainer.
+  auto t_end = end_T(T);
   if (L->p!=NULL)
   {
     const ring r=currRing;
@@ -210,12 +213,12 @@ int kFindSameLMInT_Z(const kStrategy strat, const LObject* L, const int start)
 
     pAssume(~not_sev == p_GetShortExpVector(p, r));
 
-    loop
+    for (auto it = iterator_at_T(T, start); it != t_end; ++it)
     {
-      if (j > strat->T.size()-1) return o;
-      if (p_LmShortDivisibleBy(T[j].p, sevT[j],p, not_sev, r) && p_LmEqual(T[j].p, p, r))
+      int j = it.index();
+      if (p_LmShortDivisibleBy(it->p, sevT[j],p, not_sev, r) && p_LmEqual(it->p, p, r))
       {
-        gcd = n_Gcd(pGetCoeff(p), pGetCoeff(T[j].p), r->cf);
+        gcd = n_Gcd(pGetCoeff(p), pGetCoeff(it->p), r->cf);
         if (o == -1
         || n_Greater(n_EucNorm(ogcd, r->cf), n_EucNorm(gcd, r->cf), r->cf))
         {
@@ -223,20 +226,20 @@ int kFindSameLMInT_Z(const kStrategy strat, const LObject* L, const int start)
           o = j;
         }
       }
-      j++;
     }
+    return o;
   }
   else
   {
     const ring r=strat->tailRing;
     const poly p=L->t_p;
     ogcd = pGetCoeff(p);
-    loop
+    for (auto it = iterator_at_T(T, start); it != t_end; ++it)
     {
-      if (j > strat->T.size()-1) return o;
-      if (p_LmShortDivisibleBy(T[j].p, sevT[j],p, not_sev, r) && p_LmEqual(T[j].p, p, r))
+      int j = it.index();
+      if (p_LmShortDivisibleBy(it->p, sevT[j],p, not_sev, r) && p_LmEqual(it->p, p, r))
       {
-        gcd = n_Gcd(pGetCoeff(p), pGetCoeff(T[j].p), r->cf);
+        gcd = n_Gcd(pGetCoeff(p), pGetCoeff(it->p), r->cf);
         if (o == -1
         || n_Greater(n_EucNorm(ogcd, r->cf), n_EucNorm(gcd, r->cf), r->cf))
         {
@@ -244,8 +247,8 @@ int kFindSameLMInT_Z(const kStrategy strat, const LObject* L, const int start)
           o = j;
         }
       }
-      j++;
     }
+    return o;
   }
 }
 #endif
@@ -322,12 +325,15 @@ int kTestDivisibleByT0_Z(const kStrategy strat, const LObject* L)
 int kFindDivisibleByInT_Z(const kStrategy strat, const LObject* L, const int start)
 {
   unsigned long not_sev = ~L->sev;
-  int j = start;
   int o = -1;
 
-  const BlockArray<TObject>& T=strat->T;
+  BlockArray<TObject>& T=strat->T;
   const BlockArray<unsigned long>& sevT=strat->sevT;
   number rest, orest, mult;
+  // Iterate via the skipping iterator (task 511 t-iterator-migrate-hot-path):
+  // skips unpublished slots, acquire-synchronising the T fields against
+  // enterT's release-publish on any concurrent drainer.
+  auto t_end = end_T(T);
   if (L->p!=NULL)
   {
     const ring r=currRing;
@@ -336,49 +342,49 @@ int kFindDivisibleByInT_Z(const kStrategy strat, const LObject* L, const int sta
 
     pAssume(~not_sev == p_GetShortExpVector(p, r));
 
-    loop
+    for (auto it = iterator_at_T(T, start); it != t_end; ++it)
     {
-      if (j > strat->T.size()-1) return o;
+      int j = it.index();
 #if defined(PDEBUG) || defined(PDIV_DEBUG)
-      if (p_LmShortDivisibleBy(T[j].p, sevT[j],p, not_sev, r))
+      if (p_LmShortDivisibleBy(it->p, sevT[j],p, not_sev, r))
 #else
-      if (!(sevT[j] & not_sev) && p_LmDivisibleBy(T[j].p, p, r))
+      if (!(sevT[j] & not_sev) && p_LmDivisibleBy(it->p, p, r))
 #endif
       {
-        mult= n_QuotRem(pGetCoeff(p), pGetCoeff(T[j].p), &rest, r->cf);
+        mult= n_QuotRem(pGetCoeff(p), pGetCoeff(it->p), &rest, r->cf);
         if (!n_IsZero(mult, r->cf) && n_Greater(n_EucNorm(orest, r->cf), n_EucNorm(rest, r->cf), r->cf))
         {
           o = j;
           orest = rest;
         }
       }
-      j++;
     }
+    return o;
   }
   else
   {
     const ring r=strat->tailRing;
     const poly p=L->t_p;
     orest = pGetCoeff(p);
-    loop
+    for (auto it = iterator_at_T(T, start); it != t_end; ++it)
     {
-      if (j > strat->T.size()-1) return o;
+      int j = it.index();
 #if defined(PDEBUG) || defined(PDIV_DEBUG)
-      if (p_LmShortDivisibleBy(T[j].t_p, sevT[j],
+      if (p_LmShortDivisibleBy(it->t_p, sevT[j],
             p, not_sev, r))
 #else
-      if (!(sevT[j] & not_sev) && p_LmDivisibleBy(T[j].t_p, p, r))
+      if (!(sevT[j] & not_sev) && p_LmDivisibleBy(it->t_p, p, r))
 #endif
       {
-        mult = n_QuotRem(pGetCoeff(p), pGetCoeff(T[j].t_p), &rest, r->cf);
+        mult = n_QuotRem(pGetCoeff(p), pGetCoeff(it->t_p), &rest, r->cf);
         if (!n_IsZero(mult, r->cf) && n_Greater(n_EucNorm(orest, r->cf), n_EucNorm(rest, r->cf), r->cf))
         {
           o = j;
           orest = rest;
         }
       }
-      j++;
     }
+    return o;
   }
 }
 
@@ -423,15 +429,22 @@ static sBasisSet::iterator kFindDivisibleByInS_Z(const kStrategy strat, LObject*
 
 // return -1 if no divisor is found
 //        number of first divisor, otherwise
+//
+// Task 511 t-iterator-migrate-hot-path: non-SIMD paths migrated to use
+// the skipping T iterator, which acquire-synchronises against enterT's
+// release-publish of new T slots.  The SIMD paths keep integer-indexed
+// sevT scans (SIMD load) but gate the per-candidate T-field access
+// behind an explicit tobject_published_load, so readers never dereference
+// fields (.p, .t_p) of an in-flight enterT slot.
 int kFindDivisibleByInT(const kStrategy strat, const LObject* L, const int start)
 {
   unsigned long not_sev = ~L->sev;
-  int j = start;
 
-  const BlockArray<TObject>& T=strat->T;
+  BlockArray<TObject>& T=strat->T;
   const BlockArray<unsigned long>& sevT=strat->sevT;
   const ring r=currRing;
   const BOOLEAN is_Ring=rField_is_Ring(r);
+  auto t_end = end_T(T);
   if (L->p!=NULL)
   {
     const poly p=L->p;
@@ -440,31 +453,37 @@ int kFindDivisibleByInT(const kStrategy strat, const LObject* L, const int start
 
     if(is_Ring)
     {
-      loop
+      for (auto it = iterator_at_T(T, start); it != t_end; ++it)
       {
-        if (j > strat->T.size()-1) return -1;
+        int j = it.index();
 #if defined(PDEBUG) || defined(PDIV_DEBUG)
-        if ((T[j].p!=NULL)
-        && p_LmShortDivisibleBy(T[j].p, sevT[j],p, not_sev, r))
+        if ((it->p!=NULL)
+        && p_LmShortDivisibleBy(it->p, sevT[j],p, not_sev, r))
 #else
         if (!(sevT[j] & not_sev)
-        && (T[j].p!=NULL)
-        && p_LmDivisibleBy(T[j].p, p, r))
+        && (it->p!=NULL)
+        && p_LmDivisibleBy(it->p, p, r))
 #endif
         {
-          if(n_DivBy(pGetCoeff(p), pGetCoeff(T[j].p), r->cf))
+          if(n_DivBy(pGetCoeff(p), pGetCoeff(it->p), r->cf))
             return j;
         }
-        j++;
       }
+      return -1;
     }
     else
     {
 #if defined(HAVE_SIMD_SEV_SCAN) && !defined(PDEBUG) && !defined(PDIV_DEBUG)
       // SIMD fast path: scan sevT in batches to skip non-candidates.
       // AVX2 tests 4 entries (256-bit), SSE4 tests 2 entries (128-bit).
+      // sevT[j] is written before tobject_publish(T[j]) in enterT, so
+      // a SIMD batch over sevT may see a candidate for an
+      // in-flight slot; the per-match tobject_published_load gate below
+      // ensures we only dereference T[j].p / .t_p after observing
+      // published=true (acquire-synchronised with enterT's release).
       if (__builtin_cpu_supports("avx2"))
       {
+        int j = start;
         const int tl = strat->T.size()-1;
         loop
         {
@@ -474,6 +493,7 @@ int kFindDivisibleByInT(const kStrategy strat, const LObject* L, const int start
           for (; j <= batch_end; j++)
           {
             if (!(sevT[j] & not_sev)
+            && tobject_published_load(T[j])
             && (T[j].p != NULL)
             && p_LmDivisibleBy(T[j].p, p, r))
             {
@@ -485,6 +505,7 @@ int kFindDivisibleByInT(const kStrategy strat, const LObject* L, const int start
       }
       else if (__builtin_cpu_supports("sse4.1"))
       {
+        int j = start;
         const int tl = strat->T.size()-1;
         loop
         {
@@ -494,6 +515,7 @@ int kFindDivisibleByInT(const kStrategy strat, const LObject* L, const int start
           for (; j <= batch_end; j++)
           {
             if (!(sevT[j] & not_sev)
+            && tobject_published_load(T[j])
             && (T[j].p != NULL)
             && p_LmDivisibleBy(T[j].p, p, r))
             {
@@ -506,22 +528,22 @@ int kFindDivisibleByInT(const kStrategy strat, const LObject* L, const int start
       else
 #endif
       {
-      loop
+      for (auto it = iterator_at_T(T, start); it != t_end; ++it)
       {
-        if (j > strat->T.size()-1) return -1;
+        int j = it.index();
 #if defined(PDEBUG) || defined(PDIV_DEBUG)
-        if ((T[j].p!=NULL)
-        && p_LmShortDivisibleBy(T[j].p, sevT[j],p, not_sev, r))
+        if ((it->p!=NULL)
+        && p_LmShortDivisibleBy(it->p, sevT[j],p, not_sev, r))
 #else
         if (!(sevT[j] & not_sev)
-        && (T[j].p!=NULL)
-        && p_LmDivisibleBy(T[j].p, p, r))
+        && (it->p!=NULL)
+        && p_LmDivisibleBy(it->p, p, r))
 #endif
         {
           return j;
         }
-        j++;
       }
+      return -1;
       }
     }
   }
@@ -531,29 +553,31 @@ int kFindDivisibleByInT(const kStrategy strat, const LObject* L, const int start
     const ring r=strat->tailRing;
     if(is_Ring)
     {
-      loop
+      for (auto it = iterator_at_T(T, start); it != t_end; ++it)
       {
-        if (j > strat->T.size()-1) return -1;
+        int j = it.index();
 #if defined(PDEBUG) || defined(PDIV_DEBUG)
-        if (p_LmShortDivisibleBy(T[j].t_p, sevT[j],
+        if (p_LmShortDivisibleBy(it->t_p, sevT[j],
                                p, not_sev, r))
 #else
         if (!(sevT[j] & not_sev) &&
-          p_LmDivisibleBy(T[j].t_p, p, r))
+          p_LmDivisibleBy(it->t_p, p, r))
 #endif
         {
-          if(n_DivBy(pGetCoeff(p), pGetCoeff(T[j].t_p), r->cf))
+          if(n_DivBy(pGetCoeff(p), pGetCoeff(it->t_p), r->cf))
             return j;
         }
-        j++;
       }
+      return -1;
     }
     else
     {
 #if defined(HAVE_SIMD_SEV_SCAN) && !defined(PDEBUG) && !defined(PDIV_DEBUG)
       // SIMD fast path for t_p: scan sevT in batches to skip non-candidates.
+      // See note above on the tobject_published_load gate.
       if (__builtin_cpu_supports("avx2"))
       {
+        int j = start;
         const int tl = strat->T.size()-1;
         loop
         {
@@ -563,6 +587,7 @@ int kFindDivisibleByInT(const kStrategy strat, const LObject* L, const int start
           for (; j <= batch_end; j++)
           {
             if (!(sevT[j] & not_sev)
+            && tobject_published_load(T[j])
             && p_LmDivisibleBy(T[j].t_p, p, r))
             {
               return j;
@@ -573,6 +598,7 @@ int kFindDivisibleByInT(const kStrategy strat, const LObject* L, const int start
       }
       else if (__builtin_cpu_supports("sse4.1"))
       {
+        int j = start;
         const int tl = strat->T.size()-1;
         loop
         {
@@ -582,6 +608,7 @@ int kFindDivisibleByInT(const kStrategy strat, const LObject* L, const int start
           for (; j <= batch_end; j++)
           {
             if (!(sevT[j] & not_sev)
+            && tobject_published_load(T[j])
             && p_LmDivisibleBy(T[j].t_p, p, r))
             {
               return j;
@@ -593,21 +620,21 @@ int kFindDivisibleByInT(const kStrategy strat, const LObject* L, const int start
       else
 #endif
       {
-      loop
+      for (auto it = iterator_at_T(T, start); it != t_end; ++it)
       {
-        if (j > strat->T.size()-1) return -1;
+        int j = it.index();
 #if defined(PDEBUG) || defined(PDIV_DEBUG)
-        if (p_LmShortDivisibleBy(T[j].t_p, sevT[j],
+        if (p_LmShortDivisibleBy(it->t_p, sevT[j],
                                p, not_sev, r))
 #else
         if (!(sevT[j] & not_sev) &&
-          p_LmDivisibleBy(T[j].t_p, p, r))
+          p_LmDivisibleBy(it->t_p, p, r))
 #endif
         {
           return j;
         }
-        j++;
       }
+      return -1;
       }
     }
   }
