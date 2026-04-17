@@ -1437,14 +1437,16 @@ void bba_parallel_loop(SweepContext *ctx)
   // Each iteration:
   //   1. If siCntrlc: shutdown path.
   //   2. Drain any survivors from the FIFO (serially, on main).
-  //   3. Refresh pLength for any new T entries added by drain.
-  //   4. Refill empty slots from L and (re)publish tiles for any slot
+  //      enterT (invoked from drain_survivor_queue) computes pLength
+  //      inline and release-publishes T slots, so no post-drain
+  //      refresh is needed (task 511, previously step 3).
+  //   3. Refill empty slots from L and (re)publish tiles for any slot
   //      that closer-reduce marked needs_republish.
-  //   5. If nothing to do (all slots empty, L empty, queue empty):
+  //   4. If nothing to do (all slots empty, L empty, queue empty):
   //        a. Help sweep any outstanding tiles (non-blocking) so we
   //           don't sit on main while workers still have work.
   //        b. If still idle after that, break out — we are done.
-  //   6. Else, wait briefly on slot_freed_cv so closers can wake us.
+  //   5. Else, wait briefly on slot_freed_cv so closers can wake us.
   //
   // Main only runs the drain; workers never touch strat->T / strat->S
   // / strat->L (except the L_lock for pop_and_prepare, which happens
@@ -1467,6 +1469,14 @@ void bba_parallel_loop(SweepContext *ctx)
     }
 
     // Step 1: drain survivor FIFO on main thread.
+    //
+    // Task 511 t-iterator-migrate-hot-path: the post-drain pLength
+    // refresh loop that ran here after every drain is gone — enterT
+    // now computes pLength inline and release-publishes the slot in
+    // one step (see kutil.cc enterT, task 510).  Every T entry
+    // created during drain is therefore already pLength-filled and
+    // published by the time drain_survivor_queue returns; no external
+    // refresh is needed.
     {
       kt_surv_q_lock(ctx, 0);
       bool queue_empty = ctx->survivor_queue->empty();
@@ -1474,12 +1484,6 @@ void bba_parallel_loop(SweepContext *ctx)
       if (!queue_empty)
       {
         drain_survivor_queue(ctx, 0);
-        // Refresh pLength for any T entries added by process_survivor.
-        for (int j = 0; j < strat->T.size(); j++)
-        {
-          if (strat->T[j].pLength <= 0)
-            strat->T[j].pLength = pLength(strat->T[j].p ? strat->T[j].p : strat->T[j].t_p);
-        }
       }
     }
 
