@@ -3090,8 +3090,18 @@ bba_post_loop:
         {
           int sz = strat->S.size();
           strat->S.clear_if_divisible(sj->p, sj->sev, sk, strat);
-          if (strat->S.size() == sz) ++sj;
-          else { ++sk; if (sk == strat->S.end()) goto post_loop_done; }
+          if (strat->S.size() == sz) {
+            ++sj;
+          } else {
+            // sk was erased; advance to the next live slot.
+            ++sk;
+            if (sk == strat->S.end()) goto post_loop_done;
+            // Reset sj so the new sk is checked against ALL earlier
+            // elements (not just those with index >= current sj).
+            // Without this reset, an earlier sj may divide the new sk
+            // and be missed, leaving the S-set not fully reduced.
+            sj = strat->S.begin();
+          }
         }
         ++sk;
       }
@@ -3117,7 +3127,13 @@ bba_post_loop:
           int sz = strat->S.size();
           strat->S.clear_if_divisible(sj->p, sj->sev, sk, strat);
           if (strat->S.size() == sz) ++sj;
-          else { ++sk; if (sk == strat->S.end()) goto sb1_done_a; }
+          else {
+            ++sk;
+            if (sk == strat->S.end()) goto sb1_done_a;
+            // Same fix as bba_post_loop: reset sj so the new sk is
+            // checked against all earlier elements.
+            sj = strat->S.begin();
+          }
         }
         ++sk;
       }
