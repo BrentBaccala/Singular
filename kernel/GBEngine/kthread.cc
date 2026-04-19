@@ -198,6 +198,59 @@ static inline SweepResult& sweep_result(SweepContext *ctx, int thread_id, int sl
 }
 
 /* ------------------------------------------------------------------ */
+/*  Task 512: T-integrity audit (debug).                               */
+/*                                                                     */
+/*  Walks strat->T and checks that each entry's stored pLength matches */
+/*  the actual chain length.  First mismatch aborts with a diagnostic. */
+/*  Expensive — O(|T| * avg chain length).  Controlled by env var      */
+/*  SINGULAR_AUDIT_T.  Run from chokepoints (drain entry, refill entry,*/
+/*  reduce entry, redtailBba post) to narrow the window where          */
+/*  corruption first appears.                                          */
+/* ------------------------------------------------------------------ */
+static std::atomic<bool> g_audit_T_enabled{false};
+static std::atomic<int>  g_audit_T_checked{0};
+
+static std::atomic<int> g_audit_hit_count{0};
+static void audit_T_pLength(SweepContext *ctx, const char *tag, int thread_id)
+{
+  if (!g_audit_T_enabled.load(std::memory_order_relaxed)) return;
+  kStrategy strat = ctx->strat;
+  int n = strat->T.size();
+  for (int j = 0; j < n; j++)
+  {
+    if (!tobject_published_load(strat->T[j])) continue;
+    poly p = strat->T[j].p;
+    if (p == NULL) p = strat->T[j].t_p;
+    if (p == NULL) continue;
+    int stored = strat->T[j].pLength;
+    if (stored <= 0) continue;
+    int actual = pLength(p);
+    if (stored != actual)
+    {
+      int hit = g_audit_hit_count.fetch_add(1, std::memory_order_relaxed);
+      if (hit < 20)  // log only first 20 hits per run
+      {
+        fprintf(stderr,
+                "[audit_T %s tid=%d] T[%d] stored pLength=%d, actual=%d "
+                "(p=%p t_p=%p i_r=%d); Tsize=%d\n",
+                tag, thread_id, j, stored, actual,
+                (void*)strat->T[j].p, (void*)strat->T[j].t_p,
+                strat->T[j].i_r, n);
+        fflush(stderr);
+      }
+      if (hit == 0)
+      {
+        // On first hit, abort so we can examine state in GDB.  Further
+        // hits are logged but don't abort, so we can see the cascade
+        // pattern without GDB.
+        abort();
+      }
+    }
+  }
+  g_audit_T_checked.fetch_add(1, std::memory_order_relaxed);
+}
+
+/* ------------------------------------------------------------------ */
 /*  Lifecycle                                                          */
 /* ------------------------------------------------------------------ */
 
@@ -738,6 +791,7 @@ static void tile_pull_loop(SweepContext *ctx, int thread_id, bool block)
       // Gating: skip the drain hop if the queue is observably empty
       // (snapshot under its own mutex so we don't race with a concurrent
       // push).  The cost of the lock is negligible vs the wait.
+      if (getenv("SKIP_WORKER_DRAIN") == NULL)
       {
         bool queue_has_work;
         kt_surv_q_lock(ctx, thread_id);
@@ -828,6 +882,7 @@ static void tile_pull_loop(SweepContext *ctx, int thread_id, bool block)
 
 static void reduce_slot_from_sweep(SweepContext *ctx, int slot, int thread_id)
 {
+  audit_T_pLength(ctx, "reduce-entry", thread_id);
   kStrategy strat = ctx->strat;
   ActivePoly *ap = &ctx->active[slot];
   (void)thread_id;  // used only by instrumentation wrapper
@@ -929,6 +984,7 @@ static void reduce_slot_from_sweep(SweepContext *ctx, int slot, int thread_id)
 
 static int refill_and_publish(SweepContext *ctx)
 {
+  audit_T_pLength(ctx, "refill-entry", 0);
   int in_pipeline = 0;
 
   for (int s = 0; s < ctx->max_active; s++)
@@ -1073,6 +1129,11 @@ static void process_survivor_lobject(SweepContext *ctx, LObject *P, int thread_i
 
   strat->redTailChange = FALSE;
 
+  audit_T_pLength(ctx, "ps-phase0-pre-redtailBba", thread_id);
+
+  // Task 512 bisect: disable redtailBba in drain via env var.
+  bool skip_redtail = (getenv("SKIP_DRAIN_REDTAIL") != NULL);
+
   if (rField_is_Z(currRing) && !rHasLocalOrMixedOrdering(currRing))
     redtailBbaAlsoLC_Z(P, strat);
 
@@ -1084,8 +1145,9 @@ static void process_survivor_lobject(SweepContext *ctx, LObject *P, int thread_i
 #ifdef KTHREAD_INSTRUMENT
       long rt0 = KT_STATS(ctx) ? kt_now_ns() : 0;
 #endif
-      P->p = redtailBba(P, pos_it, strat, withT,
-                        !TEST_OPT_CONTENTSB);
+      if (!skip_redtail)
+        P->p = redtailBba(P, pos_it, strat, withT,
+                          !TEST_OPT_CONTENTSB);
 #ifdef KTHREAD_INSTRUMENT
       if (KT_STATS(ctx)) redtail_accum += kt_now_ns() - rt0;
 #endif
@@ -1101,13 +1163,16 @@ static void process_survivor_lobject(SweepContext *ctx, LObject *P, int thread_i
 #ifdef KTHREAD_INSTRUMENT
       long rt0 = KT_STATS(ctx) ? kt_now_ns() : 0;
 #endif
-      P->p = redtailBba(P, pos_it, strat, withT);
+      if (!skip_redtail)
+        P->p = redtailBba(P, pos_it, strat, withT);
 #ifdef KTHREAD_INSTRUMENT
       if (KT_STATS(ctx)) redtail_accum += kt_now_ns() - rt0;
 #endif
       if (strat->redTailChange) P->t_p = NULL;
     }
   }
+
+  audit_T_pLength(ctx, "ps-phase0-post-redtailBba", thread_id);
 
   // Enter h into T and S under exclusive lock.  my_arrival is the
   // arrival_id enterS will stamp on h (enter_bba fetch_add's the
@@ -1121,6 +1186,7 @@ static void process_survivor_lobject(SweepContext *ctx, LObject *P, int thread_i
     long et0 = KT_STATS(ctx) ? kt_now_ns() : 0;
 #endif
     enterT(*P, strat);
+    audit_T_pLength(ctx, "ps-phase0-post-enterT", thread_id);
 #ifdef KTHREAD_INSTRUMENT
     if (KT_STATS(ctx)) enterT_accum += kt_now_ns() - et0;
     long es0 = KT_STATS(ctx) ? kt_now_ns() : 0;
@@ -1313,6 +1379,7 @@ static void drain_survivor_queue(SweepContext *ctx, int thread_id)
   long drained_this_call = 0;
 #endif
 
+  audit_T_pLength(ctx, "drain-entry", thread_id);
   ctx->enterpairs_active.fetch_add(1, std::memory_order_acq_rel);
 
   while (true)
@@ -1411,6 +1478,11 @@ void bba_parallel_loop(SweepContext *ctx)
 {
   kStrategy strat = ctx->strat;
   int nthreads = ctx->num_threads;
+
+  // Task 512: enable T-integrity audit if requested.
+  g_audit_T_enabled.store(getenv("SINGULAR_AUDIT_T") != NULL,
+                          std::memory_order_relaxed);
+  g_audit_T_checked.store(0, std::memory_order_relaxed);
 
   ctx->saved_posInT = strat->posInT;
   strat->posInT = posInT_appendEnd;
