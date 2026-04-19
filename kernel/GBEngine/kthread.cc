@@ -1449,12 +1449,27 @@ void bba_parallel_loop(SweepContext *ctx)
   // The BlockArray block size is 1024 (BLOCK_SHIFT=10); reserving
   // capacity for N elements allocates ceil(N/1024) blocks and sizes
   // the directory accordingly.
+  // Task 512 worker-side-drain: BlockArray::ensure_capacity aborts if
+  // it needs to grow the directory after freeze_dir() has been called
+  // (the directory-realloc path is unsafe under concurrent readers).
+  // Pre-allocate a generous reserve here while still single-threaded,
+  // then freeze.  Staging-redsb workloads with THREADS=4 grow T to a
+  // few thousand entries; 1M covers orders of magnitude more than any
+  // observed test case.  If exceeded, the abort() fires at the next
+  // enterT with a clear diagnostic, at which point we bump the reserve.
+  //
+  // strat->R is pre-allocated too (written in enterT; same race class).
+  // strat->sevT same.
   {
     int cur_T = strat->T.size();
-    long reserve_n = (long)cur_T * 4;
-    if (reserve_n < 4096) reserve_n = 4096;
+    long reserve_n = (long)cur_T * 16;
+    if (reserve_n < 1048576) reserve_n = 1048576;
     strat->T.ensure_capacity((int)reserve_n);
     strat->sevT.ensure_capacity((int)reserve_n);
+    strat->R.ensure_capacity((int)reserve_n);
+    strat->T.freeze_dir();
+    strat->sevT.freeze_dir();
+    strat->R.freeze_dir();
   }
 
 #ifdef KTHREAD_INSTRUMENT
@@ -1653,6 +1668,12 @@ parallel_shutdown:
 
   for (int t = 0; t < ctx->num_workers; t++)
     pthread_join(ctx->threads[t], NULL);
+
+  // Workers joined — unfreeze the BlockArray directories so downstream
+  // serial code can grow T / sevT / R normally.
+  strat->T.unfreeze_dir();
+  strat->sevT.unfreeze_dir();
+  strat->R.unfreeze_dir();
 
   // Now workers are joined — safe to mutate strat->L and slots.
   // (Task 512 worker-side-drain: chainCritNormal from worker drain is

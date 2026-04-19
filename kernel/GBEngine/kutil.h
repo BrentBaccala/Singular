@@ -71,10 +71,12 @@ class BlockArray {
   Elem **blocks;        // directory of block pointers
   int num_blocks;       // current number of allocated blocks
   int dir_capacity;     // allocated directory slots
+  bool dir_frozen_;     // task 512: if true, ensure_capacity aborts on dir grow
 protected:
   int count;            // number of elements in use
 public:
-  BlockArray() : blocks(NULL), num_blocks(0), dir_capacity(0), count(0) {}
+  BlockArray() : blocks(NULL), num_blocks(0), dir_capacity(0),
+                 dir_frozen_(false), count(0) {}
 
   Elem& operator[](int i) {
     return blocks[i >> BLOCK_SHIFT][i & BLOCK_MASK];
@@ -95,12 +97,36 @@ public:
   // Set the count directly (for migration from external tl/sl counters)
   void setsize(int n) { count = n; }
 
-  // Ensure at least n elements are allocated (indices 0..n-1)
+  // Ensure at least n elements are allocated (indices 0..n-1).
+  //
+  // Task 512 worker-side-drain: the directory-realloc path is UNSAFE
+  // under concurrent readers.  A reader doing `blocks[j>>SHIFT][j&MASK]`
+  // loads `this->blocks` (the directory pointer), then dereferences.
+  // If a concurrent writer in ensure_capacity free()s the old directory
+  // and assigns a new one, the reader's stale pointer is use-after-free.
+  // The only safe path is to guarantee the directory never grows after
+  // the parallel phase starts.
+  //
+  // Policy: bba_parallel_loop calls freeze_dir() after pre-allocating
+  // a generous reserve under single-threaded startup.  Once frozen,
+  // any ensure_capacity call that would grow the directory abort()s
+  // with a diagnostic — the reserve was undersized.  Block allocation
+  // (new blocks within existing dir_capacity) is still allowed, since
+  // that only writes to slots beyond any reader's size bound.
   void ensure_capacity(int n) {
     int needed_blocks = (n + BLOCK_SIZE - 1) >> BLOCK_SHIFT;
     if (needed_blocks <= num_blocks) return;
-    // Grow directory if needed
     if (needed_blocks > dir_capacity) {
+      if (dir_frozen_) {
+        fprintf(stderr,
+                "[BlockArray] ensure_capacity: directory realloc needed "
+                "after freeze_dir() (needed_blocks=%d, dir_capacity=%d, "
+                "BLOCK_SIZE=%d, n=%d).  This would be unsafe under "
+                "concurrent readers (task 512 worker-side-drain).  "
+                "Increase the startup reserve in bba_parallel_loop.\n",
+                needed_blocks, dir_capacity, BLOCK_SIZE, n);
+        abort();
+      }
       int new_cap = dir_capacity == 0 ? 4 : dir_capacity;
       while (new_cap < needed_blocks) new_cap *= 2;
       Elem **new_dir = (Elem **)calloc(new_cap, sizeof(Elem *));
@@ -111,12 +137,22 @@ public:
       blocks = new_dir;
       dir_capacity = new_cap;
     }
-    // Allocate new blocks (zero-initialized)
+    // Allocate new blocks (zero-initialized).  Safe: writes to
+    // blocks[b] for b >= num_blocks, which no reader indexes yet (the
+    // size bound is monotonically grown by setsize() after all
+    // initialisation).
     for (int b = num_blocks; b < needed_blocks; b++) {
       blocks[b] = (Elem *)calloc(BLOCK_SIZE, sizeof(Elem));
     }
     num_blocks = needed_blocks;
   }
+
+  // Task 512 worker-side-drain: lock the directory after the parallel
+  // phase startup reserve.  Any subsequent ensure_capacity call that
+  // would grow the directory (needed_blocks > dir_capacity) will
+  // abort() instead of silently racing with concurrent readers.
+  void freeze_dir() { dir_frozen_ = true; }
+  void unfreeze_dir() { dir_frozen_ = false; }
 
   // Return current capacity (total elements allocated)
   int capacity() const { return num_blocks * BLOCK_SIZE; }
@@ -147,6 +183,7 @@ public:
 
   // Free all blocks and the directory, reset count
   void free_all() {
+    dir_frozen_ = false;
     for (int b = 0; b < num_blocks; b++) {
       free(blocks[b]);
     }

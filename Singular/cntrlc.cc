@@ -530,6 +530,11 @@ static void stack_trace (char *const*args)
 void init_signals()
 {
 // signal handler -------------------------------------------------------
+  // Task 512 debug: don't install SIGSEGV handler when ASan is in use;
+  // ASan's own handler must run first to report the invalid access.
+  if (getenv("SINGULAR_DISABLE_SEGV_HANDLER") != NULL) {
+    // Skip installing our SIGSEGV / SIGBUS handlers.
+  } else {
   #ifdef SIGSEGV
   si_set_signal(SIGSEGV,(si_hdl_typ)sigsegv_handler);
   #endif
@@ -545,6 +550,7 @@ void init_signals()
   #ifdef SIGIOT
   si_set_signal(SIGIOT, (si_hdl_typ)sigsegv_handler);
   #endif
+  }
   si_set_signal(SIGINT ,(si_hdl_typ)sigint_handler);
   si_set_signal(SIGCHLD, (si_hdl_typ)sig_chld_hdl);
   si_set_signal(SIGPIPE, (si_hdl_typ)sig_pipe_hdl);
