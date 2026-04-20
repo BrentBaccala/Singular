@@ -1238,17 +1238,22 @@ static void merge_slot_results(SweepContext *ctx, int s)
 {
   int total_threads = ctx->num_workers + 1;
   int best_reducer = -1, best_good = -1, best_pLength = 0;
+  void *best_reducer_p = NULL, *best_good_p = NULL;
 
   for (int t = 0; t < total_threads; t++)
   {
     SweepResult &sr = sweep_result(ctx, t, s);
     if (sr.best_reducer >= 0 && best_reducer < 0)
+    {
       best_reducer = sr.best_reducer;
+      best_reducer_p = sr.best_reducer_p;
+    }
     if (sr.best_good >= 0)
     {
       if (best_good < 0 || sr.best_pLength < best_pLength)
       {
         best_good = sr.best_good;
+        best_good_p = sr.best_good_p;
         best_pLength = sr.best_pLength;
       }
     }
@@ -1257,6 +1262,8 @@ static void merge_slot_results(SweepContext *ctx, int s)
   ctx->active[s].best_reducer = best_reducer;
   ctx->active[s].best_good = best_good;
   ctx->active[s].best_pLength = best_pLength;
+  ctx->active[s].best_reducer_p = best_reducer_p;
+  ctx->active[s].best_good_p = best_good_p;
 }
 
 /*
@@ -1272,6 +1279,8 @@ static void reset_sweep_results_one(SweepContext *ctx, int slot)
     sr.best_reducer = -1;
     sr.best_good = -1;
     sr.best_pLength = 0;
+    sr.best_reducer_p = NULL;
+    sr.best_good_p = NULL;
   }
 }
 
@@ -1445,7 +1454,10 @@ static void sweep_one_tile(SweepContext *ctx, int thread_id,
       continue;
 
     if (sr.best_reducer < 0)
+    {
       sr.best_reducer = j;
+      sr.best_reducer_p = (void*)strat->T[j].p;
+    }
 
     int ecart_j = strat->T[j].ecart;
     if (ecart_j <= ap->P.ecart)
@@ -1455,6 +1467,7 @@ static void sweep_one_tile(SweepContext *ctx, int thread_id,
       if (sr.best_good < 0 || pLen < sr.best_pLength)
       {
         sr.best_good = j;
+        sr.best_good_p = (void*)strat->T[j].p;
         sr.best_pLength = pLen;
       }
     }
@@ -1605,6 +1618,43 @@ static void reduce_slot_from_sweep(SweepContext *ctx, int slot, int thread_id)
 
   // Apply first reduction from cooperative sweep result
   int ei = strat->T[best].ecart;
+
+  // Consistency guard: verify T[best].p still matches what the sweep
+  // observed (captured at merge time).  If it doesn't, either:
+  //  - a concurrent enterT shifted T[best] (shouldn't happen under
+  //    posInT_appendEnd + S-exclusive lock during enterT), or
+  //  - some other path mutated T[best].p in-place,
+  //  - or `best` is out of the currently-valid T range and we're
+  //    reading uninitialised memory.
+  // All three are bugs.  This is the earliest point we can detect
+  // before the ksReducePoly call does the wild deref.
+  {
+    void *seen_at_sweep =
+      (ap->best_good >= 0) ? ap->best_good_p : ap->best_reducer_p;
+    poly now_at_reduce =
+      (best >= 0 && best < (int)strat->T.size()) ? strat->T[best].p
+                                                 : (poly)NULL;
+    if (seen_at_sweep != NULL && seen_at_sweep != (void*)now_at_reduce)
+    {
+      kt_debug_audit_printf(
+        "=== REDUCE_GUARD: T[best=%d].p changed between sweep and "
+        "reduce!  seen_at_sweep=%p  now_at_reduce=%p  "
+        "slot=%d thread=%d  T.size=%d  "
+        "best_good=%d best_reducer=%d ===\n",
+        best, seen_at_sweep, (void*)now_at_reduce,
+        slot, thread_id, (int)strat->T.size(),
+        ap->best_good, ap->best_reducer);
+      kt_debug_tag("REDUCE_GUARD:T[best].p_CHANGED",
+                   seen_at_sweep, best, slot);
+    }
+    if (best < 0 || best >= (int)strat->T.size())
+    {
+      kt_debug_audit_printf(
+        "=== REDUCE_GUARD: best=%d OUT OF BOUNDS  T.size=%d  "
+        "slot=%d thread=%d  seen_at_sweep=%p ===\n",
+        best, (int)strat->T.size(), slot, thread_id, seen_at_sweep);
+    }
+  }
 
   {
     // Tag includes the T[best] reducer so the dump shows exactly which

@@ -156,6 +156,12 @@ struct SweepResult
   int best_reducer;   // first divisor found (any ecart), -1 = none
   int best_good;      // best divisor with ecart <= P.ecart, -1 = none
   int best_pLength;   // pLength of best_good
+  // Poly pointers captured when the above indices were picked.  Used
+  // by the reduce-time consistency guard (task: the ksReducePoly SEGV
+  // / R-slot logic bug investigation) to verify T[best].p still
+  // matches what the sweep observed.
+  void *best_reducer_p;
+  void *best_good_p;
 };
 
 /**
@@ -173,6 +179,11 @@ struct ActivePoly
   int best_reducer;         // merged: best T[j] found (any divisor), -1 = none
   int best_good;            // merged: best T[j] with ecart <= P.ecart, -1 = none
   int best_pLength;         // pLength of best_good reducer
+  // T[best].p values captured at merge time; used by the reduce-time
+  // consistency guard to detect T-entry mutation between merge and
+  // ksReducePoly.
+  void *best_reducer_p;
+  void *best_good_p;
   bool is_survivor;         // true if sweep found no divisor (true survivor)
   long d;                   // ecart tracking: h_d + h->ecart
   long reddeg;              // degree tracking from redHoney
