@@ -2862,13 +2862,26 @@ ideal bba (ideal F, ideal Q,intvec *w,bigintmat *hilb,kStrategy strat)
   /* parallel bba: dispatch to parallel loop if SINGULAR_THREADS > 1 */
   {
     int singular_threads = get_singular_threads();
-    if (singular_threads > 1 && strat->red == redHoney)
+    int min_f = 0;
+    const char *mfs = getenv("SINGULAR_MIN_F_PARALLEL");
+    if (mfs != NULL) min_f = atoi(mfs);
+    if (singular_threads > 1 && strat->red == redHoney
+        && getenv("SINGULAR_FORCE_SERIAL") == NULL
+        && IDELEMS(F) >= min_f)
     {
+      if (getenv("SINGULAR_DEBUG_RING") != NULL)
+        fprintf(stderr, "[bba] parallel dispatch: |L|=%d |S|=%d |F|=%d\n",
+                (int)strat->L.size(), (int)strat->S.size(), IDELEMS(F));
       SweepContext *pctx = sweep_context_init(strat, singular_threads);
       bba_parallel_loop(pctx);
       sweep_context_destroy(pctx);
       goto bba_post_loop;
     }
+    else if (getenv("SINGULAR_DEBUG_RING") != NULL)
+      fprintf(stderr, "[bba] SERIAL: threads=%d red=%s |F|=%d\n",
+              singular_threads,
+              strat->red == redHoney ? "redHoney" : "other",
+              IDELEMS(F));
   }
 
   /* compute------------------------------------------------------- */
@@ -3099,7 +3112,11 @@ bba_post_loop:
   // monomials are divisible by another S-element. The batch model may
   // produce such redundancies since multiple polynomials are reduced
   // against the same T snapshot.
-  if (get_singular_threads() > 1)
+  if (get_singular_threads() > 1 && getenv("SINGULAR_SKIP_POST_LOOP_S_REDUCE") != NULL)
+  {
+    // Diagnostic skip.
+  }
+  else if (get_singular_threads() > 1)
   {
     if (!rField_is_Ring(currRing))
     {
