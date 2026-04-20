@@ -259,6 +259,32 @@ void kt_debug_tag(const char *op, void *poly, int slot, int arg)
   tag_log(kt_debug_tid, op, poly, slot, arg);
 }
 
+// Dedicated audit-log line for the enterT "slot-in-use" probe:
+// called unconditionally from enterT; if atT points at a slot whose
+// .p is already non-NULL, we've either an OVERWRITE (breaks append-
+// only) or a SHIFT (moves existing entries up).  Both invalidate
+// pair.i_r2 values that reference affected slots.  Emits directly
+// to g_audit_log so the line survives ring-buffer wrap.  Silent
+// when the debug ring isn't enabled.
+void kt_debug_enterT_slot_probe(int atT, int pre_T_size,
+                                void *pre_T_atT_p, void *new_p)
+{
+  if (!g_debug_ring_enabled.load(std::memory_order_relaxed)) return;
+  bool overwrite = (pre_T_atT_p != NULL && pre_T_atT_p != new_p);
+  bool shift = (atT < pre_T_size);
+  if (!overwrite && !shift) return;   // pure append — not interesting
+  FILE *log = g_audit_log ? g_audit_log : stderr;
+  fprintf(log,
+          "=== enterT:SLOT_IN_USE atT=%d  pre-T.size=%d  "
+          "pre-T[atT].p=%p  new p=%p  overwrite=%d shift=%d ===\n",
+          atT, pre_T_size, pre_T_atT_p, new_p,
+          overwrite ? 1 : 0, shift ? 1 : 0);
+  fflush(log);
+  tag_log(kt_debug_tid,
+          overwrite ? "enterT:OVERWRITE_SLOT" : "enterT:SHIFT_ONLY",
+          pre_T_atT_p, atT, pre_T_size);
+}
+
 // ---------------------------------------------------------------------
 // T-node registry: records every chain node address that has been
 // enterT'd into a T entry, along with the T index it belongs to.

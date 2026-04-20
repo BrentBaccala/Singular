@@ -8962,6 +8962,19 @@ void enterT(LObject &p, kStrategy strat, int atT)
   strat->newt = TRUE;
   if (atT < 0)
     atT = strat->posInT(strat->T, strat->T.size()-1, p);
+
+  // Probe (off-by-one pair-pop investigation): catch the case where
+  // enterT targets a slot whose .p is already non-NULL (OVERWRITE)
+  // or where the shift-up loop below will run (SHIFT).  Both
+  // invalidate pair.i_r2 values that reference affected slots.
+  {
+    int pre_T_size = strat->T.size();
+    poly pre_T_atT_p =
+      (atT >= 0 && atT < pre_T_size) ? strat->T[atT].p : NULL;
+    kt_debug_enterT_slot_probe(atT, pre_T_size,
+                               (void*)pre_T_atT_p, (void*)p.p);
+  }
+
   // Ensure capacity for tl+2 elements (current tl+1, plus the new one)
   strat->T.ensure_capacity(strat->T.size()-1 + 2);
   strat->sevT.ensure_capacity(strat->T.size()-1 + 2);

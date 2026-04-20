@@ -403,6 +403,13 @@ void kt_debug_register_tnode(void *addr, int tidx);
 void kt_debug_snapshot_T_head(int tidx, void *addr);
 void *kt_debug_lookup_T_head(int tidx);
 
+// Called from enterT BEFORE the T[atT] write.  Emits a dedicated
+// audit-log line (plus a tag) iff atT targets a slot whose .p is
+// already non-NULL (OVERWRITE) or atT < T.size() (SHIFT will run).
+// No-op when the debug ring isn't enabled, or for pure-append cases.
+void kt_debug_enterT_slot_probe(int atT, int pre_T_size,
+                                void *pre_T_atT_p, void *new_p);
+
 // Fingerprint over (p1, p2, i_r1, i_r2) — stamped at pair creation,
 // rechecked at pop and in the L-scan.  fp-mismatch proves in-flight
 // mutation of the pair's own fields; fp-match with T-disagreement
