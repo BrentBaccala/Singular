@@ -858,13 +858,7 @@ BOOLEAN kTest_T(TObject * T, kStrategy strat, int i, char TN)
     if (T->t_p == NULL && i > 0)
       return dReportError("%c[%d].t_p is NULL", TN, i);
     pFalseReturn(p_Test(T->t_p, T->tailRing));
-    // Stale-pLength race bisect gate (SKIP_LMTEST_TP=1): hypothesis is
-    // that _p_LmTest (pDebug.cc:322) transiently mutates T->p by doing
-    // pNext(T->p) = NULL / test / restore — which other threads can
-    // observe as a truncated chain.  Skipping it should eliminate the
-    // T-entry pLength mismatch entirely.
-    if (T->p != NULL && getenv("SKIP_LMTEST_TP") == NULL)
-      pFalseReturn(p_LmTest(T->p, currRing));
+    if (T->p != NULL) pFalseReturn(p_LmTest(T->p, currRing));
     if ((T->p != NULL) && (T->t_p != NULL))
     {
       const char* msg = kTest_LmEqual(T->p, T->t_p, T->tailRing);
