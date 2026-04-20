@@ -208,6 +208,93 @@ static poly p_DebugInit(poly p, ring src_ring, ring dest_ring)
   return d_p;
 }
 
+// Run the per-node invariant checks for a single poly node `p`.
+// `p_prev` is the previous node (for order checks) or NULL if `p` is
+// the head.  Used by both _p_Test (inside its walking loop) and
+// _p_LmTest (head only).  Factored out so _p_LmTest need not mutate
+// pNext(p) to halt _p_Test's walk — that mutation was not thread-safe
+// and caused concurrent readers to observe transient chain truncation.
+static BOOLEAN _p_NodeTest(poly p, poly p_prev, ring r, int level, int ismod)
+{
+  // ring check
+  pFalseReturn(p_LmCheckIsFromRing(p, r));
+  #ifndef OM_NDEBUG
+  #ifndef X_OMALLOC
+  // omAddr check
+  _pPolyAssumeReturnMsg(omTestBinAddrSize(p, (omSizeWOfBin(r->PolyBin))*SIZEOF_LONG, 1)
+                   == omError_NoError, "memory error",p,r);
+  #endif
+  #endif
+  // number/coef check
+  _pPolyAssumeReturnMsg(p->coef != NULL || (n_GetChar(r->cf) >= 2), "NULL coef",p,r);
+
+  #ifdef LDEBUG
+  _pPolyAssumeReturnMsg(n_Test(p->coef,r->cf),"coeff err",p,r);
+  #endif
+  _pPolyAssumeReturnMsg(!n_IsZero(p->coef, r->cf), "Zero coef",p,r);
+
+  // check for valid comp
+  _pPolyAssumeReturnMsg(p_GetComp(p, r) >= 0 && (p_GetComp(p, r)<65000), "component out of range ?",p,r);
+  // check for mix poly/vec representation
+  _pPolyAssumeReturnMsg(ismod == (p_GetComp(p, r) != 0), "mixed poly/vector",p,r);
+
+  // special check for ringorder_s/S
+  if ((r->typ!=NULL) && (r->typ[0].ord_typ == ro_syzcomp))
+  {
+    long c1, cc1, ccc1, ec1;
+    sro_ord* o = &(r->typ[0]);
+
+    c1 = p_GetComp(p, r);
+    if (o->data.syzcomp.Components!=NULL)
+    {
+      cc1 = o->data.syzcomp.Components[c1];
+      ccc1 = o->data.syzcomp.ShiftedComponents[cc1];
+    }
+    else { cc1=0; ccc1=0; }
+    _pPolyAssumeReturnMsg(c1 == 0 || cc1 != 0, "Component <-> TrueComponent zero mismatch",p,r);
+    _pPolyAssumeReturnMsg(c1 == 0 || ccc1 != 0,"Component <-> ShiftedComponent zero mismatch",p,r);
+    ec1 = p->exp[o->data.syzcomp.place];
+    //pPolyAssumeReturnMsg(ec1 == ccc1, "Shifted comp out of sync. should %d, is %d");
+    if (ec1 != ccc1)
+    {
+      dPolyReportError(p,r,"Shifted comp out of sync. should %d, is %d",ccc1,ec1);
+      return FALSE;
+    }
+  }
+
+  // check that p_Setm works ok
+  if (level > 0)
+  {
+    poly p_should_equal = p_DebugInit(p, r, r);
+    _pPolyAssumeReturnMsg(p_ExpVectorEqual(p, p_should_equal, r), "p_Setm field(s) out of sync",p,r);
+    p_LmFree(p_should_equal, r);
+  }
+
+  // check order
+  if (p_prev != NULL)
+  {
+    int cmp = p_LmCmp(p_prev, p, r);
+    if (cmp == 0)
+    {
+      _pPolyAssumeReturnMsg(0, "monoms p and p->next are equal", p_prev, r);
+    }
+    else
+      _pPolyAssumeReturnMsg(p_LmCmp(p_prev, p, r) == 1, "wrong order", p_prev, r);
+
+    // check that compare worked sensibly
+    if (level > 1 && p_GetComp(p_prev, r) == p_GetComp(p, r))
+    {
+      int i;
+      for (i=r->N; i>0; i--)
+      {
+        if (p_GetExp(p_prev, i, r) != p_GetExp(p, i, r)) break;
+      }
+      _pPolyAssumeReturnMsg(i > 0, "Exponents equal but compare different", p_prev, r);
+    }
+  }
+  return TRUE;
+}
+
 BOOLEAN _p_Test(poly p, ring r, int level)
 {
   assume(r->cf !=NULL);
@@ -237,96 +324,34 @@ BOOLEAN _p_Test(poly p, ring r, int level)
 
   while (p != NULL)
   {
-    // ring check
-    pFalseReturn(p_LmCheckIsFromRing(p, r));
-    #ifndef OM_NDEBUG
-    #ifndef X_OMALLOC
-    // omAddr check
-    _pPolyAssumeReturnMsg(omTestBinAddrSize(p, (omSizeWOfBin(r->PolyBin))*SIZEOF_LONG, 1)
-                     == omError_NoError, "memory error",p,r);
-    #endif
-    #endif
-    // number/coef check
-    _pPolyAssumeReturnMsg(p->coef != NULL || (n_GetChar(r->cf) >= 2), "NULL coef",p,r);
-
-    #ifdef LDEBUG
-    _pPolyAssumeReturnMsg(n_Test(p->coef,r->cf),"coeff err",p,r);
-    #endif
-    _pPolyAssumeReturnMsg(!n_IsZero(p->coef, r->cf), "Zero coef",p,r);
-
-    // check for valid comp
-    _pPolyAssumeReturnMsg(p_GetComp(p, r) >= 0 && (p_GetComp(p, r)<65000), "component out of range ?",p,r);
-    // check for mix poly/vec representation
-    _pPolyAssumeReturnMsg(ismod == (p_GetComp(p, r) != 0), "mixed poly/vector",p,r);
-
-    // special check for ringorder_s/S
-    if ((r->typ!=NULL) && (r->typ[0].ord_typ == ro_syzcomp))
-    {
-      long c1, cc1, ccc1, ec1;
-      sro_ord* o = &(r->typ[0]);
-
-      c1 = p_GetComp(p, r);
-      if (o->data.syzcomp.Components!=NULL)
-      {
-        cc1 = o->data.syzcomp.Components[c1];
-        ccc1 = o->data.syzcomp.ShiftedComponents[cc1];
-      }
-      else { cc1=0; ccc1=0; }
-      _pPolyAssumeReturnMsg(c1 == 0 || cc1 != 0, "Component <-> TrueComponent zero mismatch",p,r);
-      _pPolyAssumeReturnMsg(c1 == 0 || ccc1 != 0,"Component <-> ShiftedComponent zero mismatch",p,r);
-      ec1 = p->exp[o->data.syzcomp.place];
-      //pPolyAssumeReturnMsg(ec1 == ccc1, "Shifted comp out of sync. should %d, is %d");
-      if (ec1 != ccc1)
-      {
-        dPolyReportError(p,r,"Shifted comp out of sync. should %d, is %d",ccc1,ec1);
-        return FALSE;
-      }
-    }
-
-    // check that p_Setm works ok
-    if (level > 0)
-    {
-      poly p_should_equal = p_DebugInit(p, r, r);
-      _pPolyAssumeReturnMsg(p_ExpVectorEqual(p, p_should_equal, r), "p_Setm field(s) out of sync",p,r);
-      p_LmFree(p_should_equal, r);
-    }
-
-    // check order
-    if (p_prev != NULL)
-    {
-      int cmp = p_LmCmp(p_prev, p, r);
-      if (cmp == 0)
-      {
-        _pPolyAssumeReturnMsg(0, "monoms p and p->next are equal", p_prev, r);
-      }
-      else
-        _pPolyAssumeReturnMsg(p_LmCmp(p_prev, p, r) == 1, "wrong order", p_prev, r);
-
-      // check that compare worked sensibly
-      if (level > 1 && p_GetComp(p_prev, r) == p_GetComp(p, r))
-      {
-        int i;
-        for (i=r->N; i>0; i--)
-        {
-          if (p_GetExp(p_prev, i, r) != p_GetExp(p, i, r)) break;
-        }
-        _pPolyAssumeReturnMsg(i > 0, "Exponents equal but compare different", p_prev, r);
-      }
-    }
+    pFalseReturn(_p_NodeTest(p, p_prev, r, level, ismod));
     p_prev = p;
     pIter(p);
   }
   return TRUE;
 }
 
+// Test invariants of the head monomial of p (without walking the
+// chain).  Thread-safe: does not mutate pNext(p), unlike the older
+// save/NULL/restore implementation which raced with concurrent
+// readers in parallel Groebner basis code.
 BOOLEAN _p_LmTest(poly p, ring r, int level)
 {
+  assume(r->cf != NULL);
+  if (PDEBUG > level) level = PDEBUG;
   if (level < 0 || p == NULL) return TRUE;
-  poly pnext = pNext(p);
-  pNext(p) = NULL;
-  BOOLEAN test_res = _p_Test(p, r, level);
-  pNext(p) = pnext;
-  return test_res;
+
+  #ifndef OM_NDEBUG
+  #ifndef X_OMALLOC
+  _pPolyAssumeReturnMsg(omTestBinAddrSize(p, (omSizeWOfBin(r->PolyBin))*SIZEOF_LONG, level+1)
+                        == omError_NoError, "memory error",p,r);
+  #endif
+  #endif
+
+  pFalseReturn(p_CheckRing(r));
+
+  int ismod = p_GetComp(p, r) != 0;
+  return _p_NodeTest(p, NULL, r, level, ismod);
 }
 
 BOOLEAN _pp_Test(poly p, ring lmRing, ring tailRing, int level)
@@ -343,13 +368,18 @@ BOOLEAN _pp_Test(poly p, ring lmRing, ring tailRing, int level)
   {
     poly lm = p;
     poly tail = p_DebugInit(pNext(p), tailRing, lmRing);
-    poly pnext = pNext(lm);
-    pNext(lm) = tail;
     BOOLEAN cmp = p_LmCmp(lm, tail, lmRing);
     if (cmp != 1)
       dPolyReportError(lm, lmRing, "wrong order: lm <= Lm(tail)");
+    // Note: we used to splice `tail` under pNext(lm) around the
+    // dPolyReportError call so the error printout would show the
+    // head-tail chain.  That transient mutation was not thread-safe;
+    // concurrent readers of `p` in parallel Groebner basis code could
+    // observe the spliced state.  The cmp itself looks only at the
+    // leading monomials of lm and tail (no chain walk), so dropping
+    // the splice doesn't affect the test — only the error printout,
+    // which still names lm correctly.
     p_LmFree(tail, lmRing);
-    pNext(lm) = pnext;
     return (cmp == 1);
   }
   return TRUE;
