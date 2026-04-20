@@ -237,6 +237,18 @@ static ThreadDebugState g_thread_debug[MAX_AUDIT_THREADS];
 static inline void tag_log(int tid, const char *op, void *poly,
                            int slot, int arg);  // forward decl
 
+// Thread-local tid used by the kt_debug_tag() breadcrumb API (kthread.h)
+// so callers in other translation units (e.g. kspoly.cc) don't have to
+// pass tid through their signatures.  Default 0 means main thread in
+// serial code paths — harmless: the audit is disabled there.
+thread_local int kt_debug_tid = 0;
+
+// Public breadcrumb entry point.  Thin wrapper around tag_log.
+void kt_debug_tag(const char *op, void *poly, int slot, int arg)
+{
+  tag_log(kt_debug_tid, op, poly, slot, arg);
+}
+
 // RAII tag helper: saves the previous tag on construction, restores on
 // destruction, so nested tags work correctly without the tag silently
 // becoming stale when the inner scope returns.
@@ -506,9 +518,10 @@ static void dump_debug_state(const char *tag, int my_tid, uint64_t mismatch_seq,
   fprintf(g_audit_log,
           "-- end of dump: %d events emitted --\n", emitted);
   fflush(g_audit_log);
-  // fclose forces a write to disk before abort().
-  fclose(g_audit_log);
-  g_audit_log = NULL;
+  // Don't fclose: other threads may still call fprintf(g_audit_log,...)
+  // via audit_T_pLength's pre-dump error path (subsequent mismatches
+  // race with our abort() call).  fflush above already forces the write
+  // to disk; fclose would just invite NULL derefs.
 }
 
 static std::atomic<int> g_audit_hit_count{0};
@@ -1793,6 +1806,7 @@ static void *worker_thread(void *arg)
   int thread_id = wa->thread_id;
   free(wa);
 
+  kt_debug_tid = thread_id;
   currRing = ctx->r;
   si_opt_1 = ctx->saved_si_opt_1;
   si_opt_2 = ctx->saved_si_opt_2;
@@ -1821,6 +1835,7 @@ static void *worker_thread(void *arg)
 
 void bba_parallel_loop(SweepContext *ctx)
 {
+  kt_debug_tid = 0;  // main thread
   kStrategy strat = ctx->strat;
   int nthreads = ctx->num_threads;
 

@@ -12,6 +12,7 @@
 #include "kernel/mod2.h"
 #include "misc/options.h"
 #include "kernel/GBEngine/kutil.h"
+#include "kernel/GBEngine/kthread.h"
 #include "coeffs/numbers.h"
 #include "polys/monomials/p_polys.h"
 #include "polys/templates/p_Procs.h"
@@ -206,15 +207,25 @@ int ksReducePoly(LObject* PR,
 #endif
   int ret = 0;
   ring tailRing = PR->tailRing;
+  kt_debug_tag("ksReducePoly:entry",
+               (void*)(PW ? (PW->p ? PW->p : PW->t_p) : NULL),
+               PW ? PW->i_r : -1, 0);
   if (strat!=NULL)
   {
     kTest_L(PR,strat);
+    kt_debug_tag("ksReducePoly:after_kTest_L",
+                 (void*)(PW ? (PW->p ? PW->p : PW->t_p) : NULL),
+                 PW ? PW->i_r : -1, 0);
     kTest_T(PW,strat);
+    kt_debug_tag("ksReducePoly:after_kTest_T",
+                 (void*)(PW ? (PW->p ? PW->p : PW->t_p) : NULL),
+                 PW ? PW->i_r : -1, 0);
   }
 
   poly p1 = PR->GetLmTailRing();   // p2 | p1
   poly p2 = PW->GetLmTailRing();   // i.e. will reduce p1 with p2; lm = LT(p1) / LM(p2)
   poly t2 = pNext(p2), lm = p1;    // t2 = p2 - LT(p2); really compute P = LC(p2)*p1 - LT(p1)/LM(p2)*p2
+  kt_debug_tag("ksReducePoly:got_p2_t2", (void*)p2, PW ? PW->i_r : -1, 0);
   assume(p1 != NULL && p2 != NULL);// Attention, we have rings and there LC(p2) and LC(p1) are special
   p_CheckPolyRing(p1, tailRing);
   p_CheckPolyRing(p2, tailRing);
@@ -252,7 +263,9 @@ int ksReducePoly(LObject* PR,
     return 0;
   }
 
+  kt_debug_tag("ksReducePoly:before_ExpVectorSub", (void*)lm, PW ? PW->i_r : -1, 0);
   p_ExpVectorSub(lm, p2, tailRing); // Calculate the Monomial we must multiply to p2
+  kt_debug_tag("ksReducePoly:after_ExpVectorSub", (void*)lm, PW ? PW->i_r : -1, 0);
 
   if (tailRing != currRing)
   {
@@ -318,6 +331,7 @@ int ksReducePoly(LObject* PR,
     if (coef != NULL) *coef = n_Init(1, tailRing->cf);
   }
   if(mon!=NULL) *mon=pHead(lm);
+  kt_debug_tag("ksReducePoly:after_coef", (void*)lm, PW ? PW->i_r : -1, 0);
 
   // and finally,
 #ifdef HAVE_SHIFTBBA
@@ -332,10 +346,20 @@ int ksReducePoly(LObject* PR,
   else
 #endif
   {
+    kt_debug_tag("ksReducePoly:before_Tail_Minus_mm_Mult_qq",
+                 (void*)t2, PW ? PW->i_r : -1, 0);
     PR->Tail_Minus_mm_Mult_qq(lm, t2, pLength(t2) /*PW->GetpLength() - 1*/, spNoether);
+    kt_debug_tag("ksReducePoly:after_Tail_Minus_mm_Mult_qq",
+                 (void*)t2, PW ? PW->i_r : -1, 0);
   }
   assume(PW->GetpLength() == pLength(PW->p != NULL ? PW->p : PW->t_p));
+  kt_debug_tag("ksReducePoly:before_LmDeleteAndIter",
+               (void*)(PW ? (PW->p ? PW->p : PW->t_p) : NULL),
+               PW ? PW->i_r : -1, 0);
   PR->LmDeleteAndIter();
+  kt_debug_tag("ksReducePoly:exit",
+               (void*)(PW ? (PW->p ? PW->p : PW->t_p) : NULL),
+               PW ? PW->i_r : -1, 0);
 
   return ret;
 }

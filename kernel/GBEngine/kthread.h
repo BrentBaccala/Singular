@@ -378,4 +378,15 @@ SweepContext *sweep_context_init(kStrategy strat, int nthreads);
 void sweep_context_destroy(SweepContext *ctx);
 void bba_parallel_loop(SweepContext *ctx);
 
+/* ------------------------------------------------------------------ */
+/*  Debug breadcrumb API (SINGULAR_AUDIT_T).                           */
+/*                                                                     */
+/*  kt_debug_tid is thread-local and set by the parallel loop (main    */
+/*  thread 0) and worker_thread at startup.  Files outside kthread.cc  */
+/*  (e.g. kspoly.cc) can drop breadcrumbs into the shared event ring   */
+/*  by calling kt_debug_tag().  A no-op when the audit is disabled.    */
+/* ------------------------------------------------------------------ */
+extern thread_local int kt_debug_tid;
+void kt_debug_tag(const char *op, void *poly, int slot, int arg);
+
 #endif /* KTHREAD_H */
