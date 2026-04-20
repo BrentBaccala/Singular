@@ -206,9 +206,310 @@ static inline SweepResult& sweep_result(SweepContext *ctx, int thread_id, int sl
 /*  SINGULAR_AUDIT_T.  Run from chokepoints (drain entry, refill entry,*/
 /*  reduce entry, redtailBba post) to narrow the window where          */
 /*  corruption first appears.                                          */
+/*                                                                     */
+/*  Additions for the stale-pLength investigation:                     */
+/*   1. Per-thread "current operation" tag (g_thread_debug), set by    */
+/*      an RAII OpTag helper at key entry points.  On audit-fire we    */
+/*      dump every thread's tag so we can see what the OTHER threads   */
+/*      were doing at the moment a T entry was observed truncated.     */
+/*   2. Ring buffer of pLength observations (g_plen_ring).  Every      */
+/*      audit call records (tsc, tid, Tidx, head, stored, actual) so   */
+/*      we can find the same head observed with different lengths on   */
+/*      different threads — direct evidence of transient truncation.   */
 /* ------------------------------------------------------------------ */
 static std::atomic<bool> g_audit_T_enabled{false};
 static std::atomic<int>  g_audit_T_checked{0};
+static FILE *g_audit_log = NULL;  // opened when audit is enabled, else stderr
+
+#define MAX_AUDIT_THREADS 64
+
+struct ThreadDebugState
+{
+  const char *op;       // tag string (static literal); NULL = never tagged
+  void       *arg_poly; // poly pointer relevant to the op (LObject p, T[i].p, …)
+  int         arg_slot; // active-slot or T-index
+  int         arg_int;  // generic extra (e.g. i_r)
+  uint64_t    tsc;      // timestamp of last tag (rdtsc)
+};
+
+static ThreadDebugState g_thread_debug[MAX_AUDIT_THREADS];
+
+static inline void tag_log(int tid, const char *op, void *poly,
+                           int slot, int arg);  // forward decl
+
+// RAII tag helper: saves the previous tag on construction, restores on
+// destruction, so nested tags work correctly without the tag silently
+// becoming stale when the inner scope returns.
+struct OpTag
+{
+  int tid;
+  ThreadDebugState saved;
+
+  OpTag(int t, const char *op, void *poly = NULL, int slot = -1, int arg = 0)
+    : tid(t)
+  {
+    if (!g_audit_T_enabled.load(std::memory_order_relaxed)) return;
+    if (tid < 0 || tid >= MAX_AUDIT_THREADS) return;
+    ThreadDebugState &d = g_thread_debug[tid];
+    saved = d;
+    d.op       = op;
+    d.arg_poly = poly;
+    d.arg_slot = slot;
+    d.arg_int  = arg;
+    d.tsc      = (uint64_t)__builtin_ia32_rdtsc();
+    tag_log(tid, op, poly, slot, arg);
+  }
+  ~OpTag()
+  {
+    if (!g_audit_T_enabled.load(std::memory_order_relaxed)) return;
+    if (tid < 0 || tid >= MAX_AUDIT_THREADS) return;
+    g_thread_debug[tid] = saved;
+    // Log the restoration so the ring shows "tid left scope X, returned to Y".
+    tag_log(tid, saved.op ? saved.op : "<none>",
+            saved.arg_poly, saved.arg_slot, saved.arg_int);
+  }
+};
+
+// Forward decls for tag_log (defined after OpTag uses it).
+// (Already defined above; OpTag is declared after the event machinery.)
+
+// Unified ring buffer of events.
+// Two event kinds share one ring (so ordering is preserved across both):
+//   TAG   — a thread entered an OpTag scope (op/poly/slot/arg valid, stored=-1)
+//   PLEN  — audit observed pLength (Tidx/head/stored/actual valid, op=NULL)
+// On dump we walk the ring backwards to reconstruct, for each thread, its
+// most recent TAG event at or before the mismatch.
+enum EventKind { EV_TAG = 0, EV_PLEN = 1 };
+
+struct Event
+{
+  std::atomic<uint64_t> seq;  // written last on publish (acts as valid-marker)
+  uint64_t    tsc;
+  int         tid;
+  int         kind;       // EventKind
+  const char *op;         // TAG: function name; PLEN: NULL
+  void       *poly;       // TAG: arg_poly; PLEN: chain head
+  int         slot;       // TAG: arg_slot; PLEN: Tidx
+  int         arg;        // TAG: arg_int; PLEN: stored
+  int         actual;     // TAG: unused; PLEN: observed chain length
+};
+
+#define PLEN_RING_SIZE 1048576
+static Event g_plen_ring[PLEN_RING_SIZE];
+static std::atomic<uint64_t> g_plen_seq{0};
+// Set to true at the moment of first mismatch so other threads stop
+// logging and the dump sees a stable ring.  Threads continue running
+// (they just don't record events), but the ring is frozen.
+static std::atomic<bool> g_plen_frozen{false};
+
+static inline void plen_log(int tid, int Tidx, void *head,
+                            int stored, int actual)
+{
+  if (g_plen_frozen.load(std::memory_order_relaxed)) return;
+  uint64_t s = g_plen_seq.fetch_add(1, std::memory_order_relaxed);
+  Event &e = g_plen_ring[s & (PLEN_RING_SIZE - 1)];
+  e.tsc    = (uint64_t)__builtin_ia32_rdtsc();
+  e.tid    = tid;
+  e.kind   = EV_PLEN;
+  e.op     = NULL;
+  e.poly   = head;
+  e.slot   = Tidx;
+  e.arg    = stored;
+  e.actual = actual;
+  e.seq.store(s, std::memory_order_release);
+}
+
+static inline void tag_log(int tid, const char *op, void *poly,
+                           int slot, int arg)
+{
+  if (g_plen_frozen.load(std::memory_order_relaxed)) return;
+  uint64_t s = g_plen_seq.fetch_add(1, std::memory_order_relaxed);
+  Event &e = g_plen_ring[s & (PLEN_RING_SIZE - 1)];
+  e.tsc    = (uint64_t)__builtin_ia32_rdtsc();
+  e.tid    = tid;
+  e.kind   = EV_TAG;
+  e.op     = op;
+  e.poly   = poly;
+  e.slot   = slot;
+  e.arg    = arg;
+  e.actual = 0;
+  e.seq.store(s, std::memory_order_release);
+}
+
+// Dump per-thread tag history, pLength observations for the matching head,
+// and recent mismatches.  Called once, on the first audit mismatch, just
+// before abort().
+static void dump_debug_state(const char *tag, int my_tid, uint64_t mismatch_seq,
+                             int match_Tidx, void *match_head)
+{
+  fprintf(g_audit_log,
+          "\n=== audit fired: %s tid=%d T[%d] head=%p seq=%lu ===\n",
+          tag, my_tid, match_Tidx, match_head, (unsigned long)mismatch_seq);
+
+  uint64_t cur = g_plen_seq.load(std::memory_order_acquire);
+  uint64_t start = (cur > PLEN_RING_SIZE) ? cur - PLEN_RING_SIZE : 0;
+
+  // Per-thread tag history: for each thread, find its most recent TAG
+  // event at or before the mismatch seq (i.e. what it was doing AT the
+  // moment of truncation, not what it moved to afterward).
+  fprintf(g_audit_log,
+          "\n-- per-thread tag at mismatch (most recent TAG "
+          "at seq <= %lu) --\n", (unsigned long)mismatch_seq);
+  for (int t = 0; t < MAX_AUDIT_THREADS; t++)
+  {
+    // Walk backwards from mismatch_seq to find this thread's latest tag.
+    bool found = false;
+    uint64_t scan_lo = (mismatch_seq > PLEN_RING_SIZE)
+                        ? mismatch_seq - PLEN_RING_SIZE : 0;
+    for (uint64_t idx = mismatch_seq; idx-- > scan_lo; )
+    {
+      Event &e = g_plen_ring[idx & (PLEN_RING_SIZE - 1)];
+      uint64_t ee = e.seq.load(std::memory_order_acquire);
+      if (ee != idx) continue;
+      if (e.tid != t) continue;
+      if (e.kind != EV_TAG) continue;
+      fprintf(g_audit_log,
+              "  tid=%d seq=%lu tsc=%lu op=%s poly=%p slot=%d arg=%d\n",
+              t, (unsigned long)ee, (unsigned long)e.tsc,
+              e.op ? e.op : "<none>", e.poly, e.slot, e.arg);
+      found = true;
+      break;
+    }
+    if (!found)
+    {
+      // Also check if this thread has ANY recent event at all (to
+      // distinguish "never seen" from "tag evicted from ring").
+      for (uint64_t idx = cur; idx-- > start; )
+      {
+        Event &e = g_plen_ring[idx & (PLEN_RING_SIZE - 1)];
+        if (e.seq.load(std::memory_order_acquire) != idx) continue;
+        if (e.tid != t) continue;
+        // Thread has events, but no TAG at or before mismatch_seq in ring.
+        fprintf(g_audit_log, "  tid=%d <no tag in window> (has later events)\n", t);
+        found = true;
+        break;
+      }
+    }
+  }
+
+  // All PrepareRed and refill events in the ring (regardless of poly).
+  // Lets us spot whether the match_head or an aliasing poly was ever
+  // PrepareRed'd during the run.
+  fprintf(g_audit_log,
+          "\n-- all PrepareRed / refill events (entire ring) --\n");
+  int pr_events = 0;
+  for (uint64_t idx = start; idx < cur; idx++)
+  {
+    Event &e = g_plen_ring[idx & (PLEN_RING_SIZE - 1)];
+    uint64_t ee = e.seq.load(std::memory_order_acquire);
+    if (ee != idx) continue;
+    if (e.kind != EV_TAG) continue;
+    if (e.op == NULL) continue;
+    if (strncmp(e.op, "PrepareRed", 10) != 0 &&
+        strncmp(e.op, "refill_and_publish", 18) != 0)
+      continue;
+    const char *match = (e.poly == match_head) ? " <-- MATCH" : "";
+    fprintf(g_audit_log,
+            "  seq=%lu tsc=%lu tid=%d op=%s poly=%p slot=%d arg=%d%s\n",
+            (unsigned long)ee, (unsigned long)e.tsc,
+            e.tid, e.op, e.poly, e.slot, e.arg, match);
+    pr_events++;
+    if (pr_events > 400) { fprintf(g_audit_log, "  ... (truncated after 400)\n"); break; }
+  }
+  if (pr_events == 0)
+    fprintf(g_audit_log, "  (no PrepareRed/refill events in ring)\n");
+
+  // All events (TAG + PLEN) in the ring whose poly matches the mismatch
+  // head.  This catches the PrepareRed / ksReducePoly / other ops that
+  // took this poly as an argument — even ones before the neighborhood.
+  fprintf(g_audit_log,
+          "\n-- all events for poly=%p (entire ring) --\n", match_head);
+  int poly_events = 0;
+  for (uint64_t idx = start; idx < cur; idx++)
+  {
+    Event &e = g_plen_ring[idx & (PLEN_RING_SIZE - 1)];
+    uint64_t ee = e.seq.load(std::memory_order_acquire);
+    if (ee != idx) continue;
+    if (e.poly != match_head) continue;
+    if (e.kind == EV_TAG)
+      fprintf(g_audit_log,
+              "  seq=%lu tsc=%lu tid=%d TAG op=%s slot=%d arg=%d\n",
+              (unsigned long)ee, (unsigned long)e.tsc,
+              e.tid, e.op ? e.op : "<none>", e.slot, e.arg);
+    else
+      fprintf(g_audit_log,
+              "  %c seq=%lu tsc=%lu tid=%d PLEN T[%d] stored=%d actual=%d\n",
+              (e.arg != e.actual) ? '*' : ' ',
+              (unsigned long)ee, (unsigned long)e.tsc,
+              e.tid, e.slot, e.arg, e.actual);
+    poly_events++;
+    if (poly_events > 200) { fprintf(g_audit_log, "  ... (truncated after 200)\n"); break; }
+  }
+  if (poly_events == 0)
+    fprintf(g_audit_log, "  (no events with this poly in ring)\n");
+
+  fprintf(g_audit_log,
+          "\n-- pLength observations for T[%d] "
+          "(stored != actual marked *) --\n", match_Tidx);
+  int printed = 0;
+  for (uint64_t idx = start; idx < cur; idx++)
+  {
+    Event &e = g_plen_ring[idx & (PLEN_RING_SIZE - 1)];
+    uint64_t ee = e.seq.load(std::memory_order_acquire);
+    if (ee != idx) continue;
+    if (e.kind != EV_PLEN) continue;
+    if (e.slot != match_Tidx) continue;
+    fprintf(g_audit_log,
+            "  %c seq=%lu tsc=%lu tid=%d T[%d] head=%p stored=%d actual=%d\n",
+            (e.arg != e.actual) ? '*' : ' ',
+            (unsigned long)ee, (unsigned long)e.tsc,
+            e.tid, e.slot, e.poly, e.arg, e.actual);
+    printed++;
+    if (printed > 60) { // keep output bounded
+      fprintf(g_audit_log, "  ... (truncated after 60)\n");
+      break;
+    }
+  }
+  if (printed == 0)
+    fprintf(g_audit_log, "  (no observations of T[%d] in ring)\n", match_Tidx);
+
+  // Neighborhood: all events from all threads within +/- 64 seq of the
+  // mismatch. Re-load cur so we include events logged during the earlier
+  // parts of this dump (threads are still running).
+  uint64_t cur2 = g_plen_seq.load(std::memory_order_acquire);
+  uint64_t nlo = (mismatch_seq > 128) ? mismatch_seq - 128 : 0;
+  uint64_t nhi = mismatch_seq + 64;
+  if (nhi > cur2) nhi = cur2;
+  fprintf(g_audit_log,
+          "\n-- event neighborhood (seq %lu..%lu, cur=%lu) --\n",
+          (unsigned long)nlo, (unsigned long)nhi, (unsigned long)cur2);
+  int emitted = 0;
+  for (uint64_t idx = nlo; idx < nhi; idx++)
+  {
+    Event &e = g_plen_ring[idx & (PLEN_RING_SIZE - 1)];
+    uint64_t ee = e.seq.load(std::memory_order_acquire);
+    if (ee != idx) continue;
+    const char *marker = (idx == mismatch_seq) ? ">>" : "  ";
+    if (e.kind == EV_TAG)
+      fprintf(g_audit_log,
+              "%s seq=%lu tsc=%lu tid=%d TAG op=%s poly=%p slot=%d arg=%d\n",
+              marker, (unsigned long)ee, (unsigned long)e.tsc,
+              e.tid, e.op ? e.op : "<none>", e.poly, e.slot, e.arg);
+    else
+      fprintf(g_audit_log,
+              "%s seq=%lu tsc=%lu tid=%d PLEN T[%d] head=%p stored=%d actual=%d%s\n",
+              marker, (unsigned long)ee, (unsigned long)e.tsc,
+              e.tid, e.slot, e.poly, e.arg, e.actual,
+              (e.arg != e.actual) ? " *" : "");
+    emitted++;
+  }
+  fprintf(g_audit_log,
+          "-- end of dump: %d events emitted --\n", emitted);
+  fflush(g_audit_log);
+  // fclose forces a write to disk before abort().
+  fclose(g_audit_log);
+  g_audit_log = NULL;
+}
 
 static std::atomic<int> g_audit_hit_count{0};
 static void audit_T_pLength(SweepContext *ctx, const char *tag, int thread_id)
@@ -225,24 +526,35 @@ static void audit_T_pLength(SweepContext *ctx, const char *tag, int thread_id)
     int stored = strat->T[j].pLength;
     if (stored <= 0) continue;
     int actual = pLength(p);
+
+    // Always log the observation to the ring buffer — lets us correlate
+    // "same head observed with different lengths" after the fact.
+    // Capture the seq so the dump knows exactly where in the ring the
+    // mismatch sits (important because other threads keep logging).
+    uint64_t my_seq = g_plen_seq.load(std::memory_order_relaxed);
+    plen_log(thread_id, j, (void *)p, stored, actual);
+
     if (stored != actual)
     {
       int hit = g_audit_hit_count.fetch_add(1, std::memory_order_relaxed);
       if (hit < 20)  // log only first 20 hits per run
       {
-        fprintf(stderr,
+        fprintf(g_audit_log,
                 "[audit_T %s tid=%d] T[%d] stored pLength=%d, actual=%d "
                 "(p=%p t_p=%p i_r=%d); Tsize=%d\n",
                 tag, thread_id, j, stored, actual,
                 (void*)strat->T[j].p, (void*)strat->T[j].t_p,
                 strat->T[j].i_r, n);
-        fflush(stderr);
+        fflush(g_audit_log);
       }
       if (hit == 0)
       {
-        // On first hit, abort so we can examine state in GDB.  Further
-        // hits are logged but don't abort, so we can see the cascade
-        // pattern without GDB.
+        // First hit: freeze the ring (other threads stop logging),
+        // then dump and abort.  Freezing makes the dump see a stable
+        // state — without it the ring wraps many times while the dump
+        // is walking it.
+        g_plen_frozen.store(true, std::memory_order_release);
+        dump_debug_state(tag, thread_id, my_seq, j, (void *)p);
         abort();
       }
     }
@@ -455,6 +767,12 @@ static BOOLEAN pop_and_prepare(SweepContext *ctx, ActivePoly *ap,
     }
     else if (ap->P.p1 == NULL)
     {
+      poly _tp = (ap->P.t_p != NULL) ? ap->P.t_p : ap->P.p;
+      poly _next = (_tp != NULL) ? pNext(_tp) : NULL;
+      // Log TWO tag events: (head, pNext) so we can find the mutation
+      // via either the first or second node pointer.
+      OpTag _pr(0, "PrepareRed(ap->P,p1==NULL) head", (void *)_tp);
+      OpTag _pr2(0, "PrepareRed(ap->P,p1==NULL) pNext", (void *)_next);
       ap->P.PrepareRed(strat->use_buckets);
     }
 
@@ -484,7 +802,13 @@ static BOOLEAN pop_and_prepare(SweepContext *ctx, ActivePoly *ap,
     // are picked up in the next refill pass.
     ap->sl_snapshot = sl_snapshot_arg;
 
-    ap->P.PrepareRed(strat->use_buckets);
+    {
+      poly _tp = (ap->P.t_p != NULL) ? ap->P.t_p : ap->P.p;
+      poly _next = (_tp != NULL) ? pNext(_tp) : NULL;
+      OpTag _pr(0, "PrepareRed(ap->P,final) head", (void *)_tp);
+      OpTag _pr2(0, "PrepareRed(ap->P,final) pNext", (void *)_next);
+      ap->P.PrepareRed(strat->use_buckets);
+    }
     return TRUE;
   }
 
@@ -635,6 +959,7 @@ static void publish_slot_tiles(SweepContext *ctx, int s)
  */
 static void close_slot(SweepContext *ctx, int s, int thread_id)
 {
+  OpTag _close_tag(thread_id, "close_slot", NULL, s);
   ActivePoly *ap = &ctx->active[s];
 
   // Unoccupied or already-survivor: should not happen in the continuous
@@ -712,6 +1037,7 @@ static void close_slot(SweepContext *ctx, int s, int thread_id)
 static void sweep_one_tile(SweepContext *ctx, int thread_id,
                            int s, int slice, int tl_snapshot)
 {
+  OpTag _sw_tag(thread_id, "sweep_one_tile", NULL, s, slice);
   kStrategy strat = ctx->strat;
   int K = ctx->tiles_K;
   ActivePoly *ap = &ctx->active[s];
@@ -772,6 +1098,7 @@ static void drain_survivor_queue(SweepContext *ctx, int thread_id);
 
 static void tile_pull_loop(SweepContext *ctx, int thread_id, bool block)
 {
+  OpTag _tp_tag(thread_id, block ? "tile_pull_loop(block)" : "tile_pull_loop(nb)");
   int K = ctx->tiles_K;
 
   while (true)
@@ -882,10 +1209,10 @@ static void tile_pull_loop(SweepContext *ctx, int thread_id, bool block)
 
 static void reduce_slot_from_sweep(SweepContext *ctx, int slot, int thread_id)
 {
+  OpTag _reduce_tag(thread_id, "reduce_slot_from_sweep", NULL, slot);
   audit_T_pLength(ctx, "reduce-entry", thread_id);
   kStrategy strat = ctx->strat;
   ActivePoly *ap = &ctx->active[slot];
-  (void)thread_id;  // used only by instrumentation wrapper
 
   int best = (ap->best_good >= 0) ? ap->best_good : ap->best_reducer;
 
@@ -899,8 +1226,15 @@ static void reduce_slot_from_sweep(SweepContext *ctx, int slot, int thread_id)
   // Apply first reduction from cooperative sweep result
   int ei = strat->T[best].ecart;
 
-  ksReducePoly(&ap->P, strat->T.addr(best),
-               strat->kNoetherTail(), NULL, NULL, strat);
+  {
+    // Tag includes the T[best] reducer so the dump shows exactly which
+    // T entry this worker is consuming when the audit fires on some
+    // OTHER thread.
+    OpTag _r(thread_id, "ksReducePoly(using T[best])",
+             (void *)strat->T[best].p, slot, best);
+    ksReducePoly(&ap->P, strat->T.addr(best),
+                 strat->kNoetherTail(), NULL, NULL, strat);
+  }
 
   ctx->stat_reductions.fetch_add(1, std::memory_order_relaxed);
 
@@ -984,6 +1318,7 @@ static void reduce_slot_from_sweep(SweepContext *ctx, int slot, int thread_id)
 
 static int refill_and_publish(SweepContext *ctx)
 {
+  OpTag _refill_tag(0, "refill_and_publish");
   audit_T_pLength(ctx, "refill-entry", 0);
   int in_pipeline = 0;
 
@@ -1092,9 +1427,9 @@ static int refill_and_publish(SweepContext *ctx)
  */
 static void process_survivor_lobject(SweepContext *ctx, LObject *P, int thread_id)
 {
+  OpTag _ps_tag(thread_id, "process_survivor_lobject", P ? P->p : NULL);
   kStrategy strat = ctx->strat;
   BOOLEAN withT = ctx->withT;
-  (void)thread_id;
 
 #ifdef KTHREAD_INSTRUMENT
   long ps_t0 = KT_STATS(ctx) ? kt_now_ns() : 0;
@@ -1146,8 +1481,11 @@ static void process_survivor_lobject(SweepContext *ctx, LObject *P, int thread_i
       long rt0 = KT_STATS(ctx) ? kt_now_ns() : 0;
 #endif
       if (!skip_redtail)
+      {
+        OpTag _r(thread_id, "redtailBba(Z)", P->p);
         P->p = redtailBba(P, pos_it, strat, withT,
                           !TEST_OPT_CONTENTSB);
+      }
 #ifdef KTHREAD_INSTRUMENT
       if (KT_STATS(ctx)) redtail_accum += kt_now_ns() - rt0;
 #endif
@@ -1164,7 +1502,10 @@ static void process_survivor_lobject(SweepContext *ctx, LObject *P, int thread_i
       long rt0 = KT_STATS(ctx) ? kt_now_ns() : 0;
 #endif
       if (!skip_redtail)
+      {
+        OpTag _r(thread_id, "redtailBba", P->p);
         P->p = redtailBba(P, pos_it, strat, withT);
+      }
 #ifdef KTHREAD_INSTRUMENT
       if (KT_STATS(ctx)) redtail_accum += kt_now_ns() - rt0;
 #endif
@@ -1185,7 +1526,10 @@ static void process_survivor_lobject(SweepContext *ctx, LObject *P, int thread_i
 #ifdef KTHREAD_INSTRUMENT
     long et0 = KT_STATS(ctx) ? kt_now_ns() : 0;
 #endif
-    enterT(*P, strat);
+    {
+      OpTag _r(thread_id, "enterT", P->p);
+      enterT(*P, strat);
+    }
     audit_T_pLength(ctx, "ps-phase0-post-enterT", thread_id);
 #ifdef KTHREAD_INSTRUMENT
     if (KT_STATS(ctx)) enterT_accum += kt_now_ns() - et0;
@@ -1374,6 +1718,7 @@ static void queue_survivor(SweepContext *ctx, ActivePoly *ap)
 
 static void drain_survivor_queue(SweepContext *ctx, int thread_id)
 {
+  OpTag _drain_tag(thread_id, "drain_survivor_queue");
 #ifdef KTHREAD_INSTRUMENT
   long drain_t0 = KT_STATS(ctx) ? kt_now_ns() : 0;
   long drained_this_call = 0;
@@ -1483,6 +1828,21 @@ void bba_parallel_loop(SweepContext *ctx)
   g_audit_T_enabled.store(getenv("SINGULAR_AUDIT_T") != NULL,
                           std::memory_order_relaxed);
   g_audit_T_checked.store(0, std::memory_order_relaxed);
+  g_audit_hit_count.store(0, std::memory_order_relaxed);
+  g_plen_seq.store(0, std::memory_order_relaxed);
+  g_plen_frozen.store(false, std::memory_order_relaxed);
+  for (int t = 0; t < MAX_AUDIT_THREADS; t++)
+    g_thread_debug[t] = ThreadDebugState{};
+  for (int i = 0; i < PLEN_RING_SIZE; i++)
+    g_plen_ring[i].seq.store(UINT64_MAX, std::memory_order_relaxed);
+  if (g_audit_T_enabled.load(std::memory_order_relaxed) && g_audit_log == NULL)
+  {
+    const char *path = getenv("SINGULAR_AUDIT_LOG");
+    if (path == NULL) path = "/tmp/audit-run/audit-debug.log";
+    g_audit_log = fopen(path, "w");
+    if (g_audit_log != NULL) setvbuf(g_audit_log, NULL, _IONBF, 0);
+    else g_audit_log = stderr;
+  }
 
   ctx->saved_posInT = strat->posInT;
   strat->posInT = posInT_appendEnd;
