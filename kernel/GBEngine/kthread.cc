@@ -2224,7 +2224,13 @@ static void process_survivor_lobject(SweepContext *ctx, LObject *P, int thread_i
     // A peer drainer can enterT in that window, incrementing
     // T.size().  Log atR and our own i_r so we can detect the
     // divergence.
-    int atR_for_pairs = strat->T.size()-1;
+    //
+    // FIX (rr-replay watchpoint, 20Apr2026): use P->i_r (set under
+    // our exclusive lock by enterT at kutil.cc:9092) instead of the
+    // racy strat->T.size()-1.  Watchpoint proof: pair.i_r2=12 but
+    // matching T entry was at T[5] (.i_r=5) — off by 7 = #peer
+    // enterTs in the unlock-shared window.
+    int atR_for_pairs = P->i_r;
     kt_debug_tag("enterpairs:atR_vs_P.i_r",
                  (void*)P->p, atR_for_pairs, P->i_r);
     // ALSO check: does R[atR_for_pairs]->p equal P->p at this moment?
