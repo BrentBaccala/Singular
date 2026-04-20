@@ -1800,11 +1800,11 @@ static void process_survivor_lobject(SweepContext *ctx, LObject *P, int thread_i
     }
     audit_T_pLength(ctx, "ps-phase0-post-enterT", thread_id);
 
-    // L-scan after enterT to detect when inconsistent pairs first
-    // appear.  Direct-to-log on first nonzero (so the event survives
-    // ring-buffer wrap).
+    // L-scan after enterT, under L-lock, to avoid races with
+    // concurrent enterpairs writing to strat->L.
     if (g_debug_ring_enabled.load(std::memory_order_relaxed))
     {
+      kt_L_lock(ctx, thread_id);
       int inconsistent_T = 0, offby1 = 0;
       int first_bad_i_r2 = -1;
       poly first_bad_p2 = NULL;
@@ -1825,13 +1825,14 @@ static void process_survivor_lobject(SweepContext *ctx, LObject *P, int thread_i
           }
         }
       }
+      pthread_mutex_unlock(&ctx->L_lock);
       static std::atomic<int> first_seen{-1};
       if (inconsistent_T > 0 && first_seen.exchange(inconsistent_T) < 0)
       {
         FILE *log = g_audit_log ? g_audit_log : stderr;
         fprintf(log,
-                "\n=== FIRST L-SCAN INCONSISTENCY: at enterT atT=%d, "
-                "|L|=%d, inconsistent_T=%d offby1=%d, "
+                "\n=== FIRST L-SCAN INCONSISTENCY (L-lock held): "
+                "at enterT atT=%d, |L|=%d, inconsistent_T=%d offby1=%d, "
                 "first_bad: p2=%p i_r2=%d (T[%d].p=%p, T[%d].p=%p) ===\n",
                 (int)strat->T.size()-1, total_pairs,
                 inconsistent_T, offby1,
