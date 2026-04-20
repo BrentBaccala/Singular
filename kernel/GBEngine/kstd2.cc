@@ -659,7 +659,14 @@ int kFindDivisibleByInT_ecart(const kStrategy strat, const LObject* L, const int
       if (strat->T[jj].ecart<=ecart)  // good enough
       {
         if (strat->T[jj].pLength<=0)
+        {
+          // Suspect #2: write T[jj].pLength without a lock.  After
+          // the enterT fix (pLength always > 0 at enterT time) this
+          // branch *should* never fire; tag to verify.
+          kt_debug_tag("kFindDivisibleByInT_ecart:pLength", NULL,
+                       jj, (int)strat->T[jj].pLength);
           strat->T[jj].pLength=strat->T[jj].GetpLength();
+        }
         if (j== -2) j=jj; // first found
         else if (strat->T[j].pLength > strat->T[jj].pLength) // jj better then j
           j=jj;

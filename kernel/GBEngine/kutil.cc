@@ -6588,6 +6588,7 @@ TObject* kFindDivisibleByInS_T(kStrategy strat, sBasisSet::const_iterator end, L
         if (p_LmShortDivisibleBy(t->t_p, sit->sev, p, not_sev, r)
         && (ecart== LONG_MAX || ecart >= sit->ecart))
         {
+          kt_debug_tag("kFindInS_T:6591", (void*)t, t->i_r, (int)pLength(t->t_p));
           t->pLength=pLength(t->t_p);
           return t;
         }
@@ -6609,6 +6610,7 @@ TObject* kFindDivisibleByInS_T(kStrategy strat, sBasisSet::const_iterator end, L
           assume(t != NULL && t->t_p != NULL && t->tailRing == r && t->p == sit->p);
           if (p_LmDivisibleBy(t->t_p, p, r))
           {
+            kt_debug_tag("kFindInS_T:6612", (void*)t, t->i_r, (int)pLength(t->t_p));
             t->pLength=pLength(t->t_p);
             return t;
           }
@@ -6629,6 +6631,7 @@ TObject* kFindDivisibleByInS_T(kStrategy strat, sBasisSet::const_iterator end, L
         && (ecart== LONG_MAX || ecart >= sit->ecart)
         && n_DivBy(pGetCoeff(p), pGetCoeff(t->t_p), r->cf))
         {
+          kt_debug_tag("kFindInS_T:6632", (void*)t, t->i_r, (int)pLength(t->t_p));
           t->pLength=pLength(t->t_p);
           return t;
         }
@@ -6651,6 +6654,7 @@ TObject* kFindDivisibleByInS_T(kStrategy strat, sBasisSet::const_iterator end, L
           if (p_LmDivisibleBy(t->t_p, p, r)
           && n_DivBy(pGetCoeff(p), pGetCoeff(t->t_p), r->cf))
           {
+            kt_debug_tag("kFindInS_T:6654", (void*)t, t->i_r, (int)pLength(t->t_p));
             t->pLength=pLength(t->t_p);
             return t;
           }
@@ -6699,6 +6703,13 @@ poly redtail (LObject* L, sBasisSet::const_iterator end, kStrategy strat)
       else
         With = kFindDivisibleByInS_T(strat, end, &Ln, &With_s, e);
       if (With == NULL) break;
+      // Suspect #1 from the static-audit starting list: writes
+      // With->pLength=0 on a pointer returned by
+      // kFindDivisibleByInS_T, which could be a T entry shared with
+      // other threads.  Tag with With->i_r so we can correlate with
+      // a later ksCreateSpoly STALE_l2 event on the same index.
+      kt_debug_tag("redtail:With->pLength=0", (void*)With,
+                   With->i_r, (int)With->pLength);
       With->length=0;
       With->pLength=0;
       strat->redTailChange=TRUE;
