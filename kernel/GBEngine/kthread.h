@@ -389,4 +389,13 @@ void bba_parallel_loop(SweepContext *ctx);
 extern thread_local int kt_debug_tid;
 void kt_debug_tag(const char *op, void *poly, int slot, int arg);
 
+// T-node registry check: if `addr` is a registered T-entry chain
+// node, fires a `site` tag naming the mutation.  Lock-free lookup,
+// safe in hot paths.  Called from pNext-write sites suspected of
+// mutating T entry chains.
+void kt_debug_check_tnode_write(const char *site, void *addr);
+
+// Register a chain node in the T-node set.  Called from enterT.
+void kt_debug_register_tnode(void *addr, int tidx);
+
 #endif /* KTHREAD_H */

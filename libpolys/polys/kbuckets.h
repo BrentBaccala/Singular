@@ -41,6 +41,11 @@ void kBucketInit(kBucket_pt bucket, poly p, int length);
 extern "C" {
 #endif
 extern void (*kbucket_debug_tag)(const char *op, void *lm, int slot, int arg);
+
+// T-node registry check: if addr is a registered T-entry chain node,
+// fires a `site` tag.  Called from pNext-write sites.  NULL when the
+// debug ring is disabled.
+extern void (*kbucket_debug_check_tnode)(const char *site, void *addr);
 #ifdef __cplusplus
 }
 #endif

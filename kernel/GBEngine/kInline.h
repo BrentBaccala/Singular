@@ -609,8 +609,15 @@ KINLINE void sLObject::PrepareRed(BOOLEAN use_bucket)
         poly tp = GetLmTailRing();
         assume((int)l == ::pLength(tp));
         kBucketInit(bucket, pNext(tp), l-1);
+        if (kbucket_debug_check_tnode != NULL)
+          kbucket_debug_check_tnode("PrepareRed:pNext(tp)=NULL", (void*)tp);
         pNext(tp) = NULL;
-        if (p!=NULL) pNext(p) = NULL;
+        if (p!=NULL)
+        {
+          if (kbucket_debug_check_tnode != NULL)
+            kbucket_debug_check_tnode("PrepareRed:pNext(p)=NULL", (void*)p);
+          pNext(p) = NULL;
+        }
         pLength = 0;
       }
     }
@@ -631,11 +638,15 @@ KINLINE void sLObject::SetLmTail(poly lm, poly p_tail, int p_Length, int use_buc
                         (void *)p_tail, -1, p_Length);
     bucket = kBucketCreate(_tailRing);
     kBucketInit(bucket, p_tail, p_Length);
+    if (kbucket_debug_check_tnode != NULL)
+      kbucket_debug_check_tnode("SetLmTail:pNext(lm)=NULL", (void*)lm);
     pNext(lm) = NULL;
     pLength = 0;
   }
   else
   {
+    if (kbucket_debug_check_tnode != NULL)
+      kbucket_debug_check_tnode("SetLmTail:pNext(lm)=p_tail", (void*)lm);
     pNext(lm) = p_tail;
     pLength = p_Length + 1;
   }
@@ -825,8 +836,12 @@ KINLINE long sLObject::pLDeg()
     if (kbucket_debug_tag != NULL)
       kbucket_debug_tag("sLObject::pLDeg:bucket-attach", (void*)tp, -1, 0);
     int i = kBucketCanonicalize(bucket);
+    if (kbucket_debug_check_tnode != NULL)
+      kbucket_debug_check_tnode("pLDeg:pNext(tp)=bucket[i]", (void*)tp);
     pNext(tp) = bucket->buckets[i];
     long ldeg = tailRing->pLDeg(tp, &length, tailRing);
+    if (kbucket_debug_check_tnode != NULL)
+      kbucket_debug_check_tnode("pLDeg:pNext(tp)=NULL", (void*)tp);
     pNext(tp) = NULL;
     if (kbucket_debug_tag != NULL)
       kbucket_debug_tag("sLObject::pLDeg:bucket-detach-done", (void*)tp, -1, 0);
@@ -891,8 +906,12 @@ KINLINE long sLObject::MinComp()
     if (kbucket_debug_tag != NULL)
       kbucket_debug_tag("sLObject::MinComp:bucket-attach", (void*)tp, -1, 0);
     int i = kBucketCanonicalize(bucket);
+    if (kbucket_debug_check_tnode != NULL)
+      kbucket_debug_check_tnode("MinComp:pNext(tp)=bucket[i]", (void*)tp);
     pNext(tp) = bucket->buckets[i];
     long m = p_MinComp(tp, tailRing);
+    if (kbucket_debug_check_tnode != NULL)
+      kbucket_debug_check_tnode("MinComp:pNext(tp)=NULL", (void*)tp);
     pNext(tp) = NULL;
     if (kbucket_debug_tag != NULL)
       kbucket_debug_tag("sLObject::MinComp:bucket-detach-done", (void*)tp, -1, 0);

@@ -8972,6 +8972,16 @@ void enterT(LObject &p, kStrategy strat, int atT)
   // reader path.
   tobject_publish(strat->T[atT]);
 
+  // Register every chain node of this new T entry into the T-node
+  // registry so later pNext-writes that target these addresses fire
+  // a "TNODE:mutation" tag, revealing the permanent-corruption
+  // mutator.  Walk both representations (p in currRing, t_p in
+  // tailRing) since they're independent allocations.
+  for (poly q = strat->T[atT].p; q != NULL; q = pNext(q))
+    kt_debug_register_tnode((void*)q, atT);
+  for (poly q = strat->T[atT].t_p; q != NULL; q = pNext(q))
+    kt_debug_register_tnode((void*)q, atT);
+
   __asm__ __volatile__("" ::: "memory");  // compiler barrier (x86 has strong HW ordering)
   strat->T.setsize(strat->T.size()+1);
   strat->R.setsize(strat->T.size());

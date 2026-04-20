@@ -258,6 +258,84 @@ void kt_debug_tag(const char *op, void *poly, int slot, int arg)
   tag_log(kt_debug_tid, op, poly, slot, arg);
 }
 
+// ---------------------------------------------------------------------
+// T-node registry: records every chain node address that has been
+// enterT'd into a T entry, along with the T index it belongs to.
+// A mutation of any of these addresses' pNext is a bug — T entry
+// chains are supposed to be immutable post-enterT.
+//
+// Implementation: open-addressed hash table with atomic CAS insert
+// and atomic-acquire lookup.  Sized generously; overflow is silent
+// (we'd see missing registrations in the ring, not crashes).
+// ---------------------------------------------------------------------
+#define TNODE_REGISTRY_SIZE (256 * 1024)   // 2 MB, plenty for ~100k T nodes
+struct TNodeSlot { std::atomic<void*> addr; int tidx; };
+static TNodeSlot g_tnode_registry[TNODE_REGISTRY_SIZE];
+
+static inline uint32_t tnode_hash(void *addr)
+{
+  uint64_t h = (uint64_t)(uintptr_t)addr;
+  h ^= h >> 33;
+  h *= 0xff51afd7ed558ccdULL;
+  h ^= h >> 33;
+  return (uint32_t)h & (TNODE_REGISTRY_SIZE - 1);
+}
+
+static void tnode_register(void *addr, int tidx)
+{
+  if (!g_debug_ring_enabled.load(std::memory_order_relaxed)) return;
+  if (addr == NULL) return;
+  uint32_t idx = tnode_hash(addr);
+  for (int probe = 0; probe < 32; probe++)
+  {
+    void *expected = NULL;
+    if (g_tnode_registry[idx].addr.compare_exchange_strong(
+          expected, addr, std::memory_order_acq_rel))
+    {
+      g_tnode_registry[idx].tidx = tidx;
+      return;
+    }
+    if (expected == addr) return;  // already registered
+    idx = (idx + 1) & (TNODE_REGISTRY_SIZE - 1);
+  }
+  // Table is packed — silently drop; we'll lose this node but not crash.
+}
+
+// Returns the T index if addr is a registered T-entry chain node,
+// else -1.  Lock-free read.
+static int tnode_lookup(void *addr)
+{
+  if (addr == NULL) return -1;
+  uint32_t idx = tnode_hash(addr);
+  for (int probe = 0; probe < 32; probe++)
+  {
+    void *v = g_tnode_registry[idx].addr.load(std::memory_order_acquire);
+    if (v == addr) return g_tnode_registry[idx].tidx;
+    if (v == NULL) return -1;
+    idx = (idx + 1) & (TNODE_REGISTRY_SIZE - 1);
+  }
+  return -1;
+}
+
+// Public hook called from hot-path pNext-write sites (kbuckets.cc etc.)
+// to detect a mutation of a registered T chain node.  Fires a TAG
+// event and doesn't abort — the subsequent STALE_l2 probe will fire
+// normally and we can grep the ring for the `TNODE:mutation` tags.
+void kt_debug_check_tnode_write(const char *site, void *addr)
+{
+  if (!g_debug_ring_enabled.load(std::memory_order_relaxed)) return;
+  int tidx = tnode_lookup(addr);
+  if (tidx < 0) return;
+  tag_log(kt_debug_tid, site, addr, tidx, /*arg=*/-1);
+}
+
+// Register a chain node in the T-node set.  Called from enterT for
+// every node of a freshly-published T entry's chain.
+void kt_debug_register_tnode(void *addr, int tidx)
+{
+  tnode_register(addr, tidx);
+}
+
 // RAII tag helper: saves the previous tag on construction, restores on
 // destruction, so nested tags work correctly without the tag silently
 // becoming stale when the inner scope returns.
@@ -608,6 +686,7 @@ static void dump_ring_generic(const char *reason)
 extern "C" {
 extern void (*dErrorBreak_hook)(const char *reason);
 extern void (*kbucket_debug_tag)(const char *op, void *lm, int slot, int arg);
+extern void (*kbucket_debug_check_tnode)(const char *site, void *addr);
 }
 
 // Adapter with the right signature for the kbuckets hook.  The
@@ -1634,7 +1713,10 @@ static void process_survivor_lobject(SweepContext *ctx, LObject *P, int thread_i
     long et0 = KT_STATS(ctx) ? kt_now_ns() : 0;
 #endif
     {
-      OpTag _r(thread_id, "enterT", P->p);
+      // Tag with the target T index (T.size() BEFORE enterT increments
+      // it — that's the atT for appendEnd).  Lets us correlate pair
+      // construction with the T slot it will occupy.
+      OpTag _r(thread_id, "enterT", P->p, strat->T.size(), 0);
       enterT(*P, strat);
     }
     audit_T_pLength(ctx, "ps-phase0-post-enterT", thread_id);
@@ -1949,6 +2031,8 @@ void bba_parallel_loop(SweepContext *ctx)
     g_thread_debug[t] = ThreadDebugState{};
   for (int i = 0; i < PLEN_RING_SIZE; i++)
     g_plen_ring[i].seq.store(UINT64_MAX, std::memory_order_relaxed);
+  for (int i = 0; i < TNODE_REGISTRY_SIZE; i++)
+    g_tnode_registry[i].addr.store(NULL, std::memory_order_relaxed);
   if (want_ring && g_audit_log == NULL)
   {
     const char *path = getenv("SINGULAR_AUDIT_LOG");
@@ -1966,6 +2050,7 @@ void bba_parallel_loop(SweepContext *ctx)
   {
     dErrorBreak_hook = dump_ring_generic;
     kbucket_debug_tag = kbucket_debug_tag_adapter;
+    kbucket_debug_check_tnode = kt_debug_check_tnode_write;
   }
 
   ctx->saved_posInT = strat->posInT;

@@ -265,6 +265,8 @@ inline void kBucketMergeLm(kBucket_pt bucket)
 #endif
 #ifndef USE_COEF_BUCKETS
     MULTIPLY_BUCKET(bucket,i);
+    if (kbucket_debug_check_tnode != NULL)
+      kbucket_debug_check_tnode("kBucketMergeLm:pNext(lm)=bucket[i]", (void*)lm);
     pNext(lm) = bucket->buckets[i];
     bucket->buckets[i] = lm;
     bucket->buckets_length[i]++;
@@ -339,6 +341,7 @@ BOOLEAN kBucketIsCleared(kBucket_pt bucket)
 // failure.
 extern "C" void (*kbucket_debug_tag)(const char *op, void *lm,
                                      int slot, int arg) = NULL;
+extern "C" void (*kbucket_debug_check_tnode)(const char *site, void *addr) = NULL;
 
 void kBucketInit(kBucket_pt bucket, poly lm, int length)
 {
@@ -371,6 +374,8 @@ void kBucketInit(kBucket_pt bucket, poly lm, int length)
   {
     unsigned int i = pLogLength(length-1);
     bucket->buckets[i] = pNext(lm);
+    if (kbucket_debug_check_tnode != NULL)
+      kbucket_debug_check_tnode("kBucketInit:pNext(lm)=NULL", (void*)lm);
     pNext(lm) = NULL;
     bucket->buckets_length[i] = length-1;
     bucket->buckets_used = i;
@@ -495,6 +500,8 @@ void kBucketClear(kBucket_pt bucket, poly *p, int *length)
 void kBucketSetLm(kBucket_pt bucket, poly lm)
 {
   kBucketMergeLm(bucket);
+  if (kbucket_debug_check_tnode != NULL)
+    kbucket_debug_check_tnode("kBucketSetLm:pNext(lm)=NULL", (void*)lm);
   pNext(lm) = NULL;
   bucket->buckets[0] = lm;
   bucket->buckets_length[0] = 1;

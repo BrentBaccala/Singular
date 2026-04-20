@@ -1319,6 +1319,25 @@ void ksCreateSpoly(LObject* Pair,   poly spNoether,
       kt_debug_tag("ksCreateSpoly:STALE_l2_rereads",
                    (void*)p2, stored_now,
                    actual_l2_b * 1000 + fresh_pNext);
+      // Sanity-check the registry: the head p2 AND every node of its
+      // chain should be registered at enterT time.  Probe them here
+      // so the ring tells us if registration is working.
+      kt_debug_check_tnode_write("STALE_l2:probe(p2)", (void*)p2);
+      kt_debug_check_tnode_write("STALE_l2:probe(pNext(p2))", (void*)pNext(p2));
+      // Direct test: does Pair->p2 equal T[i_r2].p?  If not, Pair's
+      // (p2, i_r2) pair is INCONSISTENT and the bug is in pair
+      // construction, not chain mutation.
+      TObject *Tp2 = (*R)[Pair->i_r2];
+      if (Tp2 != NULL && Tp2->p != p2)
+      {
+        kt_debug_tag("STALE_l2:Pair_mismatch_T[i_r2].p",
+                     (void*)Tp2->p, Pair->i_r2, Tp2->i_r);
+      }
+      else if (Tp2 != NULL && Tp2->p == p2)
+      {
+        kt_debug_tag("STALE_l2:Pair_consistent_T[i_r2].p",
+                     (void*)Tp2->p, Pair->i_r2, Tp2->i_r);
+      }
       dReportError("ksCreateSpoly: T[%d].pLength-1=%d, pLength(a2_1)=%d, "
                    "pLength(a2_2)=%d, pLength(pNext(p2))=%d, stored_now=%d",
                    Pair->i_r2, l2, actual_l2_a, actual_l2_b,
