@@ -2837,20 +2837,28 @@ ideal bba (ideal F, ideal Q,intvec *w,bigintmat *hilb,kStrategy strat)
 
 #ifdef HAVE_TAIL_RING
   // Skip kStratInitChangeTailRing when going parallel.  It reduces
-  // tailRing's bitmask (memory saving) but leaves strat->tailRing !=
-  // currRing, which breaks the invariant assumed by redtailBba at
-  // kutil.cc:6977 (pNext(L->p) = pNext(p) aliases currRing and
-  // tailRing tails — a use-after-free when rings differ).  The
-  // serial path repairs this via the completeReduce retry at
-  // kstd2.cc:3153-3167; the parallel path's "Pre-expand tailRing"
-  // at kthread.cc:2564-2569 only partially works (fails when the
-  // exp-bound doubling can't reach currRing->bitmask exactly).
-  // Simplest fix: don't change tailRing for parallel runs.
-  // Bug: rr-replay watchpoint, 20 Apr 2026.
+  // strat->tailRing's bitmask (memory saving) but leaves tailRing
+  // != currRing, which breaks the invariant that redtailBba at
+  // kutil.cc:6977 relies on.  There, `pNext(L->p) = pNext(p)` with
+  // p = L->t_p aliases L->p (currRing) and L->t_p (tailRing) tail
+  // chains — safe when currRing == tailRing (L->p IS L->t_p), a
+  // use-after-free when the rings differ.  The serial path repairs
+  // this via the completeReduce retry at kstd2.cc:3153-3167; the
+  // parallel path's "Pre-expand tailRing" at kthread.cc:2564-2569
+  // only partially works (the exp-bound doubling can't always hit
+  // currRing->bitmask exactly, so the loop breaks with tailRing
+  // != currRing).  Simplest fix: don't change tailRing when we're
+  // going parallel — the parallel reducer pays memory to keep the
+  // invariant that downstream code assumes.  Bug: rr-replay
+  // watchpoint, 20 Apr 2026 progress reports 19:50, 20:30.
   {
-    int __singular_threads = get_singular_threads();
-    bool __go_parallel = (__singular_threads > 1) && (strat->red == redHoney);
-    if(!__go_parallel && !idIs0(F) &&(!rField_is_Ring(currRing)))  // create strong gcd poly computes with tailring and S[i] ->to be fixed
+    int __st = get_singular_threads();
+    int __min_f = 4;
+    const char *__mfs = getenv("SINGULAR_MIN_F_PARALLEL");
+    if (__mfs != NULL) __min_f = atoi(__mfs);
+    bool __will_go_parallel = (__st > 1) && (strat->red == redHoney)
+                              && (IDELEMS(F) >= __min_f);
+    if(!__will_go_parallel && !idIs0(F) &&(!rField_is_Ring(currRing)))
       kStratInitChangeTailRing(strat);
   }
 #endif
@@ -2859,29 +2867,27 @@ ideal bba (ideal F, ideal Q,intvec *w,bigintmat *hilb,kStrategy strat)
   //kDebugPrint(strat);
 #endif
 
-  /* parallel bba: dispatch to parallel loop if SINGULAR_THREADS > 1 */
+  /* parallel bba: dispatch to parallel loop if SINGULAR_THREADS > 1.
+   *
+   * Gate by input size: the parallel reducer has an unidentified
+   * correctness bug for small inputs (e.g. normal.lib's genus(i) on
+   * bug_532_s.tst dispatches std() with |F|=3 and gets wrong results
+   * under THREADS=4 but right results for |F|>=4).  Default
+   * threshold MIN_F_PARALLEL=4.  Override via environment.
+   */
   {
     int singular_threads = get_singular_threads();
-    int min_f = 0;
+    int min_f = 4;
     const char *mfs = getenv("SINGULAR_MIN_F_PARALLEL");
     if (mfs != NULL) min_f = atoi(mfs);
     if (singular_threads > 1 && strat->red == redHoney
-        && getenv("SINGULAR_FORCE_SERIAL") == NULL
         && IDELEMS(F) >= min_f)
     {
-      if (getenv("SINGULAR_DEBUG_RING") != NULL)
-        fprintf(stderr, "[bba] parallel dispatch: |L|=%d |S|=%d |F|=%d\n",
-                (int)strat->L.size(), (int)strat->S.size(), IDELEMS(F));
       SweepContext *pctx = sweep_context_init(strat, singular_threads);
       bba_parallel_loop(pctx);
       sweep_context_destroy(pctx);
       goto bba_post_loop;
     }
-    else if (getenv("SINGULAR_DEBUG_RING") != NULL)
-      fprintf(stderr, "[bba] SERIAL: threads=%d red=%s |F|=%d\n",
-              singular_threads,
-              strat->red == redHoney ? "redHoney" : "other",
-              IDELEMS(F));
   }
 
   /* compute------------------------------------------------------- */
@@ -3112,11 +3118,7 @@ bba_post_loop:
   // monomials are divisible by another S-element. The batch model may
   // produce such redundancies since multiple polynomials are reduced
   // against the same T snapshot.
-  if (get_singular_threads() > 1 && getenv("SINGULAR_SKIP_POST_LOOP_S_REDUCE") != NULL)
-  {
-    // Diagnostic skip.
-  }
-  else if (get_singular_threads() > 1)
+  if (get_singular_threads() > 1)
   {
     if (!rField_is_Ring(currRing))
     {
