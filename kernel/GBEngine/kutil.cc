@@ -2399,12 +2399,23 @@ void enterOnePairNormal (const SElement &si,poly p,int ecart, int isFromQ,kStrat
       Lp.i_r1 = si.s_2_r;
       Lp.i_r2 = atR;
       // Creation-time CONSISTENCY check.
+      // atR is an R-SLOT INDEX; the authoritative check is R[atR]->p.
+      // (Historically this compared against T[atR].p, but T-array
+      // positions shift under posInT-driven sorted insertion while
+      // R slots are stable.  See progress 20Apr2026-1030.md.)
       if (atR < strat->T.size())
       {
+        TObject *r_entry = strat->R[atR];
+        poly R_atR_p = (r_entry != NULL) ? r_entry->p : NULL;
         poly T_atR_p = strat->T[atR].p;
-        if (T_atR_p != p)
-          kt_debug_tag("enterOnePair:T[atR].p!=p (BORN_INCONSISTENT)",
-                       (void*)p, atR, si.s_2_r);
+        if (R_atR_p != NULL && R_atR_p != p)
+          kt_debug_tag(
+            "enterOnePair:R[atR]->p!=p (BORN_R_INCONSISTENT, REAL)",
+            (void*)p, atR, si.s_2_r);
+        if (T_atR_p != p && R_atR_p == p)
+          kt_debug_tag(
+            "enterOnePair:T[atR]!=p (cosmetic; R consistent)",
+            (void*)p, atR, si.s_2_r);
       }
       else
       {
@@ -2647,12 +2658,23 @@ static void enterOnePairLift (const SElement &si,poly p,int ecart, int isFromQ,k
       Lp.i_r1 = si.s_2_r;
       Lp.i_r2 = atR;
       // Creation-time CONSISTENCY check.
+      // atR is an R-SLOT INDEX; the authoritative check is R[atR]->p.
+      // (Historically this compared against T[atR].p, but T-array
+      // positions shift under posInT-driven sorted insertion while
+      // R slots are stable.  See progress 20Apr2026-1030.md.)
       if (atR < strat->T.size())
       {
+        TObject *r_entry = strat->R[atR];
+        poly R_atR_p = (r_entry != NULL) ? r_entry->p : NULL;
         poly T_atR_p = strat->T[atR].p;
-        if (T_atR_p != p)
-          kt_debug_tag("enterOnePair:T[atR].p!=p (BORN_INCONSISTENT)",
-                       (void*)p, atR, si.s_2_r);
+        if (R_atR_p != NULL && R_atR_p != p)
+          kt_debug_tag(
+            "enterOnePair:R[atR]->p!=p (BORN_R_INCONSISTENT, REAL)",
+            (void*)p, atR, si.s_2_r);
+        if (T_atR_p != p && R_atR_p == p)
+          kt_debug_tag(
+            "enterOnePair:T[atR]!=p (cosmetic; R consistent)",
+            (void*)p, atR, si.s_2_r);
       }
       else
       {
@@ -2929,12 +2951,23 @@ static void enterOnePairSig (const SElement &si, sBasisSet::const_iterator si_it
       Lp.i_r1 = si.s_2_r;
       Lp.i_r2 = atR;
       // Creation-time CONSISTENCY check.
+      // atR is an R-SLOT INDEX; the authoritative check is R[atR]->p.
+      // (Historically this compared against T[atR].p, but T-array
+      // positions shift under posInT-driven sorted insertion while
+      // R slots are stable.  See progress 20Apr2026-1030.md.)
       if (atR < strat->T.size())
       {
+        TObject *r_entry = strat->R[atR];
+        poly R_atR_p = (r_entry != NULL) ? r_entry->p : NULL;
         poly T_atR_p = strat->T[atR].p;
-        if (T_atR_p != p)
-          kt_debug_tag("enterOnePair:T[atR].p!=p (BORN_INCONSISTENT)",
-                       (void*)p, atR, si.s_2_r);
+        if (R_atR_p != NULL && R_atR_p != p)
+          kt_debug_tag(
+            "enterOnePair:R[atR]->p!=p (BORN_R_INCONSISTENT, REAL)",
+            (void*)p, atR, si.s_2_r);
+        if (T_atR_p != p && R_atR_p == p)
+          kt_debug_tag(
+            "enterOnePair:T[atR]!=p (cosmetic; R consistent)",
+            (void*)p, atR, si.s_2_r);
       }
       else
       {
@@ -3329,12 +3362,23 @@ static void enterOnePairSigRing (const SElement &si, poly p, poly pSig, int, int
       Lp.i_r1 = si.s_2_r;
       Lp.i_r2 = atR;
       // Creation-time CONSISTENCY check.
+      // atR is an R-SLOT INDEX; the authoritative check is R[atR]->p.
+      // (Historically this compared against T[atR].p, but T-array
+      // positions shift under posInT-driven sorted insertion while
+      // R slots are stable.  See progress 20Apr2026-1030.md.)
       if (atR < strat->T.size())
       {
+        TObject *r_entry = strat->R[atR];
+        poly R_atR_p = (r_entry != NULL) ? r_entry->p : NULL;
         poly T_atR_p = strat->T[atR].p;
-        if (T_atR_p != p)
-          kt_debug_tag("enterOnePair:T[atR].p!=p (BORN_INCONSISTENT)",
-                       (void*)p, atR, si.s_2_r);
+        if (R_atR_p != NULL && R_atR_p != p)
+          kt_debug_tag(
+            "enterOnePair:R[atR]->p!=p (BORN_R_INCONSISTENT, REAL)",
+            (void*)p, atR, si.s_2_r);
+        if (T_atR_p != p && R_atR_p == p)
+          kt_debug_tag(
+            "enterOnePair:T[atR]!=p (cosmetic; R consistent)",
+            (void*)p, atR, si.s_2_r);
       }
       else
       {

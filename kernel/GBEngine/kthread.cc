@@ -970,42 +970,49 @@ static BOOLEAN pop_and_prepare(SweepContext *ctx, ActivePoly *ap,
     ap->P = strat->L.top();
     strat->L.pop();
 
-    // pop-time sanity check.  Check BOTH (p1, i_r1) and (p2, i_r2).
-    // If the pair is inconsistent, dump neighborhood for context.
+    // pop-time sanity check.  pair.i_r{1,2} is an R-SLOT INDEX (stable
+    // across T shifts — enterT updates R via the persistent .i_r
+    // field).  The authoritative comparison is R[ir]->p.  T[ir].p
+    // also reported as a secondary observation to spot T-shift
+    // activity, but a mismatch there alone is NOT a bug.
     auto check_side = [&](const char *which, poly pp, int ir) {
       if (ir < 0 || ir >= strat->T.size()) return false;
+      TObject *r_entry = (ir < (int)strat->T.size()) ? strat->R[ir] : NULL;
+      poly exp_r = (r_entry != NULL) ? r_entry->p : NULL;
       poly exp_t = strat->T[ir].p;
-      if (pp != NULL && pp != exp_t)
+      bool r_mismatch = (pp != NULL && exp_r != NULL && pp != exp_r);
+      bool t_mismatch = (pp != NULL && pp != exp_t);
+      if (r_mismatch || t_mismatch)
       {
-        // Compare against the enterT-time snapshot of T[ir].p.  If
-        // the snapshot equals pp, then T[ir].p was OVERWRITTEN
-        // post-enterT (and the pair's p2 still holds the original
-        // value).  If the snapshot equals T[ir].p (current), then
-        // T[ir].p hasn't changed since enterT — meaning the pair's
-        // fields were wrong from creation or got rewritten.
         poly snap = (poly)kt_debug_lookup_T_head(ir);
         FILE *log = g_audit_log ? g_audit_log : stderr;
         fprintf(log,
-                "\n=== POP INCONSISTENT: %s=%p i_r=%d T[%d].p=%p  "
-                "snap[ir]=%p  T[%d-1].p=%p  T[%d+1].p=%p  "
-                "match_prev=%d match_next=%d  snap_eq_pp=%d  "
+                "\n=== POP CHECK (%s): pp=%p i_r=%d  "
+                "R[ir]->p=%p (mismatch=%d, REAL BUG if 1)  "
+                "T[ir].p=%p (mismatch=%d, cosmetic from T-shift)  "
+                "snap[ir]=%p  T[ir-1].p=%p T[ir+1].p=%p  "
+                "match_prev=%d match_next=%d  snap_eq_pp=%d "
                 "snap_eq_tp=%d ===\n",
-                which, (void*)pp, ir, ir, (void*)exp_t, (void*)snap,
-                ir, ir > 0 ? (void*)strat->T[ir-1].p : NULL,
-                ir, ir+1 < strat->T.size() ? (void*)strat->T[ir+1].p : NULL,
+                which, (void*)pp, ir,
+                (void*)exp_r, r_mismatch ? 1 : 0,
+                (void*)exp_t, t_mismatch ? 1 : 0,
+                (void*)snap,
+                ir > 0 ? (void*)strat->T[ir-1].p : NULL,
+                ir+1 < (int)strat->T.size() ? (void*)strat->T[ir+1].p : NULL,
                 (ir > 0 && pp == strat->T[ir-1].p) ? 1 : 0,
-                (ir+1 < strat->T.size() && pp == strat->T[ir+1].p) ? 1 : 0,
+                (ir+1 < (int)strat->T.size() && pp == strat->T[ir+1].p) ? 1 : 0,
                 snap == pp ? 1 : 0,
                 snap == exp_t ? 1 : 0);
         fflush(log);
-        return true;
       }
-      return false;
+      // Only R-mismatch is treated as a real bug for gating
+      // downstream tags.
+      return r_mismatch;
     };
     bool p2_bad = check_side("p2", ap->P.p2, ap->P.i_r2);
     bool p1_bad = check_side("p1", ap->P.p1, ap->P.i_r1);
     if (p2_bad || p1_bad)
-      kt_debug_tag("pop:Pair_inconsistent",
+      kt_debug_tag("pop:Pair_R_INCONSISTENT",
                    (void*)ap->P.p2, ap->P.i_r2,
                    (p1_bad ? 1 : 0) | (p2_bad ? 2 : 0));
 
@@ -1857,25 +1864,28 @@ static void process_survivor_lobject(SweepContext *ctx, LObject *P, int thread_i
 
     // L-scan after enterT, under L-lock, to avoid races with
     // concurrent enterpairs writing to strat->L.
+    //
+    // pair.i_r2 is an R-SLOT INDEX.  Primary check is R[i_r2]->p.
+    // T-array lookup is reported as a secondary, COSMETIC observation
+    // (off-by-one on T side is normal when posInT shifted T entries).
     if (g_debug_ring_enabled.load(std::memory_order_relaxed))
     {
       kt_L_lock(ctx, thread_id);
-      int inconsistent_T = 0, offby1 = 0;
-      int fp_mismatches = 0, fp_matches_on_bad = 0;
-      int first_bad_i_r2 = -1;
-      poly first_bad_p2 = NULL;
-      unsigned long first_bad_fp_stamped = 0, first_bad_fp_now = 0;
-      poly first_bad_p1 = NULL;
-      int first_bad_i_r1 = -1;
+      int inconsistent_R = 0;   // REAL bug: R[i_r2]->p != pair.p2
+      int inconsistent_T = 0;   // cosmetic: T[i_r2].p != pair.p2
+      int offby1_T = 0;         // cosmetic: T[i_r2-1].p == pair.p2
+      int fp_mismatches = 0;
+      int first_bad_r_i_r2 = -1;
+      poly first_bad_r_p2 = NULL;
+      poly first_bad_r_r_p = NULL;
       int total_pairs = 0;
       for (auto it = strat->L.begin(); it != strat->L.end(); ++it)
       {
         total_pairs++;
-        if (it->i_r2 < 0 || it->i_r2 >= strat->T.size()) continue;
+        if (it->i_r2 < 0 || it->i_r2 >= (int)strat->T.size()) continue;
         poly t_p = strat->T[it->i_r2].p;
-        // Fingerprint check applies to every pair regardless of
-        // consistency — if ANY pair's fp no longer matches, we've
-        // caught an in-flight mutation.
+        TObject *r_entry = strat->R[it->i_r2];
+        poly r_p = (r_entry != NULL) ? r_entry->p : NULL;
         if (it->dbg_fp != 0)
         {
           unsigned long now_fp = kt_debug_pair_fp((void*)it->p1,
@@ -1883,60 +1893,47 @@ static void process_survivor_lobject(SweepContext *ctx, LObject *P, int thread_i
                                                   it->i_r1, it->i_r2);
           if (now_fp != it->dbg_fp) fp_mismatches++;
         }
+        if (it->p2 != NULL && r_p != NULL && it->p2 != r_p)
+        {
+          inconsistent_R++;
+          if (first_bad_r_i_r2 < 0)
+          {
+            first_bad_r_i_r2 = it->i_r2;
+            first_bad_r_p2 = it->p2;
+            first_bad_r_r_p = r_p;
+          }
+        }
         if (it->p2 != NULL && it->p2 != t_p)
         {
           inconsistent_T++;
           if (it->i_r2 > 0 && it->p2 == strat->T[it->i_r2 - 1].p)
-            offby1++;
-          // Among inconsistent pairs, count fp-still-matching ones.
-          // If all inconsistent pairs have fp match, the four fields
-          // were preserved as a set — bug is not direct field mutation.
-          if (it->dbg_fp != 0)
-          {
-            unsigned long now_fp = kt_debug_pair_fp((void*)it->p1,
-                                                    (void*)it->p2,
-                                                    it->i_r1, it->i_r2);
-            if (now_fp == it->dbg_fp) fp_matches_on_bad++;
-          }
-          if (first_bad_i_r2 < 0) {
-            first_bad_i_r2 = it->i_r2;
-            first_bad_p2 = it->p2;
-            first_bad_p1 = it->p1;
-            first_bad_i_r1 = it->i_r1;
-            first_bad_fp_stamped = it->dbg_fp;
-            first_bad_fp_now = kt_debug_pair_fp((void*)it->p1,
-                                                (void*)it->p2,
-                                                it->i_r1, it->i_r2);
-          }
+            offby1_T++;
         }
       }
       pthread_mutex_unlock(&ctx->L_lock);
-      static std::atomic<int> first_seen{-1};
-      if (inconsistent_T > 0 && first_seen.exchange(inconsistent_T) < 0)
+      // Fire a distinct first-occurrence log line for REAL bugs
+      // (R-inconsistency) versus cosmetic T-shift observations.
+      static std::atomic<int> first_R_seen{-1};
+      if (inconsistent_R > 0 && first_R_seen.exchange(inconsistent_R) < 0)
       {
         FILE *log = g_audit_log ? g_audit_log : stderr;
         fprintf(log,
-                "\n=== FIRST L-SCAN INCONSISTENCY (L-lock held): "
-                "at enterT atT=%d, |L|=%d, inconsistent_T=%d offby1=%d, "
-                "fp_mismatches=%d fp_matches_on_bad=%d, "
-                "first_bad: p1=%p i_r1=%d p2=%p i_r2=%d "
-                "(T[%d].p=%p, T[%d].p=%p) "
-                "fp_stamped=%016lx fp_now=%016lx ===\n",
+                "\n=== FIRST L-SCAN R-INCONSISTENCY (REAL BUG, "
+                "L-lock held): at enterT atT=%d, |L|=%d, "
+                "inconsistent_R=%d  inconsistent_T=%d (cosmetic) "
+                "offby1_T=%d (cosmetic) fp_mismatches=%d, "
+                "first_bad: i_r2=%d pair.p2=%p R[i_r2]->p=%p ===\n",
                 (int)strat->T.size()-1, total_pairs,
-                inconsistent_T, offby1,
-                fp_mismatches, fp_matches_on_bad,
-                (void*)first_bad_p1, first_bad_i_r1,
-                (void*)first_bad_p2, first_bad_i_r2,
-                first_bad_i_r2, (void*)strat->T[first_bad_i_r2].p,
-                first_bad_i_r2-1,
-                first_bad_i_r2 > 0 ? (void*)strat->T[first_bad_i_r2-1].p : NULL,
-                first_bad_fp_stamped, first_bad_fp_now);
+                inconsistent_R, inconsistent_T, offby1_T, fp_mismatches,
+                first_bad_r_i_r2, (void*)first_bad_r_p2,
+                (void*)first_bad_r_r_p);
         fflush(log);
       }
-      kt_debug_tag("L-scan:after-enterT", NULL, inconsistent_T, offby1);
+      kt_debug_tag("L-scan:after-enterT", NULL, inconsistent_R,
+                   inconsistent_T);
       if (fp_mismatches > 0)
         kt_debug_tag("L-scan:fp_MISMATCH", NULL,
-                     fp_mismatches, inconsistent_T);
+                     fp_mismatches, inconsistent_R);
     }
 #ifdef KTHREAD_INSTRUMENT
     if (KT_STATS(ctx)) enterT_accum += kt_now_ns() - et0;
@@ -2026,15 +2023,20 @@ static void process_survivor_lobject(SweepContext *ctx, LObject *P, int thread_i
     int atR_for_pairs = strat->T.size()-1;
     kt_debug_tag("enterpairs:atR_vs_P.i_r",
                  (void*)P->p, atR_for_pairs, P->i_r);
-    // ALSO check: does T[atR_for_pairs].p equal P->p at this moment?
-    // Pair construction will set Lp.p2 = P->p and Lp.i_r2 = atR.
-    // If T[atR].p != P->p, pair is constructed inconsistent FROM THE
-    // START.  This captures the race between our enterT setting
-    // T[P->i_r] and a peer enterT adding T[atR] > P->i_r.
+    // ALSO check: does R[atR_for_pairs]->p equal P->p at this moment?
+    // atR is an R-slot index; T-based check is cosmetic (T shifts).
+    TObject *r_entry = (atR_for_pairs >= 0 && atR_for_pairs < (int)strat->T.size())
+                       ? strat->R[atR_for_pairs] : NULL;
+    poly R_atR_p = (r_entry != NULL) ? r_entry->p : NULL;
     poly T_atR_p = strat->T[atR_for_pairs].p;
-    if (T_atR_p != P->p)
+    if (R_atR_p != NULL && R_atR_p != P->p)
     {
-      kt_debug_tag("enterpairs:T[atR].p!=P->p",
+      kt_debug_tag("enterpairs:R[atR]->p!=P->p (REAL)",
+                   (void*)P->p, atR_for_pairs, P->i_r);
+    }
+    if (T_atR_p != P->p && R_atR_p == P->p)
+    {
+      kt_debug_tag("enterpairs:T[atR]!=P->p (cosmetic)",
                    (void*)P->p, atR_for_pairs, P->i_r);
     }
     if (rField_is_Ring(currRing))
@@ -2303,6 +2305,7 @@ void bba_parallel_loop(SweepContext *ctx)
   if (want_ring)
   {
     int inconsistent_T = 0, inconsistent_R = 0, offby1 = 0, checked = 0;
+    int r_reports = 0;
     FILE *log = g_audit_log ? g_audit_log : stderr;
     fprintf(log, "\n=== STARTUP L-scan: T.size=%d, L.size=%d ===\n",
             (int)strat->T.size(), (int)strat->L.size());
@@ -2312,29 +2315,34 @@ void bba_parallel_loop(SweepContext *ctx)
       if (it->i_r2 < 0 || it->i_r2 >= strat->T.size()) continue;
       poly t_p = strat->T[it->i_r2].p;
       poly r_p = (strat->R[it->i_r2] != NULL) ? strat->R[it->i_r2]->p : NULL;
-      if (it->p2 != NULL && it->p2 != t_p)
+      bool t_mismatch = (it->p2 != NULL && it->p2 != t_p);
+      bool r_mismatch = (it->p2 != NULL && r_p != NULL && it->p2 != r_p);
+      if (t_mismatch) inconsistent_T++;
+      if (r_mismatch) inconsistent_R++;
+      if (t_mismatch && it->i_r2 > 0
+          && it->p2 == strat->T[it->i_r2 - 1].p)
+        offby1++;
+      // Print per-pair detail only for R-mismatch (REAL BUG).  T-only
+      // mismatches are cosmetic (posInT shifted T after pair creation;
+      // pair.i_r2 is an R-slot index, stable across shifts).
+      if (r_mismatch && r_reports < 20)
       {
-        inconsistent_T++;
-        bool is_offby1 = (it->i_r2 > 0
-                          && it->p2 == strat->T[it->i_r2 - 1].p);
-        if (is_offby1) offby1++;
-        if (inconsistent_T <= 20)
-          fprintf(log,
-                  "  pair L[?]: p2=%p i_r2=%d  T[i_r2].p=%p  "
-                  "R[i_r2]->p=%p  %s\n",
-                  (void*)it->p2, it->i_r2, (void*)t_p, (void*)r_p,
-                  is_offby1 ? "(OFF_BY_ONE: p2 == T[i_r2-1].p)" : "");
+        fprintf(log,
+                "  [REAL BUG] pair L[?]: p2=%p i_r2=%d  "
+                "R[i_r2]->p=%p  T[i_r2].p=%p\n",
+                (void*)it->p2, it->i_r2, (void*)r_p, (void*)t_p);
+        r_reports++;
       }
-      if (it->p2 != NULL && it->p2 != r_p) inconsistent_R++;
     }
     fprintf(log,
-            "STARTUP L-scan: checked=%d inconsistent_T=%d "
-            "inconsistent_R=%d offby1=%d\n\n",
-            checked, inconsistent_T, inconsistent_R, offby1);
+            "STARTUP L-scan: checked=%d  "
+            "inconsistent_R=%d (REAL)  "
+            "inconsistent_T=%d (cosmetic)  "
+            "offby1_T=%d (cosmetic)\n\n",
+            checked, inconsistent_R, inconsistent_T, offby1);
     fflush(log);
-    // also tag for consistency with other instrumentation
     kt_debug_tag("STARTUP:L-scan-complete",
-                 NULL, checked, inconsistent_T);
+                 NULL, checked, inconsistent_R);
   }
 
   ctx->saved_posInT = strat->posInT;
