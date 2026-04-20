@@ -1332,11 +1332,18 @@ void ksCreateSpoly(LObject* Pair,   poly spNoether,
       {
         kt_debug_tag("STALE_l2:Pair_mismatch_T[i_r2].p",
                      (void*)Tp2->p, Pair->i_r2, Tp2->i_r);
-      }
-      else if (Tp2 != NULL && Tp2->p == p2)
-      {
-        kt_debug_tag("STALE_l2:Pair_consistent_T[i_r2].p",
-                     (void*)Tp2->p, Pair->i_r2, Tp2->i_r);
+        // Probe BOTH: is Tp2->p registered, and for which T index?
+        // Is Pair->p2 (which should be T[i_r2].p) registered, and
+        // for which?
+        kt_debug_check_tnode_write("STALE_l2:probe(T[i_r2].p)", (void*)Tp2->p);
+        // Also: check if p2 is actually T[i_r2 - 1].p or T[i_r2 + 1].p
+        if (Pair->i_r2 > 0)
+        {
+          TObject *Tp_prev = (*R)[Pair->i_r2 - 1];
+          if (Tp_prev != NULL)
+            kt_debug_tag("STALE_l2:T[i_r2-1].p",
+                         (void*)Tp_prev->p, Pair->i_r2 - 1, 0);
+        }
       }
       dReportError("ksCreateSpoly: T[%d].pLength-1=%d, pLength(a2_1)=%d, "
                    "pLength(a2_2)=%d, pLength(pNext(p2))=%d, stored_now=%d",

@@ -245,6 +245,7 @@ static ThreadDebugState g_thread_debug[MAX_AUDIT_THREADS];
 
 static inline void tag_log(int tid, const char *op, void *poly,
                            int slot, int arg);  // forward decl
+static void dump_ring_generic(const char *reason);  // forward decl
 
 // Thread-local tid used by the kt_debug_tag() breadcrumb API (kthread.h)
 // so callers in other translation units (e.g. kspoly.cc) don't have to
@@ -330,9 +331,30 @@ void kt_debug_check_tnode_write(const char *site, void *addr)
 }
 
 // Register a chain node in the T-node set.  Called from enterT for
-// every node of a freshly-published T entry's chain.
+// every node of a freshly-published T entry's chain.  Before the
+// register, check if the node is already registered to a DIFFERENT
+// T entry — that's chain aliasing at the node-address level, which
+// is the bug we're hunting.  Fire a TAG event with (new_atT, prior
+// tidx, address) and dump via the existing dErrorBreak hook.
 void kt_debug_register_tnode(void *addr, int tidx)
 {
+  if (!g_debug_ring_enabled.load(std::memory_order_relaxed)) {
+    tnode_register(addr, tidx);
+    return;
+  }
+  int prior = tnode_lookup(addr);
+  if (prior >= 0 && prior != tidx)
+  {
+    // Aliasing detected.  Encode (new_atT, prior) in the TAG args.
+    tag_log(kt_debug_tid, "enterT:ALIASING", addr, tidx, prior);
+    // Dump once and abort if the user wants an immediate stop.
+    static std::atomic<int> once{0};
+    if (once.fetch_add(1) == 0)
+    {
+      dump_ring_generic("enterT:ALIASING");
+      if (getenv("SINGULAR_ABORT_ON_DERROR") != NULL) abort();
+    }
+  }
   tnode_register(addr, tidx);
 }
 
@@ -903,6 +925,40 @@ static BOOLEAN pop_and_prepare(SweepContext *ctx, ActivePoly *ap,
 
     ap->P = strat->L.top();
     strat->L.pop();
+
+    // pop-time sanity check.  R[i_r] maps static i_r values to
+    // the CURRENT T entry location (handles post-shift addressing),
+    // so the correct expected value is (*R)[i_r2]->p, not T[i_r2].p.
+    // The raw T[i_r2].p check is still useful because in parallel-bba
+    // atT = T.size() (no shifts), so T[i_r] == the entry with .i_r ==
+    // i_r and (*R)[i_r] points there too.
+    if (ap->P.i_r2 >= 0 && ap->P.i_r2 < strat->T.size()
+        && strat->R[ap->P.i_r2] != NULL)
+    {
+      poly expected_R = strat->R[ap->P.i_r2]->p;
+      if (ap->P.p2 != NULL && ap->P.p2 != expected_R)
+      {
+        kt_debug_tag("pop:Pair.p2!=R[i_r2]->p",
+                     (void*)ap->P.p2, ap->P.i_r2,
+                     strat->R[ap->P.i_r2]->i_r);
+      }
+    }
+    if (ap->P.i_r2 >= 0 && ap->P.i_r2 < strat->T.size())
+    {
+      poly expected_T = strat->T[ap->P.i_r2].p;
+      if (ap->P.p2 != NULL && ap->P.p2 != expected_T)
+      {
+        kt_debug_tag("pop:Pair.p2!=T[i_r2].p",
+                     (void*)ap->P.p2, ap->P.i_r2, 0);
+        if (ap->P.i_r2 > 0)
+        {
+          poly prev = strat->T[ap->P.i_r2 - 1].p;
+          if (ap->P.p2 == prev)
+            kt_debug_tag("pop:Pair.p2==T[i_r2-1].p (OFF_BY_ONE)",
+                         (void*)prev, ap->P.i_r2 - 1, ap->P.i_r2);
+        }
+      }
+    }
 
     // Create spoly if needed
     if (pNext(ap->P.p) == strat->tail)
@@ -1799,10 +1855,30 @@ static void process_survivor_lobject(SweepContext *ctx, LObject *P, int thread_i
     // are blocked while I hold S-shared; (b) tombstone CAS erases don't
     // shift indices.  pos_it now points at h (or the entry at find_pos'd
     // index); the arrival_id filter skips h in the clearS walk.
+    // Hypothesis: `strat->T.size()-1` can be stale by the time we
+    // reach here because we released S-exclusive and reacquired
+    // S-shared between our own enterT and this enterpairs call.
+    // A peer drainer can enterT in that window, incrementing
+    // T.size().  Log atR and our own i_r so we can detect the
+    // divergence.
+    int atR_for_pairs = strat->T.size()-1;
+    kt_debug_tag("enterpairs:atR_vs_P.i_r",
+                 (void*)P->p, atR_for_pairs, P->i_r);
+    // ALSO check: does T[atR_for_pairs].p equal P->p at this moment?
+    // Pair construction will set Lp.p2 = P->p and Lp.i_r2 = atR.
+    // If T[atR].p != P->p, pair is constructed inconsistent FROM THE
+    // START.  This captures the race between our enterT setting
+    // T[P->i_r] and a peer enterT adding T[atR] > P->i_r.
+    poly T_atR_p = strat->T[atR_for_pairs].p;
+    if (T_atR_p != P->p)
+    {
+      kt_debug_tag("enterpairs:T[atR].p!=P->p",
+                   (void*)P->p, atR_for_pairs, P->i_r);
+    }
     if (rField_is_Ring(currRing))
-      superenterpairs(P->p, strat->S.size()-1, P->ecart, pos_it, strat, strat->T.size()-1);
+      superenterpairs(P->p, strat->S.size()-1, P->ecart, pos_it, strat, atR_for_pairs);
     else
-      enterpairs(P->p, strat->S.size()-1, P->ecart, pos_it, strat, strat->T.size()-1);
+      enterpairs(P->p, strat->S.size()-1, P->ecart, pos_it, strat, atR_for_pairs);
 
 #ifdef KTHREAD_INSTRUMENT
     if (KT_STATS(ctx))
