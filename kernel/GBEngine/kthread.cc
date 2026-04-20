@@ -983,6 +983,35 @@ static BOOLEAN pop_and_prepare(SweepContext *ctx, ActivePoly *ap,
                    (void*)ap->P.p2, ap->P.i_r2,
                    (p1_bad ? 1 : 0) | (p2_bad ? 2 : 0));
 
+    // Fingerprint experiment: recompute fp from the popped pair's
+    // current (p1, p2, i_r1, i_r2) and compare to what was stamped
+    // at creation.  fp==0 means the pair was created on a path that
+    // didn't stamp (e.g., Ring variants, strong-poly variants) or
+    // pre-dates the parallel window — skip those.  Only the
+    // enterOnePairNormal path stamps.
+    if (ap->P.dbg_fp != 0)
+    {
+      unsigned long now_fp = kt_debug_pair_fp((void*)ap->P.p1,
+                                              (void*)ap->P.p2,
+                                              ap->P.i_r1, ap->P.i_r2);
+      bool fp_match = (now_fp == ap->P.dbg_fp);
+      if (!fp_match || p1_bad || p2_bad)
+      {
+        FILE *log = g_audit_log ? g_audit_log : stderr;
+        fprintf(log,
+                "=== POP FP: stamped=%016lx now=%016lx match=%d  "
+                "p1=%p p2=%p i_r1=%d i_r2=%d  "
+                "p1_bad=%d p2_bad=%d ===\n",
+                ap->P.dbg_fp, now_fp, fp_match ? 1 : 0,
+                (void*)ap->P.p1, (void*)ap->P.p2,
+                ap->P.i_r1, ap->P.i_r2,
+                p1_bad ? 1 : 0, p2_bad ? 2 : 0);
+        fflush(log);
+        kt_debug_tag(fp_match ? "pop:fp_match" : "pop:fp_MISMATCH",
+                     (void*)ap->P.p2, ap->P.i_r2, (int)ap->P.i_r1);
+      }
+    }
+
     // Create spoly if needed
     if (pNext(ap->P.p) == strat->tail)
     {
@@ -1806,22 +1835,52 @@ static void process_survivor_lobject(SweepContext *ctx, LObject *P, int thread_i
     {
       kt_L_lock(ctx, thread_id);
       int inconsistent_T = 0, offby1 = 0;
+      int fp_mismatches = 0, fp_matches_on_bad = 0;
       int first_bad_i_r2 = -1;
       poly first_bad_p2 = NULL;
+      unsigned long first_bad_fp_stamped = 0, first_bad_fp_now = 0;
+      poly first_bad_p1 = NULL;
+      int first_bad_i_r1 = -1;
       int total_pairs = 0;
       for (auto it = strat->L.begin(); it != strat->L.end(); ++it)
       {
         total_pairs++;
         if (it->i_r2 < 0 || it->i_r2 >= strat->T.size()) continue;
         poly t_p = strat->T[it->i_r2].p;
+        // Fingerprint check applies to every pair regardless of
+        // consistency — if ANY pair's fp no longer matches, we've
+        // caught an in-flight mutation.
+        if (it->dbg_fp != 0)
+        {
+          unsigned long now_fp = kt_debug_pair_fp((void*)it->p1,
+                                                  (void*)it->p2,
+                                                  it->i_r1, it->i_r2);
+          if (now_fp != it->dbg_fp) fp_mismatches++;
+        }
         if (it->p2 != NULL && it->p2 != t_p)
         {
           inconsistent_T++;
           if (it->i_r2 > 0 && it->p2 == strat->T[it->i_r2 - 1].p)
             offby1++;
+          // Among inconsistent pairs, count fp-still-matching ones.
+          // If all inconsistent pairs have fp match, the four fields
+          // were preserved as a set — bug is not direct field mutation.
+          if (it->dbg_fp != 0)
+          {
+            unsigned long now_fp = kt_debug_pair_fp((void*)it->p1,
+                                                    (void*)it->p2,
+                                                    it->i_r1, it->i_r2);
+            if (now_fp == it->dbg_fp) fp_matches_on_bad++;
+          }
           if (first_bad_i_r2 < 0) {
             first_bad_i_r2 = it->i_r2;
             first_bad_p2 = it->p2;
+            first_bad_p1 = it->p1;
+            first_bad_i_r1 = it->i_r1;
+            first_bad_fp_stamped = it->dbg_fp;
+            first_bad_fp_now = kt_debug_pair_fp((void*)it->p1,
+                                                (void*)it->p2,
+                                                it->i_r1, it->i_r2);
           }
         }
       }
@@ -1833,16 +1892,25 @@ static void process_survivor_lobject(SweepContext *ctx, LObject *P, int thread_i
         fprintf(log,
                 "\n=== FIRST L-SCAN INCONSISTENCY (L-lock held): "
                 "at enterT atT=%d, |L|=%d, inconsistent_T=%d offby1=%d, "
-                "first_bad: p2=%p i_r2=%d (T[%d].p=%p, T[%d].p=%p) ===\n",
+                "fp_mismatches=%d fp_matches_on_bad=%d, "
+                "first_bad: p1=%p i_r1=%d p2=%p i_r2=%d "
+                "(T[%d].p=%p, T[%d].p=%p) "
+                "fp_stamped=%016lx fp_now=%016lx ===\n",
                 (int)strat->T.size()-1, total_pairs,
                 inconsistent_T, offby1,
+                fp_mismatches, fp_matches_on_bad,
+                (void*)first_bad_p1, first_bad_i_r1,
                 (void*)first_bad_p2, first_bad_i_r2,
                 first_bad_i_r2, (void*)strat->T[first_bad_i_r2].p,
                 first_bad_i_r2-1,
-                first_bad_i_r2 > 0 ? (void*)strat->T[first_bad_i_r2-1].p : NULL);
+                first_bad_i_r2 > 0 ? (void*)strat->T[first_bad_i_r2-1].p : NULL,
+                first_bad_fp_stamped, first_bad_fp_now);
         fflush(log);
       }
       kt_debug_tag("L-scan:after-enterT", NULL, inconsistent_T, offby1);
+      if (fp_mismatches > 0)
+        kt_debug_tag("L-scan:fp_MISMATCH", NULL,
+                     fp_mismatches, inconsistent_T);
     }
 #ifdef KTHREAD_INSTRUMENT
     if (KT_STATS(ctx)) enterT_accum += kt_now_ns() - et0;

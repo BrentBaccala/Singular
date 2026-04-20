@@ -2430,6 +2430,15 @@ void enterOnePairNormal (const SElement &si,poly p,int ecart, int isFromQ,kStrat
         nDelete(&(Lp.p->coef));
     }
 
+    // Fingerprint experiment (off-by-one pair-mutation probe).
+    // Stamp Lp.dbg_fp from (p1, p2, i_r1, i_r2) just before the push
+    // into strat->L.  If at pop / L-scan time the recomputed fp still
+    // matches, the four fields were preserved as a set (bug must be
+    // elsewhere — e.g., T-side shift).  If the fp differs, at least
+    // one of the four fields was mutated in flight inside strat->L.
+    Lp.dbg_fp = kt_debug_pair_fp((void*)Lp.p1, (void*)Lp.p2,
+                                 Lp.i_r1, Lp.i_r2);
+
     strat_B(strat).push(Lp);
   }
 }

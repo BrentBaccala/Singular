@@ -403,4 +403,23 @@ void kt_debug_register_tnode(void *addr, int tidx);
 void kt_debug_snapshot_T_head(int tidx, void *addr);
 void *kt_debug_lookup_T_head(int tidx);
 
+// Fingerprint over (p1, p2, i_r1, i_r2) — stamped at pair creation,
+// rechecked at pop and in the L-scan.  fp-mismatch proves in-flight
+// mutation of the pair's own fields; fp-match with T-disagreement
+// would point elsewhere (e.g., T-side shift).
+static inline unsigned long kt_debug_pair_fp(void *p1, void *p2,
+                                             int i_r1, int i_r2)
+{
+  // Mix pointer halves with indices so any single-field change flips
+  // bits throughout.  Keep it cheap — this runs on the pair hot path.
+  unsigned long a = (unsigned long)p1;
+  unsigned long b = (unsigned long)p2;
+  unsigned long c = (unsigned long)(unsigned int)i_r1;
+  unsigned long d = (unsigned long)(unsigned int)i_r2;
+  unsigned long h = a ^ (b * 0x9E3779B97F4A7C15UL)
+                      ^ (c << 17) ^ (d << 47)
+                      ^ ((a >> 32) * 0xBF58476D1CE4E5B9UL);
+  return h;
+}
+
 #endif /* KTHREAD_H */

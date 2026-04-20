@@ -1198,6 +1198,15 @@ public:
                       // lobject_deleted_cas) perform these ops while keeping
                       // the struct copyable.
 
+  // Debug fingerprint experiment (off-by-one pair-mutation probe).
+  // Stamped at pair creation in enterOnePairNormal with a hash of
+  // (p1, p2, i_r1, i_r2).  Re-checked at pop-time and in the per-
+  // enterT L-scan to tell apart "fields were mutated in flight"
+  // (fp mismatch) from "fields preserved but T entries shifted"
+  // (fp match).  POD field at end of struct so memset in Init() zeros
+  // it and sizeof layout stays simple.
+  unsigned long dbg_fp = 0;
+
   // initialization
   KINLINE void Init(ring tailRing = currRing);
   KINLINE sLObject(ring tailRing = currRing);
