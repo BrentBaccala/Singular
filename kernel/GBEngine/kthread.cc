@@ -1439,6 +1439,9 @@ static void close_slot(SweepContext *ctx, int s, int thread_id)
   // design (batches only fire for FILLED slots) but keep as a safety.
   if (!ap->occupied || ap->is_survivor) return;
 
+  // Time-bisection: check L for R-mismatch BEFORE the work in close_slot.
+  kt_debug_R_scan_L(ctx->strat, "close_slot:entry");
+
   merge_slot_results(ctx, s);
 
 #ifdef KTHREAD_INSTRUMENT
@@ -1488,6 +1491,11 @@ static void close_slot(SweepContext *ctx, int s, int thread_id)
     pthread_cond_broadcast(&ctx->slot_freed_cv);
     pthread_mutex_unlock(&ctx->publish_lock);
   }
+
+  // And at exit: if R-mismatch first appears here, close_slot's body
+  // (merge_slot_results + reduce_slot_from_sweep + queue_survivor) is
+  // the writer.
+  kt_debug_R_scan_L(ctx->strat, "close_slot:exit");
 }
 
 /*
@@ -1740,6 +1748,10 @@ static void reduce_slot_from_sweep(SweepContext *ctx, int slot, int thread_id)
     }
   }
 
+  // Time-bisection: scan L for R-inconsistency BEFORE ksReducePoly.
+  // If 0, the writer hasn't struck yet (or has struck and recovered).
+  kt_debug_R_scan_L(strat, "reduce_slot:pre_ksReducePoly");
+
   {
     // Tag includes the T[best] reducer so the dump shows exactly which
     // T entry this worker is consuming when the audit fires on some
@@ -1749,6 +1761,11 @@ static void reduce_slot_from_sweep(SweepContext *ctx, int slot, int thread_id)
     ksReducePoly(&ap->P, strat->T.addr(best),
                  strat->kNoetherTail(), NULL, NULL, strat);
   }
+
+  // And AFTER ksReducePoly: did THIS reduce step introduce the
+  // R-mismatch?  If 0 before and N>0 after, ksReducePoly is the
+  // writer.
+  kt_debug_R_scan_L(strat, "reduce_slot:post_ksReducePoly");
 
   ctx->stat_reductions.fetch_add(1, std::memory_order_relaxed);
 
