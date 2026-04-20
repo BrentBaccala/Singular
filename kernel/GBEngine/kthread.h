@@ -398,4 +398,9 @@ void kt_debug_check_tnode_write(const char *site, void *addr);
 // Register a chain node in the T-node set.  Called from enterT.
 void kt_debug_register_tnode(void *addr, int tidx);
 
+// Snapshot T[tidx].p at enterT time; later reads let us detect if the
+// T entry's head gets overwritten post-enterT (shouldn't happen).
+void kt_debug_snapshot_T_head(int tidx, void *addr);
+void *kt_debug_lookup_T_head(int tidx);
+
 #endif /* KTHREAD_H */

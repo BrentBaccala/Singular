@@ -330,6 +330,24 @@ void kt_debug_check_tnode_write(const char *site, void *addr)
   tag_log(kt_debug_tid, site, addr, tidx, /*arg=*/-1);
 }
 
+// Snapshot of each T entry's head pointer at enterT time.  Lets us
+// detect whether T[atT].p gets overwritten post-enterT (which it
+// shouldn't, per the immutability invariant).
+#define TNODE_HEAD_SNAPSHOT_SIZE 16384
+static std::atomic<void*> g_tnode_head_snapshot[TNODE_HEAD_SNAPSHOT_SIZE];
+
+void kt_debug_snapshot_T_head(int tidx, void *addr)
+{
+  if (tidx < 0 || tidx >= TNODE_HEAD_SNAPSHOT_SIZE) return;
+  g_tnode_head_snapshot[tidx].store(addr, std::memory_order_release);
+}
+
+void *kt_debug_lookup_T_head(int tidx)
+{
+  if (tidx < 0 || tidx >= TNODE_HEAD_SNAPSHOT_SIZE) return NULL;
+  return g_tnode_head_snapshot[tidx].load(std::memory_order_acquire);
+}
+
 // Register a chain node in the T-node set.  Called from enterT for
 // every node of a freshly-published T entry's chain.  Before the
 // register, check if the node is already registered to a DIFFERENT
@@ -926,39 +944,44 @@ static BOOLEAN pop_and_prepare(SweepContext *ctx, ActivePoly *ap,
     ap->P = strat->L.top();
     strat->L.pop();
 
-    // pop-time sanity check.  R[i_r] maps static i_r values to
-    // the CURRENT T entry location (handles post-shift addressing),
-    // so the correct expected value is (*R)[i_r2]->p, not T[i_r2].p.
-    // The raw T[i_r2].p check is still useful because in parallel-bba
-    // atT = T.size() (no shifts), so T[i_r] == the entry with .i_r ==
-    // i_r and (*R)[i_r] points there too.
-    if (ap->P.i_r2 >= 0 && ap->P.i_r2 < strat->T.size()
-        && strat->R[ap->P.i_r2] != NULL)
-    {
-      poly expected_R = strat->R[ap->P.i_r2]->p;
-      if (ap->P.p2 != NULL && ap->P.p2 != expected_R)
+    // pop-time sanity check.  Check BOTH (p1, i_r1) and (p2, i_r2).
+    // If the pair is inconsistent, dump neighborhood for context.
+    auto check_side = [&](const char *which, poly pp, int ir) {
+      if (ir < 0 || ir >= strat->T.size()) return false;
+      poly exp_t = strat->T[ir].p;
+      if (pp != NULL && pp != exp_t)
       {
-        kt_debug_tag("pop:Pair.p2!=R[i_r2]->p",
-                     (void*)ap->P.p2, ap->P.i_r2,
-                     strat->R[ap->P.i_r2]->i_r);
+        // Compare against the enterT-time snapshot of T[ir].p.  If
+        // the snapshot equals pp, then T[ir].p was OVERWRITTEN
+        // post-enterT (and the pair's p2 still holds the original
+        // value).  If the snapshot equals T[ir].p (current), then
+        // T[ir].p hasn't changed since enterT — meaning the pair's
+        // fields were wrong from creation or got rewritten.
+        poly snap = (poly)kt_debug_lookup_T_head(ir);
+        FILE *log = g_audit_log ? g_audit_log : stderr;
+        fprintf(log,
+                "\n=== POP INCONSISTENT: %s=%p i_r=%d T[%d].p=%p  "
+                "snap[ir]=%p  T[%d-1].p=%p  T[%d+1].p=%p  "
+                "match_prev=%d match_next=%d  snap_eq_pp=%d  "
+                "snap_eq_tp=%d ===\n",
+                which, (void*)pp, ir, ir, (void*)exp_t, (void*)snap,
+                ir, ir > 0 ? (void*)strat->T[ir-1].p : NULL,
+                ir, ir+1 < strat->T.size() ? (void*)strat->T[ir+1].p : NULL,
+                (ir > 0 && pp == strat->T[ir-1].p) ? 1 : 0,
+                (ir+1 < strat->T.size() && pp == strat->T[ir+1].p) ? 1 : 0,
+                snap == pp ? 1 : 0,
+                snap == exp_t ? 1 : 0);
+        fflush(log);
+        return true;
       }
-    }
-    if (ap->P.i_r2 >= 0 && ap->P.i_r2 < strat->T.size())
-    {
-      poly expected_T = strat->T[ap->P.i_r2].p;
-      if (ap->P.p2 != NULL && ap->P.p2 != expected_T)
-      {
-        kt_debug_tag("pop:Pair.p2!=T[i_r2].p",
-                     (void*)ap->P.p2, ap->P.i_r2, 0);
-        if (ap->P.i_r2 > 0)
-        {
-          poly prev = strat->T[ap->P.i_r2 - 1].p;
-          if (ap->P.p2 == prev)
-            kt_debug_tag("pop:Pair.p2==T[i_r2-1].p (OFF_BY_ONE)",
-                         (void*)prev, ap->P.i_r2 - 1, ap->P.i_r2);
-        }
-      }
-    }
+      return false;
+    };
+    bool p2_bad = check_side("p2", ap->P.p2, ap->P.i_r2);
+    bool p1_bad = check_side("p1", ap->P.p1, ap->P.i_r1);
+    if (p2_bad || p1_bad)
+      kt_debug_tag("pop:Pair_inconsistent",
+                   (void*)ap->P.p2, ap->P.i_r2,
+                   (p1_bad ? 1 : 0) | (p2_bad ? 2 : 0));
 
     // Create spoly if needed
     if (pNext(ap->P.p) == strat->tail)
@@ -1776,6 +1799,50 @@ static void process_survivor_lobject(SweepContext *ctx, LObject *P, int thread_i
       enterT(*P, strat);
     }
     audit_T_pLength(ctx, "ps-phase0-post-enterT", thread_id);
+
+    // L-scan after enterT to detect when inconsistent pairs first
+    // appear.  Direct-to-log on first nonzero (so the event survives
+    // ring-buffer wrap).
+    if (g_debug_ring_enabled.load(std::memory_order_relaxed))
+    {
+      int inconsistent_T = 0, offby1 = 0;
+      int first_bad_i_r2 = -1;
+      poly first_bad_p2 = NULL;
+      int total_pairs = 0;
+      for (auto it = strat->L.begin(); it != strat->L.end(); ++it)
+      {
+        total_pairs++;
+        if (it->i_r2 < 0 || it->i_r2 >= strat->T.size()) continue;
+        poly t_p = strat->T[it->i_r2].p;
+        if (it->p2 != NULL && it->p2 != t_p)
+        {
+          inconsistent_T++;
+          if (it->i_r2 > 0 && it->p2 == strat->T[it->i_r2 - 1].p)
+            offby1++;
+          if (first_bad_i_r2 < 0) {
+            first_bad_i_r2 = it->i_r2;
+            first_bad_p2 = it->p2;
+          }
+        }
+      }
+      static std::atomic<int> first_seen{-1};
+      if (inconsistent_T > 0 && first_seen.exchange(inconsistent_T) < 0)
+      {
+        FILE *log = g_audit_log ? g_audit_log : stderr;
+        fprintf(log,
+                "\n=== FIRST L-SCAN INCONSISTENCY: at enterT atT=%d, "
+                "|L|=%d, inconsistent_T=%d offby1=%d, "
+                "first_bad: p2=%p i_r2=%d (T[%d].p=%p, T[%d].p=%p) ===\n",
+                (int)strat->T.size()-1, total_pairs,
+                inconsistent_T, offby1,
+                (void*)first_bad_p2, first_bad_i_r2,
+                first_bad_i_r2, (void*)strat->T[first_bad_i_r2].p,
+                first_bad_i_r2-1,
+                first_bad_i_r2 > 0 ? (void*)strat->T[first_bad_i_r2-1].p : NULL);
+        fflush(log);
+      }
+      kt_debug_tag("L-scan:after-enterT", NULL, inconsistent_T, offby1);
+    }
 #ifdef KTHREAD_INSTRUMENT
     if (KT_STATS(ctx)) enterT_accum += kt_now_ns() - et0;
     long es0 = KT_STATS(ctx) ? kt_now_ns() : 0;
@@ -2109,6 +2176,8 @@ void bba_parallel_loop(SweepContext *ctx)
     g_plen_ring[i].seq.store(UINT64_MAX, std::memory_order_relaxed);
   for (int i = 0; i < TNODE_REGISTRY_SIZE; i++)
     g_tnode_registry[i].addr.store(NULL, std::memory_order_relaxed);
+  for (int i = 0; i < TNODE_HEAD_SNAPSHOT_SIZE; i++)
+    g_tnode_head_snapshot[i].store(NULL, std::memory_order_relaxed);
   if (want_ring && g_audit_log == NULL)
   {
     const char *path = getenv("SINGULAR_AUDIT_LOG");
@@ -2127,6 +2196,50 @@ void bba_parallel_loop(SweepContext *ctx)
     dErrorBreak_hook = dump_ring_generic;
     kbucket_debug_tag = kbucket_debug_tag_adapter;
     kbucket_debug_check_tnode = kt_debug_check_tnode_write;
+  }
+
+  // Startup-introduced-inconsistency probe: before the parallel phase
+  // begins, scan strat->L and check each pair's (p2, i_r2) against
+  // the current T array.  If ANY pair is inconsistent at this point,
+  // the bug originates in startup code (reorderT / updateT are the
+  // live suspects).  Also write a summary directly to g_audit_log
+  // since these events would otherwise be evicted from the ring
+  // long before any fault dump.
+  if (want_ring)
+  {
+    int inconsistent_T = 0, inconsistent_R = 0, offby1 = 0, checked = 0;
+    FILE *log = g_audit_log ? g_audit_log : stderr;
+    fprintf(log, "\n=== STARTUP L-scan: T.size=%d, L.size=%d ===\n",
+            (int)strat->T.size(), (int)strat->L.size());
+    for (auto it = strat->L.begin(); it != strat->L.end(); ++it)
+    {
+      checked++;
+      if (it->i_r2 < 0 || it->i_r2 >= strat->T.size()) continue;
+      poly t_p = strat->T[it->i_r2].p;
+      poly r_p = (strat->R[it->i_r2] != NULL) ? strat->R[it->i_r2]->p : NULL;
+      if (it->p2 != NULL && it->p2 != t_p)
+      {
+        inconsistent_T++;
+        bool is_offby1 = (it->i_r2 > 0
+                          && it->p2 == strat->T[it->i_r2 - 1].p);
+        if (is_offby1) offby1++;
+        if (inconsistent_T <= 20)
+          fprintf(log,
+                  "  pair L[?]: p2=%p i_r2=%d  T[i_r2].p=%p  "
+                  "R[i_r2]->p=%p  %s\n",
+                  (void*)it->p2, it->i_r2, (void*)t_p, (void*)r_p,
+                  is_offby1 ? "(OFF_BY_ONE: p2 == T[i_r2-1].p)" : "");
+      }
+      if (it->p2 != NULL && it->p2 != r_p) inconsistent_R++;
+    }
+    fprintf(log,
+            "STARTUP L-scan: checked=%d inconsistent_T=%d "
+            "inconsistent_R=%d offby1=%d\n\n",
+            checked, inconsistent_T, inconsistent_R, offby1);
+    fflush(log);
+    // also tag for consistency with other instrumentation
+    kt_debug_tag("STARTUP:L-scan-complete",
+                 NULL, checked, inconsistent_T);
   }
 
   ctx->saved_posInT = strat->posInT;

@@ -2398,15 +2398,21 @@ void enterOnePairNormal (const SElement &si,poly p,int ecart, int isFromQ,kStrat
     {
       Lp.i_r1 = si.s_2_r;
       Lp.i_r2 = atR;
-      // Creation-time CONSISTENCY check: does T[atR].p equal p?
-      // They should match — enterpairs passes p=h just after h was
-      // enterT'd at atT=atR.  If not, pair is born inconsistent.
+      // Creation-time CONSISTENCY check.
       if (atR < strat->T.size())
       {
         poly T_atR_p = strat->T[atR].p;
         if (T_atR_p != p)
           kt_debug_tag("enterOnePair:T[atR].p!=p (BORN_INCONSISTENT)",
                        (void*)p, atR, si.s_2_r);
+      }
+      else
+      {
+        // atR out of bounds at creation time — pair is created with
+        // i_r2 pointing beyond current T array.  This is a race with
+        // T not yet grown to atR+1.
+        kt_debug_tag("enterOnePair:atR>=T.size (SKIPPED_CHECK)",
+                     (void*)p, atR, (int)strat->T.size());
       }
     }
     else
@@ -2631,15 +2637,21 @@ static void enterOnePairLift (const SElement &si,poly p,int ecart, int isFromQ,k
     {
       Lp.i_r1 = si.s_2_r;
       Lp.i_r2 = atR;
-      // Creation-time CONSISTENCY check: does T[atR].p equal p?
-      // They should match — enterpairs passes p=h just after h was
-      // enterT'd at atT=atR.  If not, pair is born inconsistent.
+      // Creation-time CONSISTENCY check.
       if (atR < strat->T.size())
       {
         poly T_atR_p = strat->T[atR].p;
         if (T_atR_p != p)
           kt_debug_tag("enterOnePair:T[atR].p!=p (BORN_INCONSISTENT)",
                        (void*)p, atR, si.s_2_r);
+      }
+      else
+      {
+        // atR out of bounds at creation time — pair is created with
+        // i_r2 pointing beyond current T array.  This is a race with
+        // T not yet grown to atR+1.
+        kt_debug_tag("enterOnePair:atR>=T.size (SKIPPED_CHECK)",
+                     (void*)p, atR, (int)strat->T.size());
       }
     }
     else
@@ -2907,15 +2919,21 @@ static void enterOnePairSig (const SElement &si, sBasisSet::const_iterator si_it
     {
       Lp.i_r1 = si.s_2_r;
       Lp.i_r2 = atR;
-      // Creation-time CONSISTENCY check: does T[atR].p equal p?
-      // They should match — enterpairs passes p=h just after h was
-      // enterT'd at atT=atR.  If not, pair is born inconsistent.
+      // Creation-time CONSISTENCY check.
       if (atR < strat->T.size())
       {
         poly T_atR_p = strat->T[atR].p;
         if (T_atR_p != p)
           kt_debug_tag("enterOnePair:T[atR].p!=p (BORN_INCONSISTENT)",
                        (void*)p, atR, si.s_2_r);
+      }
+      else
+      {
+        // atR out of bounds at creation time — pair is created with
+        // i_r2 pointing beyond current T array.  This is a race with
+        // T not yet grown to atR+1.
+        kt_debug_tag("enterOnePair:atR>=T.size (SKIPPED_CHECK)",
+                     (void*)p, atR, (int)strat->T.size());
       }
     }
     else
@@ -3301,15 +3319,21 @@ static void enterOnePairSigRing (const SElement &si, poly p, poly pSig, int, int
     {
       Lp.i_r1 = si.s_2_r;
       Lp.i_r2 = atR;
-      // Creation-time CONSISTENCY check: does T[atR].p equal p?
-      // They should match — enterpairs passes p=h just after h was
-      // enterT'd at atT=atR.  If not, pair is born inconsistent.
+      // Creation-time CONSISTENCY check.
       if (atR < strat->T.size())
       {
         poly T_atR_p = strat->T[atR].p;
         if (T_atR_p != p)
           kt_debug_tag("enterOnePair:T[atR].p!=p (BORN_INCONSISTENT)",
                        (void*)p, atR, si.s_2_r);
+      }
+      else
+      {
+        // atR out of bounds at creation time — pair is created with
+        // i_r2 pointing beyond current T array.  This is a race with
+        // T not yet grown to atR+1.
+        kt_debug_tag("enterOnePair:atR>=T.size (SKIPPED_CHECK)",
+                     (void*)p, atR, (int)strat->T.size());
       }
     }
     else
@@ -9021,6 +9045,9 @@ void enterT(LObject &p, kStrategy strat, int atT)
     kt_debug_register_tnode((void*)q, atT);
   for (poly q = strat->T[atT].t_p; q != NULL; q = pNext(q))
     kt_debug_register_tnode((void*)q, atT);
+
+  // Snapshot T[atT].p so we can detect any post-enterT overwrite.
+  kt_debug_snapshot_T_head(atT, (void*)strat->T[atT].p);
 
   __asm__ __volatile__("" ::: "memory");  // compiler barrier (x86 has strong HW ordering)
   strat->T.setsize(strat->T.size()+1);
