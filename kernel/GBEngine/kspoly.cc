@@ -1302,6 +1302,30 @@ void ksCreateSpoly(LObject* Pair,   poly spNoether,
     }
   }
 
+  // Stale-pLength probe: walk pNext(p2) *right now* and compare to l2
+  // captured above.  If they disagree, T[i_r2].pLength is stale (or
+  // pNext(p2) was transiently mutated by another thread between those
+  // two reads).  Read TWICE to distinguish transient vs permanent.
+  if (R != NULL && Pair->i_r2 != -1 && (*R)[Pair->i_r2] != NULL)
+  {
+    int actual_l2_a = pLength(a2);
+    int actual_l2_b = pLength(a2);  // second read — same if permanent
+    int fresh_pNext = pLength(pNext(p2));  // re-read pNext(p2) live
+    int stored_now = ((*R)[Pair->i_r2])->GetpLength() - 1;
+    if (actual_l2_a != l2)
+    {
+      kt_debug_tag("ksCreateSpoly:STALE_l2", (void*)p2,
+                   Pair->i_r2, l2 * 1000 + actual_l2_a);
+      kt_debug_tag("ksCreateSpoly:STALE_l2_rereads",
+                   (void*)p2, stored_now,
+                   actual_l2_b * 1000 + fresh_pNext);
+      dReportError("ksCreateSpoly: T[%d].pLength-1=%d, pLength(a2_1)=%d, "
+                   "pLength(a2_2)=%d, pLength(pNext(p2))=%d, stored_now=%d",
+                   Pair->i_r2, l2, actual_l2_a, actual_l2_b,
+                   fresh_pNext, stored_now);
+    }
+  }
+
   // get m2 * a2
 #ifdef HAVE_SHIFTBBA
   if (tailRing->isLPring)

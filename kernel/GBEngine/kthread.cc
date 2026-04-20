@@ -551,6 +551,32 @@ static void dump_ring_generic(const char *reason)
           "\n=== dErrorBreak hook: %s cur=%lu ===\n",
           reason, (unsigned long)cur);
 
+  // Per-thread tag at the moment of fault: walk the ring backwards
+  // from `cur` to find each thread's most recent TAG event.  This
+  // is the technique that pinned the _p_LmTest race — knowing what
+  // OTHER threads were doing at the fault site is usually more
+  // revealing than the faulting thread's own tag.
+  fprintf(g_audit_log,
+          "\n-- per-thread tag at fault (most recent TAG at seq < %lu) --\n",
+          (unsigned long)cur);
+  for (int t = 0; t < MAX_AUDIT_THREADS; t++)
+  {
+    uint64_t scan_lo = (cur > PLEN_RING_SIZE) ? cur - PLEN_RING_SIZE : 0;
+    for (uint64_t idx = cur; idx-- > scan_lo; )
+    {
+      Event &e = g_plen_ring[idx & (PLEN_RING_SIZE - 1)];
+      uint64_t ee = e.seq.load(std::memory_order_acquire);
+      if (ee != idx) continue;
+      if (e.tid != t) continue;
+      if (e.kind != EV_TAG) continue;
+      fprintf(g_audit_log,
+              "  tid=%d seq=%lu tsc=%lu op=%s poly=%p slot=%d arg=%d\n",
+              t, (unsigned long)ee, (unsigned long)e.tsc,
+              e.op ? e.op : "<none>", e.poly, e.slot, e.arg);
+      break;
+    }
+  }
+
   // Last 2048 events (thread-interleaved), newest first would be harder
   // to read — print oldest first so the immediate pre-fault events are
   // at the bottom.

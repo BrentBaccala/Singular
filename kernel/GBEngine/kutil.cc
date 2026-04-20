@@ -8898,6 +8898,15 @@ void enterT(LObject &p, kStrategy strat, int atT)
       && (strat->tailRing == NULL || strat->tailBin != strat->tailRing->PolyBin)
       && (pNext(p.p) != NULL))
   {
+    // PROBE: if we're here with --disable-omalloc, something's off —
+    // tailBin should equal tailRing->PolyBin in that config.  Also
+    // this path frees the source chain as it copies, so if p.p's
+    // tail aliases with any live T entry's tail, that T entry gets
+    // corrupted.
+    extern void (*kbucket_debug_tag)(const char *op, void *lm, int slot, int arg);
+    if (kbucket_debug_tag != NULL)
+      kbucket_debug_tag("enterT:ShallowCopyDelete(active)",
+                        (void*)pNext(p.p), -1, 0);
 #ifdef HAVE_SHIFTBBA
     // letterplace: if p.shift > 0 then pNext(p.p) is already in the tailBin
     if (!(currRing->isLPring && p.shift > 0))
