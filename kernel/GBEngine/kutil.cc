@@ -8911,6 +8911,18 @@ void enterT(LObject &p, kStrategy strat, int atT)
   strat->T[atT] = (TObject) p;
   //printf("\nenterT: add new: length = %i, ecart = %i\n",p.length,p.ecart);
 
+  // Stale-pLength race bisect gate: FORCE_TCOPY=1 makes enterT deep-copy
+  // the LObject's chain so the new T entry cannot share spolyrec nodes
+  // with any other poly (ap->P buckets, other L entries, ...).  If the
+  // race disappears under this gate, chain aliasing is the cause.
+  if (getenv("FORCE_TCOPY") != NULL)
+  {
+    if (strat->T[atT].p != NULL)
+      strat->T[atT].p = p_Copy(strat->T[atT].p, currRing);
+    if (strat->T[atT].t_p != NULL && strat->T[atT].t_p != strat->T[atT].p)
+      strat->T[atT].t_p = p_Copy(strat->T[atT].t_p, strat->tailRing);
+  }
+
   if ((pNext(p.p) != NULL) && (!rIsLPRing(currRing)))
     strat->T[atT].max_exp = p_GetMaxExpP(pNext(p.p), strat->tailRing);
   else
