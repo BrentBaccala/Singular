@@ -332,11 +332,23 @@ BOOLEAN kBucketIsCleared(kBucket_pt bucket)
   return TRUE;
 }
 
+// Optional debug breadcrumb hook (parallel-bba event ring).  NULL in
+// serial / release builds; set at runtime by the kthread.cc init
+// when SINGULAR_DEBUG_RING is on.  Fires BEFORE the pLength(lm) check
+// so we can see who was calling at the exact moment of an assertion
+// failure.
+extern "C" void (*kbucket_debug_tag)(const char *op, void *lm,
+                                     int slot, int arg) = NULL;
+
 void kBucketInit(kBucket_pt bucket, poly lm, int length)
 {
   //assume(false);
   assume(bucket != NULL);
+  if (kbucket_debug_tag != NULL)
+    kbucket_debug_tag("kBucketInit:entry", (void*)lm, -1, length);
   assume(length <= 0 || length == pLength(lm));
+  if (kbucket_debug_tag != NULL)
+    kbucket_debug_tag("kBucketInit:after_assume", (void*)lm, -1, length);
   assume(kBucketIsCleared(bucket));
 
   if (lm == NULL) return;

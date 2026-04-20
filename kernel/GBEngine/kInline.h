@@ -614,6 +614,12 @@ KINLINE void sLObject::SetLmTail(poly lm, poly p_tail, int p_Length, int use_buc
   Set(lm, _tailRing);
   if (use_bucket)
   {
+    // parallel-bba debug: tag the p_tail address & p_Length so the
+    // event-ring dump tells us what ksCreateSpoly handed to us just
+    // before kBucketInit's assume fires.
+    if (kbucket_debug_tag != NULL)
+      kbucket_debug_tag("SetLmTail(p_tail, p_Length)",
+                        (void *)p_tail, -1, p_Length);
     bucket = kBucketCreate(_tailRing);
     kBucketInit(bucket, p_tail, p_Length);
     pNext(lm) = NULL;

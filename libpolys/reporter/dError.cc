@@ -135,8 +135,22 @@ int dReportError(const char* fmt, ...)
 #endif
 
 #ifndef MAKE_DISTRIBUTION
-// dummy procedure for setting a breakpoint
-// within the debugger
+// Optional hook for debug instrumentation (e.g. parallel-bba event
+// ring dump).  Set by kthread.cc at startup; NULL means no hook.
+extern "C" {
+void (*dErrorBreak_hook)(const char *reason) = NULL;
+}
+
+// dummy procedure for setting a breakpoint within the debugger.
+// Under SINGULAR_ABORT_ON_DERROR=1, abort so the process dies at
+// the first dReportError instead of logging and continuing —
+// lets the audit-ring dump capture context around the first fault.
 void dErrorBreak()
-{}
+{
+  if (getenv("SINGULAR_ABORT_ON_DERROR") != NULL)
+  {
+    if (dErrorBreak_hook != NULL) dErrorBreak_hook("dErrorBreak");
+    abort();
+  }
+}
 #endif

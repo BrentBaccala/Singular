@@ -35,6 +35,16 @@ void kBucketDeleteAndDestroy(kBucket_pt *bucket);
 // Assumes length <= 0 || pLength(p) == length
 void kBucketInit(kBucket_pt bucket, poly p, int length);
 
+// Optional debug breadcrumb hook — parallel-bba event ring tag.
+// NULL in serial/release; set at runtime by kthread.cc.
+#ifdef __cplusplus
+extern "C" {
+#endif
+extern void (*kbucket_debug_tag)(const char *op, void *lm, int slot, int arg);
+#ifdef __cplusplus
+}
+#endif
+
 // Converts Bpoly into a poly and clears bucket
 // i.e., afterwards Bpoly == 0
 void kBucketClear(kBucket_pt bucket, poly *p, int *length);

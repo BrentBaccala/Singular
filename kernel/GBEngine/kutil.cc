@@ -982,20 +982,22 @@ BOOLEAN kTest_L(LObject *L, kStrategy strat,
 
   if (testp)
   {
-    poly pn = NULL;
     if (L->bucket != NULL)
     {
       kFalseReturn(kbTest(L->bucket));
       r_assume(L->bucket->bucket_ring == L->tailRing);
-      if (L->p != NULL && pNext(L->p) != NULL)
-      {
-        pn = pNext(L->p);
-        pNext(L->p) = NULL;
-      }
+      // Previously: save pNext(L->p), set to NULL, call kTest_T,
+      // restore.  That transient mutation was not thread-safe — it
+      // raced with concurrent readers of L->p in parallel Groebner
+      // basis code (ksCreateSpoly captures a2 = pNext(p2) and l2 =
+      // T[i_r2].pLength in separate reads; a transient NULL makes
+      // them inconsistent, firing kBucketInit's length assertion).
+      // After PrepareRed puts the tail in the bucket, pNext(L->p) is
+      // already NULL, so this dance was redundant for parallel-bba
+      // callers.  If some caller reaches here with pNext(L->p) !=
+      // NULL we'd rather catch that than hide it with a mutation.
     }
     kFalseReturn(kTest_T(L, strat, lpos, 'L'));
-    if (pn != NULL)
-      pNext(L->p) = pn;
 
     ring r;
     poly p;

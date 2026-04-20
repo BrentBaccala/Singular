@@ -217,9 +217,18 @@ static inline SweepResult& sweep_result(SweepContext *ctx, int thread_id, int sl
 /*      we can find the same head observed with different lengths on   */
 /*      different threads — direct evidence of transient truncation.   */
 /* ------------------------------------------------------------------ */
+// SINGULAR_DEBUG_RING=1  — event ring, OpTag breadcrumbs, dErrorBreak
+//                          hook active.  Low overhead; safe to leave on.
+// SINGULAR_AUDIT_T=1     — additionally, audit_T_pLength walks every
+//                          published T entry at each chokepoint.
+//                          Expensive; floods the ring with PLEN events.
+// Using the ring WITHOUT the walks lets TAG breadcrumbs (enterT,
+// ksReducePoly sub-steps, etc.) survive long enough to reach a
+// dErrorBreak hook dump without getting drowned out.
+static std::atomic<bool> g_debug_ring_enabled{false};
 static std::atomic<bool> g_audit_T_enabled{false};
 static std::atomic<int>  g_audit_T_checked{0};
-static FILE *g_audit_log = NULL;  // opened when audit is enabled, else stderr
+static FILE *g_audit_log = NULL;  // opened when ring/audit is enabled
 
 #define MAX_AUDIT_THREADS 64
 
@@ -260,7 +269,7 @@ struct OpTag
   OpTag(int t, const char *op, void *poly = NULL, int slot = -1, int arg = 0)
     : tid(t)
   {
-    if (!g_audit_T_enabled.load(std::memory_order_relaxed)) return;
+    if (!g_debug_ring_enabled.load(std::memory_order_relaxed)) return;
     if (tid < 0 || tid >= MAX_AUDIT_THREADS) return;
     ThreadDebugState &d = g_thread_debug[tid];
     saved = d;
@@ -273,7 +282,7 @@ struct OpTag
   }
   ~OpTag()
   {
-    if (!g_audit_T_enabled.load(std::memory_order_relaxed)) return;
+    if (!g_debug_ring_enabled.load(std::memory_order_relaxed)) return;
     if (tid < 0 || tid >= MAX_AUDIT_THREADS) return;
     g_thread_debug[tid] = saved;
     // Log the restoration so the ring shows "tid left scope X, returned to Y".
@@ -522,6 +531,65 @@ static void dump_debug_state(const char *tag, int my_tid, uint64_t mismatch_seq,
   // via audit_T_pLength's pre-dump error path (subsequent mismatches
   // race with our abort() call).  fflush above already forces the write
   // to disk; fclose would just invite NULL derefs.
+}
+
+// Dump a generic ring-buffer snapshot (no specific T[j] to filter on).
+// Called from the dErrorBreak hook so bucket-length dErrors and other
+// fault sites get the same treatment the T-entry audit got.
+static void dump_ring_generic(const char *reason)
+{
+  if (!g_debug_ring_enabled.load(std::memory_order_relaxed)) return;
+  if (g_audit_log == NULL) return;
+  // Freeze to keep the ring stable while we dump.  Note: this is a
+  // one-shot — subsequent dErrors land in a frozen ring (that's fine,
+  // the first one is the one we care about).
+  bool was_frozen = g_plen_frozen.exchange(true, std::memory_order_acq_rel);
+  if (was_frozen) return;  // someone else got here first
+
+  uint64_t cur = g_plen_seq.load(std::memory_order_acquire);
+  fprintf(g_audit_log,
+          "\n=== dErrorBreak hook: %s cur=%lu ===\n",
+          reason, (unsigned long)cur);
+
+  // Last 2048 events (thread-interleaved), newest first would be harder
+  // to read — print oldest first so the immediate pre-fault events are
+  // at the bottom.
+  uint64_t nlo = (cur > 2048) ? cur - 2048 : 0;
+  for (uint64_t idx = nlo; idx < cur; idx++)
+  {
+    Event &e = g_plen_ring[idx & (PLEN_RING_SIZE - 1)];
+    uint64_t ee = e.seq.load(std::memory_order_acquire);
+    if (ee != idx) continue;
+    if (e.kind == EV_TAG)
+      fprintf(g_audit_log,
+              "  seq=%lu tsc=%lu tid=%d TAG op=%s poly=%p slot=%d arg=%d\n",
+              (unsigned long)ee, (unsigned long)e.tsc,
+              e.tid, e.op ? e.op : "<none>", e.poly, e.slot, e.arg);
+    else
+      fprintf(g_audit_log,
+              "  seq=%lu tsc=%lu tid=%d PLEN T[%d] head=%p stored=%d actual=%d%s\n",
+              (unsigned long)ee, (unsigned long)e.tsc,
+              e.tid, e.slot, e.poly, e.arg, e.actual,
+              (e.arg != e.actual) ? " *" : "");
+  }
+  fprintf(g_audit_log, "-- end dErrorBreak dump --\n");
+  fflush(g_audit_log);
+}
+
+// Hook installers — kthread.cc plugs these into the reporter /
+// kbuckets layers at bba_parallel_loop startup so libpolys can
+// trigger our dump / tag without a reverse dependency on the kernel.
+extern "C" {
+extern void (*dErrorBreak_hook)(const char *reason);
+extern void (*kbucket_debug_tag)(const char *op, void *lm, int slot, int arg);
+}
+
+// Adapter with the right signature for the kbuckets hook.  The
+// ring-buffer tag_log takes 5 args; we reuse it.
+static void kbucket_debug_tag_adapter(const char *op, void *lm,
+                                      int slot, int arg)
+{
+  tag_log(kt_debug_tid, op, lm, slot, arg);
 }
 
 static std::atomic<int> g_audit_hit_count{0};
@@ -1839,9 +1907,14 @@ void bba_parallel_loop(SweepContext *ctx)
   kStrategy strat = ctx->strat;
   int nthreads = ctx->num_threads;
 
-  // Task 512: enable T-integrity audit if requested.
-  g_audit_T_enabled.store(getenv("SINGULAR_AUDIT_T") != NULL,
-                          std::memory_order_relaxed);
+  // Two layers of debug enablement:
+  //   SINGULAR_AUDIT_T=1     -> audit-walks on top of the ring
+  //   SINGULAR_DEBUG_RING=1  -> event ring + OpTag breadcrumbs + dError hook
+  // SINGULAR_AUDIT_T implies SINGULAR_DEBUG_RING (the audit needs the ring).
+  bool want_audit = (getenv("SINGULAR_AUDIT_T") != NULL);
+  bool want_ring  = want_audit || (getenv("SINGULAR_DEBUG_RING") != NULL);
+  g_audit_T_enabled.store(want_audit, std::memory_order_relaxed);
+  g_debug_ring_enabled.store(want_ring, std::memory_order_relaxed);
   g_audit_T_checked.store(0, std::memory_order_relaxed);
   g_audit_hit_count.store(0, std::memory_order_relaxed);
   g_plen_seq.store(0, std::memory_order_relaxed);
@@ -1850,13 +1923,23 @@ void bba_parallel_loop(SweepContext *ctx)
     g_thread_debug[t] = ThreadDebugState{};
   for (int i = 0; i < PLEN_RING_SIZE; i++)
     g_plen_ring[i].seq.store(UINT64_MAX, std::memory_order_relaxed);
-  if (g_audit_T_enabled.load(std::memory_order_relaxed) && g_audit_log == NULL)
+  if (want_ring && g_audit_log == NULL)
   {
     const char *path = getenv("SINGULAR_AUDIT_LOG");
     if (path == NULL) path = "/tmp/audit-run/audit-debug.log";
     g_audit_log = fopen(path, "w");
     if (g_audit_log != NULL) setvbuf(g_audit_log, NULL, _IONBF, 0);
     else g_audit_log = stderr;
+  }
+  // Install the dErrorBreak hook so dReportError sites (bucket
+  // length, etc.) get a ring dump before aborting.  Controlled at
+  // fire-time by SINGULAR_ABORT_ON_DERROR=1 (checked in dErrorBreak).
+  // Also install the kBucketInit tag hook so every call site shows
+  // up in the ring.
+  if (want_ring)
+  {
+    dErrorBreak_hook = dump_ring_generic;
+    kbucket_debug_tag = kbucket_debug_tag_adapter;
   }
 
   ctx->saved_posInT = strat->posInT;
