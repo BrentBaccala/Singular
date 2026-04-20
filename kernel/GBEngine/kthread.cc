@@ -1065,9 +1065,27 @@ static BOOLEAN pop_and_prepare(SweepContext *ctx, ActivePoly *ap,
     bool p2_bad = check_side("p2", ap->P.p2, ap->P.i_r2);
     bool p1_bad = check_side("p1", ap->P.p1, ap->P.i_r1);
     if (p2_bad || p1_bad)
+    {
       kt_debug_tag("pop:Pair_R_INCONSISTENT",
                    (void*)ap->P.p2, ap->P.i_r2,
                    (p1_bad ? 1 : 0) | (p2_bad ? 2 : 0));
+      // Early-abort test: if SINGULAR_SKIP_BAD_POP is set, discard
+      // this pair rather than passing it to ksReducePoly.  Lets us
+      // verify whether the downstream SEGV is a consequence of the
+      // R-inconsistent pair.
+      if (getenv("SINGULAR_SKIP_BAD_POP") != NULL)
+      {
+        kt_debug_audit_printf(
+          "=== SKIP_BAD_POP: discarding pair p1=%p i_r1=%d p2=%p "
+          "i_r2=%d p1_bad=%d p2_bad=%d ===\n",
+          (void*)ap->P.p1, ap->P.i_r1,
+          (void*)ap->P.p2, ap->P.i_r2,
+          p1_bad ? 1 : 0, p2_bad ? 1 : 0);
+        kDeleteLcm(&ap->P);
+        ap->P.Clear();
+        continue;    // next iteration of `while (!strat->L.empty())`
+      }
+    }
 
     // Fingerprint experiment: recompute fp from the popped pair's
     // current (p1, p2, i_r1, i_r2) and compare to what was stamped
