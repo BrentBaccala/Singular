@@ -53,6 +53,7 @@
 // #define ENTER_USE_MYMEMMOVE
 
 #include "kernel/GBEngine/kutil.h"
+#include "kernel/GBEngine/kthread.h"
 #include "polys/kbuckets.h"
 #include "coeffs/numbers.h"
 #include "kernel/polys.h"
@@ -10683,6 +10684,11 @@ void finalReduceByMon(kStrategy strat)
 
 BOOLEAN kStratChangeTailRing(kStrategy strat, LObject *L, TObject* T, unsigned long expbound)
 {
+  // Audit task 308 suspect #2: bulk T rewrite on exp-bound overflow.
+  // Mutates every T entry's t_p chain without a lock.  If this fires
+  // during parallel phase, concurrent readers see torn T entries.
+  kt_debug_tag("kStratChangeTailRing:entry", (void*)strat,
+               strat->T.size(), 0);
   assume((strat->tailRing == currRing) || (strat->tailRing->bitmask <= currRing->bitmask));
   /* initial setup or extending */
 

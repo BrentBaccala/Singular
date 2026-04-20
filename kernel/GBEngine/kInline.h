@@ -266,7 +266,16 @@ KINLINE BOOLEAN sTObject::IsNull() const
 
 KINLINE int sTObject::GetpLength()
 {
-  if (pLength <= 0) pLength = ::pLength(p != NULL ? p : t_p);
+  if (pLength <= 0) {
+    // Audit task 308 suspect #1: self-heal writes pLength from a
+    // potentially racy chain walk.  Tag to see if this branch ever
+    // fires in the parallel-bba hot path.  Expected: should never
+    // fire post-enterT since enterT always sets pLength > 0.
+    if (kbucket_debug_tag != NULL)
+      kbucket_debug_tag("TObject::GetpLength:selfheal",
+                        (void*)(p ? p : t_p), i_r, pLength);
+    pLength = ::pLength(p != NULL ? p : t_p);
+  }
   return pLength;
 }
 
@@ -748,6 +757,17 @@ KINLINE poly sLObject::GetP(omBin lmBin)
   if (bucket != NULL)
   {
     kBucketClear(bucket, &pNext(p), &pLength);
+    // Tag what the bucket handed back: this pLength value propagates
+    // into the enterT'd T entry.  If it disagrees with a later
+    // pLength(p) walk, the stale pLength originated here.
+    if (kbucket_debug_tag != NULL) {
+      int actual_chain = pLength + 1;  // +1 for head
+      // compare to live walk of chain (now that bucket is merged)
+      int walked = ::pLength(p);
+      kbucket_debug_tag("LObject::GetP:bucketLen",
+                        (void*)p, pLength,
+                        actual_chain * 10000 + walked);
+    }
     kBucketDestroy(&bucket);
     pLength++;
     if (t_p != NULL) pNext(t_p) = pNext(p);
@@ -802,10 +822,14 @@ KINLINE long sLObject::pLDeg()
   assume(tp != NULL);
   if (bucket != NULL)
   {
+    if (kbucket_debug_tag != NULL)
+      kbucket_debug_tag("sLObject::pLDeg:bucket-attach", (void*)tp, -1, 0);
     int i = kBucketCanonicalize(bucket);
     pNext(tp) = bucket->buckets[i];
     long ldeg = tailRing->pLDeg(tp, &length, tailRing);
     pNext(tp) = NULL;
+    if (kbucket_debug_tag != NULL)
+      kbucket_debug_tag("sLObject::pLDeg:bucket-detach-done", (void*)tp, -1, 0);
     return ldeg;
   }
   else
@@ -864,10 +888,14 @@ KINLINE long sLObject::MinComp()
   assume(tp != NULL);
   if (bucket != NULL)
   {
+    if (kbucket_debug_tag != NULL)
+      kbucket_debug_tag("sLObject::MinComp:bucket-attach", (void*)tp, -1, 0);
     int i = kBucketCanonicalize(bucket);
     pNext(tp) = bucket->buckets[i];
     long m = p_MinComp(tp, tailRing);
     pNext(tp) = NULL;
+    if (kbucket_debug_tag != NULL)
+      kbucket_debug_tag("sLObject::MinComp:bucket-detach-done", (void*)tp, -1, 0);
     return m;
   }
   else
