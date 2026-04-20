@@ -1200,10 +1200,18 @@ static void process_survivor_lobject(SweepContext *ctx, LObject *P, int thread_i
     // are blocked while I hold S-shared; (b) tombstone CAS erases don't
     // shift indices.  pos_it now points at h (or the entry at find_pos'd
     // index); the arrival_id filter skips h in the clearS walk.
+    //
+    // atR: use P->i_r (set under our exclusive lock by enterT at
+    // kutil.cc:9092) instead of the racy strat->T.size()-1.  After we
+    // released S-exclusive and reacquired S-shared above, peer drainers
+    // can run their own phase-0 enterT, growing T.size() — so
+    // strat->T.size()-1 now points at a peer's R-slot, not ours.
+    // P->i_r is the persistent R-slot for our T entry.
+    int atR_for_pairs = P->i_r;
     if (rField_is_Ring(currRing))
-      superenterpairs(P->p, strat->S.size()-1, P->ecart, pos_it, strat, strat->T.size()-1);
+      superenterpairs(P->p, strat->S.size()-1, P->ecart, pos_it, strat, atR_for_pairs);
     else
-      enterpairs(P->p, strat->S.size()-1, P->ecart, pos_it, strat, strat->T.size()-1);
+      enterpairs(P->p, strat->S.size()-1, P->ecart, pos_it, strat, atR_for_pairs);
 
 #ifdef KTHREAD_INSTRUMENT
     if (KT_STATS(ctx))
