@@ -434,6 +434,12 @@ void kt_debug_R_write_probe(const char *site, int k,
 void kt_debug_audit_printf(const char *fmt, ...)
   __attribute__((format(printf, 1, 2)));
 
+// Scan strat->L for R-inconsistent pairs.  Returns count.  Emits an
+// audit-log line on any nonzero count.  Used for time-bisecting
+// where the R-rewrite occurs in the parallel-phase main loop.
+// Pass strat as void* to avoid pulling kutil.h into kthread.h.
+int kt_debug_R_scan_L(void *strat, const char *label);
+
 // Fingerprint over (p1, p2, i_r1, i_r2) — stamped at pair creation,
 // rechecked at pop and in the L-scan.  fp-mismatch proves in-flight
 // mutation of the pair's own fields; fp-match with T-disagreement

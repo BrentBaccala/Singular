@@ -300,6 +300,72 @@ void kt_debug_audit_printf(const char *fmt, ...)
   fflush(log);
 }
 
+// Scan strat->L and count pairs whose R[i_r2]->p doesn't match
+// pair.p2 (and same for p1/i_r1).  Emits direct to audit log on
+// any nonzero count.  Call at parallel-phase checkpoints to
+// time-bisect when R-mismatch first appears.  `label` is a short
+// site name; included in the audit line.
+//
+// WARNING: walks all of strat->L without taking L_lock.  Cheap, but
+// may observe a torn pair if a concurrent insert is mid-flight.
+// Acceptable for diagnostic narrowing — false-positive rate from
+// torn reads is negligible compared to the bug rate.
+int kt_debug_R_scan_L(void *strat_void, const char *label)
+{
+  if (!g_debug_ring_enabled.load(std::memory_order_relaxed)) return 0;
+  kStrategy strat = (kStrategy)strat_void;
+  int inconsistent_R = 0;
+  int total = 0;
+  int first_bad_k = -1;
+  void *first_bad_pair_p = NULL;
+  void *first_bad_R_p = NULL;
+  for (auto it = strat->L.begin(); it != strat->L.end(); ++it)
+  {
+    total++;
+    if (it->i_r2 >= 0 && it->i_r2 < (int)strat->T.size())
+    {
+      TObject *r_entry = strat->R[it->i_r2];
+      poly r_p = (r_entry != NULL) ? r_entry->p : NULL;
+      if (it->p2 != NULL && r_p != NULL && it->p2 != r_p)
+      {
+        inconsistent_R++;
+        if (first_bad_k < 0)
+        {
+          first_bad_k = it->i_r2;
+          first_bad_pair_p = (void*)it->p2;
+          first_bad_R_p = (void*)r_p;
+        }
+      }
+    }
+    if (it->i_r1 >= 0 && it->i_r1 < (int)strat->T.size())
+    {
+      TObject *r_entry = strat->R[it->i_r1];
+      poly r_p = (r_entry != NULL) ? r_entry->p : NULL;
+      if (it->p1 != NULL && r_p != NULL && it->p1 != r_p)
+      {
+        inconsistent_R++;
+        if (first_bad_k < 0)
+        {
+          first_bad_k = it->i_r1;
+          first_bad_pair_p = (void*)it->p1;
+          first_bad_R_p = (void*)r_p;
+        }
+      }
+    }
+  }
+  if (inconsistent_R > 0)
+  {
+    FILE *log = g_audit_log ? g_audit_log : stderr;
+    fprintf(log,
+            "=== R_SCAN_L (%s): |L|=%d  inconsistent_R=%d  "
+            "first_bad: k=%d pair_p=%p R[k]->p=%p ===\n",
+            label, total, inconsistent_R, first_bad_k,
+            first_bad_pair_p, first_bad_R_p);
+    fflush(log);
+  }
+  return inconsistent_R;
+}
+
 // R-write probe.  Called BEFORE each write to strat->R[k].  Compares
 // the pre-write R[k] (and its ->p) to the target being written.
 // Emits a direct audit-log line when the rewrite is "meaningful":
