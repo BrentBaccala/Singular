@@ -22,6 +22,7 @@
 #include "kernel/polys.h"
 
 #include "kernel/GBEngine/kutil.h"
+#include "kernel/GBEngine/kthread.h"
 #include "kernel/GBEngine/kstd1.h"
 #include "kernel/GBEngine/khstd.h"
 #include "kernel/combinatorics/stairc.h"
@@ -1241,6 +1242,52 @@ static void reorderT(kStrategy strat)
   TObject p;
   unsigned long sev;
 
+  // Pre-reorderT: scan T for invariant violations that would make
+  // reorderT's R-updates point at the wrong entry.
+  {
+    int n = (int)strat->T.size();
+    int dup_count = 0, r_mismatch = 0, oob = 0;
+    for (int a = 0; a < n; a++)
+    {
+      int ir = strat->T[a].i_r;
+      if (ir < 0 || ir >= (int)strat->R.size())
+      {
+        oob++;
+        kt_debug_audit_printf(
+          "=== reorderT:PRE OOB i_r: T[%d].p=%p .i_r=%d ===\n",
+          a, (void*)strat->T[a].p, ir);
+      }
+      else
+      {
+        TObject *r_entry = strat->R[ir];
+        if (r_entry != &strat->T[a])
+        {
+          r_mismatch++;
+          kt_debug_audit_printf(
+            "=== reorderT:PRE R[T[%d].i_r=%d]=%p != &T[%d]=%p  "
+            "T[%d].p=%p  R[%d]->p=%p ===\n",
+            a, ir, (void*)r_entry, a, (void*)&strat->T[a],
+            a, (void*)strat->T[a].p, ir,
+            r_entry ? (void*)r_entry->p : NULL);
+        }
+      }
+      for (int b = a+1; b < n; b++)
+      {
+        if (strat->T[b].i_r == ir && ir >= 0)
+        {
+          dup_count++;
+          kt_debug_audit_printf(
+            "=== reorderT:PRE DUP_i_r: T[%d].p=%p and T[%d].p=%p  "
+            "both .i_r=%d ===\n",
+            a, (void*)strat->T[a].p, b, (void*)strat->T[b].p, ir);
+        }
+      }
+    }
+    if (dup_count || r_mismatch || oob)
+      kt_debug_audit_printf(
+        "reorderT:PRE scan: T.size=%d  dups=%d  r_mismatch=%d  oob=%d\n",
+        n, dup_count, r_mismatch, oob);
+  }
 
   for (i=1; i < strat->T.size(); i++)
   {
@@ -1259,12 +1306,70 @@ static void reorderT(kStrategy strat)
       {
         strat->T[j+1]=strat->T[j];
         strat->sevT[j+1]=strat->sevT[j];
+        {
+          int k = strat->T[j+1].i_r;
+          TObject *old_target = (k >= 0) ? strat->R[k] : NULL;
+          poly old_p = (old_target != NULL) ? old_target->p : NULL;
+          TObject *new_target = &(strat->T[j+1]);
+          poly new_p = (new_target != NULL) ? new_target->p : NULL;
+          kt_debug_R_write_probe("reorderT:shift", k,
+                                 (void*)old_target, (void*)new_target,
+                                 (void*)old_p, (void*)new_p);
+        }
         strat->R[strat->T[j+1].i_r] = &(strat->T[j+1]);
       }
       strat->T[at+1]=p;
       strat->sevT[at+1] = sev;
+      {
+        int k = p.i_r;
+        TObject *old_target = (k >= 0) ? strat->R[k] : NULL;
+        poly old_p = (old_target != NULL) ? old_target->p : NULL;
+        TObject *new_target = &(strat->T[at+1]);
+        poly new_p = (new_target != NULL) ? new_target->p : NULL;
+        kt_debug_R_write_probe("reorderT:final", k,
+                               (void*)old_target, (void*)new_target,
+                               (void*)old_p, (void*)new_p);
+      }
       strat->R[p.i_r] = &(strat->T[at+1]);
     }
+  }
+
+  // Post-reorderT scan: verify the invariant wasn't broken.
+  {
+    int n = (int)strat->T.size();
+    int dup_count = 0, r_mismatch = 0;
+    for (int a = 0; a < n; a++)
+    {
+      int ir = strat->T[a].i_r;
+      if (ir >= 0 && ir < (int)strat->R.size())
+      {
+        if (strat->R[ir] != &strat->T[a])
+        {
+          r_mismatch++;
+          kt_debug_audit_printf(
+            "=== reorderT:POST R[T[%d].i_r=%d]=%p != &T[%d]=%p  "
+            "T[%d].p=%p  R[%d]->p=%p ===\n",
+            a, ir, (void*)strat->R[ir], a, (void*)&strat->T[a],
+            a, (void*)strat->T[a].p, ir,
+            strat->R[ir] ? (void*)strat->R[ir]->p : NULL);
+        }
+      }
+      for (int b = a+1; b < n; b++)
+      {
+        if (strat->T[b].i_r == ir && ir >= 0)
+        {
+          dup_count++;
+          kt_debug_audit_printf(
+            "=== reorderT:POST DUP_i_r: T[%d].p=%p and T[%d].p=%p  "
+            "both .i_r=%d ===\n",
+            a, (void*)strat->T[a].p, b, (void*)strat->T[b].p, ir);
+        }
+      }
+    }
+    if (dup_count || r_mismatch)
+      kt_debug_audit_printf(
+        "reorderT:POST scan: T.size=%d  dups=%d  r_mismatch=%d\n",
+        n, dup_count, r_mismatch);
   }
 }
 
@@ -1531,6 +1636,7 @@ static void updateT(kStrategy strat)
   while (i < strat->T.size())
   {
     p = strat->T[i];
+    poly orig_p = strat->T[i].p;
     deleteHC(&p,strat, TRUE);
     /*- tries to cancel a unit: -*/
     cancelunit(&p);
@@ -1540,6 +1646,15 @@ static void updateT(kStrategy strat)
     {
       strat->sevT[i] = pGetShortExpVector(p.p);
       p.SetpFDeg();
+      // THE SUSPECT (bug hunt): .p is about to change in-place.
+      // Any pair in strat->L with i_r2 == T[i].i_r has pair.p2 ==
+      // orig_p, and R[T[i].i_r]->p is about to become p.p (!=
+      // orig_p).  That flips pair consistency from consistent to
+      // R-inconsistent with NO WRITE TO R itself.
+      kt_debug_audit_printf(
+        "=== updateT:T[%d].p_CHANGED  i_r=%d  "
+        "old_p=%p  new_p=%p  reason=deleteHC/cancelunit ===\n",
+        i, strat->T[i].i_r, (void*)orig_p, (void*)p.p);
     }
     strat->T[i] = p;
     i++;

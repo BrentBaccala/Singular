@@ -9029,6 +9029,18 @@ void enterT(LObject &p, kStrategy strat, int atT)
     {
       strat->T[i] = strat->T[i-1];
       strat->sevT[i] = strat->sevT[i-1];
+      // R-write probe: shift-loop rewrite.  Expected to be benign
+      // (same ->p, new T-address); probe silent in that case.
+      {
+        int k = strat->T[i].i_r;
+        TObject *old_target = (k >= 0) ? strat->R[k] : NULL;
+        poly old_p = (old_target != NULL) ? old_target->p : NULL;
+        TObject *new_target = strat->T.addr(i);
+        poly new_p = (new_target != NULL) ? new_target->p : NULL;
+        kt_debug_R_write_probe("enterT:shift", k,
+                               (void*)old_target, (void*)new_target,
+                               (void*)old_p, (void*)new_p);
+      }
       strat->R[strat->T[i].i_r] = strat->T.addr(i);
     }
   }
@@ -9087,6 +9099,21 @@ void enterT(LObject &p, kStrategy strat, int atT)
   // reordering of the tl++ past the data writes.
   assume((p.sev == 0) || (pGetShortExpVector(p.p) == p.sev));
   strat->sevT[atT] = (p.sev == 0 ? pGetShortExpVector(p.p) : p.sev);
+  // R-write probe: fresh-slot write at end of enterT.  This is the
+  // KEY SUSPECT for the remaining real bug: if strat->R[T.size()]
+  // already held a non-NULL TObject whose .p differs from the new
+  // T[atT].p, we're reassigning an R-slot that a prior pair still
+  // references via its i_r2.
+  {
+    int k = (int)strat->T.size();
+    TObject *old_target = (k >= 0) ? strat->R[k] : NULL;
+    poly old_p = (old_target != NULL) ? old_target->p : NULL;
+    TObject *new_target = strat->T.addr(atT);
+    poly new_p = (new_target != NULL) ? new_target->p : NULL;
+    kt_debug_R_write_probe("enterT:fresh_slot", k,
+                           (void*)old_target, (void*)new_target,
+                           (void*)old_p, (void*)new_p);
+  }
   strat->R[strat->T.size()] = strat->T.addr(atT);
   strat->T[atT].i_r = strat->T.size();
   p.i_r = strat->T.size();  // propagate back so enterS can use it
@@ -9168,6 +9195,17 @@ void enterT_strong(LObject &p, kStrategy strat, int atT)
     {
       strat->T[i] = strat->T[i-1];
       strat->sevT[i] = strat->sevT[i-1];
+      // R-write probe: enterT_strong shift-loop rewrite.
+      {
+        int k = strat->T[i].i_r;
+        TObject *old_target = (k >= 0) ? strat->R[k] : NULL;
+        poly old_p = (old_target != NULL) ? old_target->p : NULL;
+        TObject *new_target = strat->T.addr(i);
+        poly new_p = (new_target != NULL) ? new_target->p : NULL;
+        kt_debug_R_write_probe("enterT_strong:shift", k,
+                               (void*)old_target, (void*)new_target,
+                               (void*)old_p, (void*)new_p);
+      }
       strat->R[strat->T[i].i_r] = strat->T.addr(i);
     }
   }
@@ -9196,6 +9234,17 @@ void enterT_strong(LObject &p, kStrategy strat, int atT)
                                          : strat->T[atT].t_p);
 
   strat->T.setsize(strat->T.size()+1);
+  // R-write probe: enterT_strong fresh-slot write.
+  {
+    int k = (int)strat->T.size()-1;
+    TObject *old_target = (k >= 0) ? strat->R[k] : NULL;
+    poly old_p = (old_target != NULL) ? old_target->p : NULL;
+    TObject *new_target = strat->T.addr(atT);
+    poly new_p = (new_target != NULL) ? new_target->p : NULL;
+    kt_debug_R_write_probe("enterT_strong:fresh_slot", k,
+                           (void*)old_target, (void*)new_target,
+                           (void*)old_p, (void*)new_p);
+  }
   strat->R[strat->T.size()-1] = strat->T.addr(atT);
   strat->T[atT].i_r = strat->T.size()-1;
   assume(p.sev == 0 || pGetShortExpVector(p.p) == p.sev);

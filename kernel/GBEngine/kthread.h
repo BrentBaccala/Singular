@@ -410,6 +410,19 @@ void *kt_debug_lookup_T_head(int tidx);
 void kt_debug_enterT_slot_probe(int atT, int pre_T_size,
                                 void *pre_T_atT_p, void *new_p);
 
+// Called from every strat->R[k] write site BEFORE the write.
+// Emits an audit line when R[k] is being replaced with a TObject
+// whose .p differs from the old one's.  Shift-loop no-ops (same .p,
+// different T-address) stay silent.
+void kt_debug_R_write_probe(const char *site, int k,
+                            void *old_target, void *new_target,
+                            void *old_p, void *new_p);
+
+// printf directly to the audit log (survives ring-buffer wrap).
+// Silent when the debug ring isn't enabled.
+void kt_debug_audit_printf(const char *fmt, ...)
+  __attribute__((format(printf, 1, 2)));
+
 // Fingerprint over (p1, p2, i_r1, i_r2) — stamped at pair creation,
 // rechecked at pop and in the L-scan.  fp-mismatch proves in-flight
 // mutation of the pair's own fields; fp-match with T-disagreement

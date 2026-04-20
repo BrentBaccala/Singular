@@ -49,6 +49,7 @@
 
 #include <cstdlib>
 #include <cstdio>
+#include <cstdarg>
 #include <cstring>
 
 /* ------------------------------------------------------------------ */
@@ -283,6 +284,58 @@ void kt_debug_enterT_slot_probe(int atT, int pre_T_size,
   tag_log(kt_debug_tid,
           overwrite ? "enterT:OVERWRITE_SLOT" : "enterT:SHIFT_ONLY",
           pre_T_atT_p, atT, pre_T_size);
+}
+
+// General-purpose audit-log emitter.  Writes a formatted line to
+// g_audit_log (or stderr) iff the debug ring is enabled.  Use for
+// diagnostics that need to survive ring-buffer wrap.
+void kt_debug_audit_printf(const char *fmt, ...)
+{
+  if (!g_debug_ring_enabled.load(std::memory_order_relaxed)) return;
+  FILE *log = g_audit_log ? g_audit_log : stderr;
+  va_list ap;
+  va_start(ap, fmt);
+  vfprintf(log, fmt, ap);
+  va_end(ap);
+  fflush(log);
+}
+
+// R-write probe.  Called BEFORE each write to strat->R[k].  Compares
+// the pre-write R[k] (and its ->p) to the target being written.
+// Emits a direct audit-log line when the rewrite is "meaningful":
+//   - old R[k] was non-NULL, and
+//   - old R[k]->p is different from new target's ->p.
+// A shift-loop rewrite that keeps R[k]->p the same (just points at
+// a new T-address) is expected and stays silent.  The "fresh-slot
+// with stale contents" rewrite — the suspected bug — fires loud.
+//
+// `site` is a short string naming the call site (free-form).
+// `old_target` is the pre-write R[k] TObject* (may be NULL).
+// `new_target` is the T-addr about to be written (should be non-NULL).
+// `old_p` / `new_p` are the .p fields of the TObjects, captured by
+//   the caller (passing them in avoids re-dereferencing possibly-
+//   stale pointers here).
+void kt_debug_R_write_probe(const char *site, int k,
+                            void *old_target, void *new_target,
+                            void *old_p, void *new_p)
+{
+  if (!g_debug_ring_enabled.load(std::memory_order_relaxed)) return;
+  if (old_target == NULL) return;              // first write, benign
+  if (old_p == new_p && old_target == new_target) return;  // no-op
+  if (old_p == new_p) {
+    // R[k] moved to a new T-address but still points at same .p —
+    // this is the shift-loop's benign update.  Silent.
+    return;
+  }
+  // Meaningful rewrite — old and new .p differ.
+  FILE *log = g_audit_log ? g_audit_log : stderr;
+  fprintf(log,
+          "=== R_WRITE:OVERWRITE site=%s  R[%d]  "
+          "old_target=%p old_p=%p  new_target=%p new_p=%p ===\n",
+          site, k, old_target, new_target, old_p, new_p);
+  fflush(log);
+  tag_log(kt_debug_tid, "R:OVERWRITE_DIFF_POLY",
+          old_p, k, 0);
 }
 
 // ---------------------------------------------------------------------
