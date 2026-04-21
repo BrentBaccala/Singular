@@ -2864,8 +2864,15 @@ ideal bba (ideal F, ideal Q,intvec *w,bigintmat *hilb,kStrategy strat)
   /* parallel bba: dispatch to parallel loop if SINGULAR_THREADS > 1. */
   {
     int singular_threads = get_singular_threads();
-    if (singular_threads > 1 && strat->red == redHoney)
+    int min_f = 0;
+    const char *mf = getenv("SINGULAR_MIN_F_PARALLEL");
+    if (mf != NULL) min_f = atoi(mf);
+    if (singular_threads > 1 && strat->red == redHoney
+        && IDELEMS(F) >= min_f)
     {
+      if (getenv("SINGULAR_LOG_F_SIZES") != NULL)
+        fprintf(stderr, "[bba] dispatch: |F|=%d nvars=%d\n",
+                IDELEMS(F), currRing ? currRing->N : -1);
       SweepContext *pctx = sweep_context_init(strat, singular_threads);
       bba_parallel_loop(pctx);
       sweep_context_destroy(pctx);
