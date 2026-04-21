@@ -2867,27 +2867,63 @@ ideal bba (ideal F, ideal Q,intvec *w,bigintmat *hilb,kStrategy strat)
   //kDebugPrint(strat);
 #endif
 
-  /* parallel bba: dispatch to parallel loop if SINGULAR_THREADS > 1.
-   *
-   * Gate by input size: the parallel reducer has an unidentified
-   * correctness bug for small inputs (e.g. normal.lib's genus(i) on
-   * bug_532_s.tst dispatches std() with |F|=3 and gets wrong results
-   * under THREADS=4 but right results for |F|>=4).  Default
-   * threshold MIN_F_PARALLEL=4.  Override via environment.
-   */
+  /* parallel bba: dispatch to parallel loop if SINGULAR_THREADS > 1. */
   {
     int singular_threads = get_singular_threads();
     int min_f = 4;
     const char *mfs = getenv("SINGULAR_MIN_F_PARALLEL");
     if (mfs != NULL) min_f = atoi(mfs);
+    static int __dispatch_id = 0;
+    int __my_id = __dispatch_id++;
+    // Skip list: SINGULAR_SKIP_DISPATCH="3,7,9" forces these ids serial
+    bool __skip_me = false;
+    const char *__skip_list = getenv("SINGULAR_SKIP_DISPATCH");
+    if (__skip_list != NULL) {
+      char buf[256]; strncpy(buf, __skip_list, 255); buf[255] = 0;
+      char *tok = strtok(buf, ",");
+      while (tok) {
+        if (atoi(tok) == __my_id) { __skip_me = true; break; }
+        tok = strtok(NULL, ",");
+      }
+    }
     if (singular_threads > 1 && strat->red == redHoney
-        && IDELEMS(F) >= min_f)
+        && IDELEMS(F) >= min_f && !__skip_me)
     {
+      if (getenv("SINGULAR_LOG_DISPATCH") != NULL)
+        fprintf(stderr, "[bba#%d] parallel dispatch |L|=%d |F|=%d\n",
+                __my_id, (int)strat->L.size(), IDELEMS(F));
+      if (getenv("SINGULAR_DUMP_DISPATCH_F") != NULL)
+      {
+        char path[128];
+        snprintf(path, sizeof(path),
+                 "/tmp/audit-run/F-dispatch-%d.txt", __my_id);
+        FILE *fp = fopen(path, "w");
+        if (fp)
+        {
+          fprintf(fp, "dispatch id %d  |F|=%d\n", __my_id, IDELEMS(F));
+          fprintf(fp, "ring-nvars=%d  pCompIndex=%d  bitmask=%lu\n",
+                  currRing->N, currRing->pCompIndex,
+                  (unsigned long)currRing->bitmask);
+          for (int __i = 0; __i < IDELEMS(F); __i++)
+          {
+            char *s = pString(F->m[__i]);
+            fprintf(fp, "F[%d] = %s\n", __i, s ? s : "0");
+            if (s) omFree(s);
+          }
+          // Also dump G (output) after bba finishes — but we're
+          // pre-dispatch here, so just flag; full dump not feasible
+          // at this point.
+          fclose(fp);
+        }
+      }
       SweepContext *pctx = sweep_context_init(strat, singular_threads);
       bba_parallel_loop(pctx);
       sweep_context_destroy(pctx);
       goto bba_post_loop;
     }
+    else if (getenv("SINGULAR_LOG_DISPATCH") != NULL)
+      fprintf(stderr, "[bba#%d] serial |F|=%d skip=%d\n",
+              __my_id, IDELEMS(F), __skip_me ? 1 : 0);
   }
 
   /* compute------------------------------------------------------- */
