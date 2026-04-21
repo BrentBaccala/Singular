@@ -57,7 +57,7 @@ SLIB1 = arr.lib arnold.lib arnoldclassify.lib \
 	parallel.lib polyclass.lib polymake.lib polybori.lib \
 	puiseuxexpansions.lib \
 	realizationMatroids.lib resources.lib \
-	rootisolation.lib rwalk.lib rstandard.lib \
+	rootisolation.lib rustgb-dispatch.lib rwalk.lib rstandard.lib \
 	sagbiNormaliz0.lib\
 	schreyer.lib sets.lib SingularityDBM.lib symodstd.lib schubert.lib swalk.lib \
 	ssi.lib \

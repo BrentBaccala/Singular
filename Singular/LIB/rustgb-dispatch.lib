@@ -1,0 +1,87 @@
+//////////////////////////////////////////////////////////////////////////////
+version="version rustgb-dispatch.lib 0.1 Apr_2026 ";
+category="Experimental";
+info="
+LIBRARY:  rustgb-dispatch.lib  Dispatch std() to rustgb_std() for matching rings
+
+OVERVIEW:
+  Loads on top of singrust.so to transparently dispatch std(I) calls to
+  rustgb_std(I) whenever the basering matches rustgb's scope:
+  - characteristic Z/p with 2 <= p < 2^31 (no Q, no Z, no GF(q), no algext)
+  - degrevlex ordering only (allowing optional leading or trailing C/c block)
+  - commutative (no Plural rings; no parameters)
+  - up to 31 variables
+
+  For every other ring shape, dispatch falls through to bba(I) (the renamed
+  builtin formerly named std).
+
+  std(I, p) (the 2-argument incremental form) always falls through to bba()
+  because rustgb has no incremental interface.
+
+  Each dispatch decision is recorded via tst_ignore() so regress.cmd-based
+  validation harnesses can classify which engine actually ran. The
+  tst_ignore: lines are stripped from regress.cmd's diff comparison but
+  remain visible in the raw .new.res file.
+
+PROCEDURES:
+  std(I[,p])    dispatch to rustgb_std or bba based on basering shape
+";
+
+proc dbg_rgb(string msg) {
+  if (defined(tst_ignore)) { tst_ignore(msg); }
+}
+
+proc std (def I, list #)
+"USAGE:    std(I[,p]); I ideal/module, p poly/bigintvec
+RETURN:    same type as I -- a Groebner basis of I in basering
+PURPOSE:   Dispatch wrapper that routes to rustgb_std() when the basering
+           matches rustgb's supported scope (Z/p, degrevlex, commutative,
+           <= 31 vars), otherwise falls through to bba(). The 2-arg form
+           always falls through.
+SEE ALSO:  bba, rustgb_std
+"
+{
+  if (size(#) == 0) {
+    list rl = ringlist(basering);
+    int ok = 1;
+    // rustgb_std only accepts ideal. Other std-accepted types (poly,
+    // module, smatrix, matrix) must fall through to bba.
+    if (typeof(I) != "ideal") { ok = 0; }
+    if (ok) { if (npars(basering) != 0) { ok = 0; } }
+    if (ok) { if (typeof(rl[1]) != "int") { ok = 0; } }
+    if (ok) { if (char(basering) <= 0 || char(basering) >= 2147483648) { ok = 0; } }
+    if (ok) { if (nvars(basering) > 31) { ok = 0; } }
+    if (ok) {
+      int ord_ok = 0;
+      if (size(rl[3]) >= 1) {
+        if (string(rl[3][1][1]) == "dp") { ord_ok = 1; }
+      }
+      if (!ord_ok && size(rl[3]) >= 2) {
+        if ((string(rl[3][1][1]) == "c" || string(rl[3][1][1]) == "C")
+            && string(rl[3][2][1]) == "dp") { ord_ok = 1; }
+      }
+      if (!ord_ok) { ok = 0; }
+    }
+    if (ok) {
+      dbg_rgb("rustgb-dispatch: rgb fired");
+      def G = rustgb_std(I);
+      attrib(G, "isSB", 1);
+      return(G);
+    }
+    dbg_rgb("rustgb-dispatch: bba fallthrough");
+    return(bba(I));
+  }
+  if (size(#) == 1) {
+    dbg_rgb("rustgb-dispatch: 2-arg std -> bba");
+    return(bba(I, #[1]));
+  }
+  if (size(#) == 2) {
+    dbg_rgb("rustgb-dispatch: 3-arg std -> bba");
+    return(bba(I, #[1], #[2]));
+  }
+  if (size(#) == 3) {
+    dbg_rgb("rustgb-dispatch: 4-arg std -> bba");
+    return(bba(I, #[1], #[2], #[3]));
+  }
+  ERROR("std: 1..4 arguments expected, got " + string(size(#)+1));
+}
