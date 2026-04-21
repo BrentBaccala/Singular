@@ -220,9 +220,9 @@
 // operation: sortvec (ideal)  ->  intvec
 // operation: sortvec (module)  ->  intvec
 // operation: sqrfree (poly)  ->  list, only commutative rings, field coeffs
-// operation: std (ideal)  ->  ideal
-// operation: std (module)  ->  module
-// operation: std (smatrix)  ->  smatrix
+// operation: bba (ideal)  ->  ideal
+// operation: bba (module)  ->  module
+// operation: bba (smatrix)  ->  smatrix
 // operation: string (string)  ->  string
 // operation: syz (ideal)  ->  module, field coeffs for non-global orderings
 // operation: syz (module)  ->  module, field coeffs for non-global orderings
@@ -638,12 +638,12 @@
 // operation: status (list, int)  ->  int
 // operation: sres (ideal, int)  ->  resolution, only commutative rings
 // operation: sres (module, int)  ->  resolution, only commutative rings
-// operation: std (ideal, poly)  ->  ideal
-// operation: std (module, vector)  ->  module
-// operation: std (ideal, ideal)  ->  ideal
-// operation: std (module, module)  ->  module
-// operation: std (ideal, bigintvec)  ->  ideal, field coeffs
-// operation: std (module, bigintvec)  ->  module, field coeffs
+// operation: bba (ideal, poly)  ->  ideal
+// operation: bba (module, vector)  ->  module
+// operation: bba (ideal, ideal)  ->  ideal
+// operation: bba (module, module)  ->  module
+// operation: bba (ideal, bigintvec)  ->  ideal, field coeffs
+// operation: bba (module, bigintvec)  ->  module, field coeffs
 // operation: syz (ideal, string)  ->  module
 // operation: syz (module, string)  ->  module
 // operation: tensor (matrix, matrix)  ->  matrix
@@ -747,8 +747,8 @@
 // operation: sba (ideal, int, int)  ->  ideal
 // operation: sba (module, int, int)  ->  module
 // operation: status (link, string, string)  ->  int
-// operation: std (ideal, bigintvec, intvec)  ->  ideal, field coeffs
-// operation: std (module, bigintvec, intvec)  ->  module, field coeffs
+// operation: bba (ideal, bigintvec, intvec)  ->  ideal, field coeffs
+// operation: bba (module, bigintvec, intvec)  ->  module, field coeffs
 // operation: subst (def, poly, polyBucket)  ->  any_type
 // operation: subst (poly, poly, poly)  ->  poly
 // operation: subst (vector, poly, poly)  ->  vector
@@ -829,10 +829,10 @@
 // operation: status (...)  ->  int ( 4 arguments )
 // operation: simplex (...)  ->  list ( 6 arguments )
 // operation: uressolve (...)  ->  list ( 4 arguments )
-// operation: std (...)  ->  ideal ( 1 arguments )
-// operation: std (...)  ->  ideal ( 2 arguments )
-// operation: std (...)  ->  ideal ( 3 arguments )
-// operation: std (...)  ->  ideal ( 4 arguments )
+// operation: bba (...)  ->  ideal ( 1 arguments )
+// operation: bba (...)  ->  ideal ( 2 arguments )
+// operation: bba (...)  ->  ideal ( 3 arguments )
+// operation: bba (...)  ->  ideal ( 4 arguments )
 // operation: qrds (...)  ->  list ( 4 arguments )
 // operation: factmodd (...)  ->  list ( number of arguments >0 )
 /*---------------------------------------------*/
@@ -1138,7 +1138,7 @@
 // token 507 : sqrfree
 // token 508 : sres
 // token 509 : status
-// token 510 : std
+// token 510 : bba
 // token 511 : string
 // token 512 : subst
 // token 513 : system
@@ -1289,7 +1289,7 @@ const struct sValCmdTab dArithTab1[]=
  { 505,202 }, /* slimgb */
  { 506,205 }, /* sortvec */
  { 507,207 }, /* sqrfree */
- { 510,208 }, /* std */
+ { 510,208 }, /* bba */
  { 511,211 }, /* string */
  { 514,212 }, /* syz */
  { 517,220 }, /* transpose */
@@ -1398,7 +1398,7 @@ const struct sValCmdTab dArithTab2[]=
  { 507,377 }, /* sqrfree */
  { 508,380 }, /* sres */
  { 509,378 }, /* status */
- { 510,382 }, /* std */
+ { 510,382 }, /* bba */
  { 514,388 }, /* syz */
  { 515,390 }, /* tensor */
  { 526,393 }, /* varstr */
@@ -1436,201 +1436,201 @@ void iiInitCmdName()
   iiArithAddCmd("apply",               0, 329, 329, 12);
   iiArithAddCmd("attrib",              0, 360, CMD_123, 13);
   iiArithAddCmd("bareiss",             0, 361, CMD_13, 14);
-  iiArithAddCmd("betti",               0, 285, CMD_12, 15);
-  iiArithAddCmd("bigint",              0, 362, ROOT_DECL, 16);
-  iiArithAddCmd("bigintmat",           0, 269, 269, 17);
-  iiArithAddCmd("bigintvec",           0, 270, ROOT_DECL_LIST, 18);
-  iiArithAddCmd("bracket",             0, 364, CMD_23, 19);
-  iiArithAddCmd("branchTo",            0, 363, CMD_M, 20);
-  iiArithAddCmd("break",               0, 331, 331, 21);
-  iiArithAddCmd("breakpoint",          0, 365, CMD_M, 22);
-  iiArithAddCmd("char",                0, 366, CMD_1, 23);
-  iiArithAddCmd("char_series",         0, 368, CMD_1, 24);
-  iiArithAddCmd("charstr",             0, 367, CMD_1, 25);
-  iiArithAddCmd("chinrem",             0, 369, CMD_2, 26);
-  iiArithAddCmd("cleardenom",          0, 377, CMD_1, 27);
-  iiArithAddCmd("close",               0, 373, CMD_1, 28);
-  iiArithAddCmd("coef",                0, 375, CMD_M, 29);
-  iiArithAddCmd("coeffs",              0, 374, CMD_123, 30);
-  iiArithAddCmd("continue",            0, 332, 332, 31);
-  iiArithAddCmd("contract",            0, 378, CMD_2, 32);
-  iiArithAddCmd("convhull",            0, 464, CMD_1, 33);
-  iiArithAddCmd("cring",               0, 380, ROOT_DECL, 34);
-  iiArithAddCmd("dbprint",             0, 381, CMD_M, 35);
-  iiArithAddCmd("def",                 0, 382, ROOT_DECL, 36);
-  iiArithAddCmd("defined",             0, 383, CMD_1, 37);
-  iiArithAddCmd("deg",                 0, 384, CMD_12, 38);
-  iiArithAddCmd("degBound",            0, 298, SYSVAR, 39);
-  iiArithAddCmd("degree",              0, 385, CMD_1, 40);
-  iiArithAddCmd("delete",              0, 386, CMD_2, 41);
-  iiArithAddCmd("denominator",         0, 387, CMD_1, 42);
-  iiArithAddCmd("det",                 0, 388, CMD_12, 43);
-  iiArithAddCmd("diff",                0, 389, CMD_2, 44);
-  iiArithAddCmd("dim",                 0, 390, CMD_12, 45);
-  iiArithAddCmd("div",                 0, 421, '/', 46);
-  iiArithAddCmd("division",            0, 391, CMD_M, 47);
-  iiArithAddCmd("dump",                0, 392, CMD_1, 48);
-  iiArithAddCmd("echo",                0, 533, SYSVAR, 49);
-  iiArithAddCmd("eliminate",           0, 393, CMD_23, 50);
-  iiArithAddCmd("else",                0, 333, 333, 51);
-  iiArithAddCmd("envelope",            0, 395, CMD_1, 52);
-  iiArithAddCmd("eval",                0, 334, 334, 53);
-  iiArithAddCmd("example",             0, 315, 315, 54);
-  iiArithAddCmd("execute",             0, 397, CMD_1, 55);
-  iiArithAddCmd("export",              0, 316, 316, 56);
-  iiArithAddCmd("exportto",            0, 398, CMD_2, 57);
-  iiArithAddCmd("extgcd",              0, 399, CMD_2, 58);
-  iiArithAddCmd("facstd",              0, 403, CMD_12, 59);
-  iiArithAddCmd("factmodd",            0, 404, CMD_M, 60);
-  iiArithAddCmd("factorize",           0, 400, CMD_12, 61);
-  iiArithAddCmd("farey",               0, 401, CMD_2, 62);
-  iiArithAddCmd("fetch",               0, 287, CMD_M, 63);
-  iiArithAddCmd("fglm",                0, 407, CMD_2, 64);
-  iiArithAddCmd("fglmquot",            0, 408, CMD_2, 65);
-  iiArithAddCmd("find",                0, 402, CMD_23, 66);
-  iiArithAddCmd("finduni",             0, 409, CMD_1, 67);
-  iiArithAddCmd("forif",               0, 337, 337, 68);
-  iiArithAddCmd("freemodule",          0, 288, CMD_1, 69);
-  iiArithAddCmd("fres",                0, 405, CMD_23, 70);
-  iiArithAddCmd("frwalk",              0, 406, CMD_23, 71);
-  iiArithAddCmd("gcd",                 0, 410, CMD_2, 72);
-  iiArithAddCmd("gen",                 0, 286, CMD_1, 73);
-  iiArithAddCmd("getdump",             0, 411, CMD_1, 74);
-  iiArithAddCmd("highcorner",          0, 412, CMD_1, 75);
-  iiArithAddCmd("hilb",                0, 413, CMD_M, 76);
-  iiArithAddCmd("homog",               0, 414, CMD_123, 77);
-  iiArithAddCmd("hres",                0, 415, CMD_2, 78);
-  iiArithAddCmd("ideal",               0, 276, 314, 79);
-  iiArithAddCmd("if",                  0, 337, 337, 80);
-  iiArithAddCmd("imap",                0, 290, CMD_2, 81);
-  iiArithAddCmd("impart",              0, 416, CMD_1, 82);
-  iiArithAddCmd("importfrom",          0, 417, CMD_2, 83);
-  iiArithAddCmd("indepSet",            0, 418, CMD_12, 84);
-  iiArithAddCmd("insert",              0, 419, CMD_23, 85);
-  iiArithAddCmd("int",                 0, 420, ROOT_DECL, 86);
-  iiArithAddCmd("interpolation",       0, 422, CMD_2, 87);
-  iiArithAddCmd("interred",            0, 423, CMD_1, 88);
-  iiArithAddCmd("intersect",           0, 424, CMD_M, 89);
-  iiArithAddCmd("intmat",              0, 271, 271, 90);
-  iiArithAddCmd("intvec",              0, 425, ROOT_DECL_LIST, 91);
-  iiArithAddCmd("jacob",               0, 427, CMD_1, 92);
-  iiArithAddCmd("janet",               0, 428, CMD_12, 93);
-  iiArithAddCmd("jet",                 0, 429, CMD_M, 94);
-  iiArithAddCmd("kbase",               0, 430, CMD_12, 95);
-  iiArithAddCmd("keepring",            0, 289, 289, 96);
-  iiArithAddCmd("kernel",              0, 431, CMD_12, 97);
-  iiArithAddCmd("kill",                0, 318, 318, 98);
-  iiArithAddCmd("killattrib",          0, 432, CMD_12, 99);
-  iiArithAddCmd("koszul",              0, 291, CMD_23, 100);
-  iiArithAddCmd("kres",                0, 433, CMD_2, 101);
-  iiArithAddCmd("laguerre",            0, 434, CMD_13, 102);
-  iiArithAddCmd("lead",                0, 435, CMD_1, 103);
-  iiArithAddCmd("leadcoef",            0, 436, CMD_1, 104);
-  iiArithAddCmd("leadexp",             0, 437, CMD_1, 105);
-  iiArithAddCmd("leadmonom",           0, 438, CMD_1, 106);
-  iiArithAddCmd("lift",                0, 440, CMD_M, 107);
-  iiArithAddCmd("liftstd",             0, 439, CMD_M, 108);
-  iiArithAddCmd("link",                0, 441, ROOT_DECL, 109);
-  iiArithAddCmd("list",                0, 442, ROOT_DECL_LIST, 110);
-  iiArithAddCmd("listvar",             0, 320, 320, 111);
-  iiArithAddCmd("load",                0, 443, CMD_12, 112);
-  iiArithAddCmd("lres",                0, 444, CMD_2, 113);
-  iiArithAddCmd("ludecomp",            0, 445, CMD_1, 114);
-  iiArithAddCmd("luinverse",           0, 446, CMD_M, 115);
-  iiArithAddCmd("lusolve",             0, 447, CMD_M, 116);
-  iiArithAddCmd("map",                 0, 277, RING_DECL, 117);
-  iiArithAddCmd("matrix",              0, 278, 278, 118);
-  iiArithAddCmd("maxideal",            0, 292, CMD_1, 119);
-  iiArithAddCmd("memory",              0, 448, CMD_1, 120);
-  iiArithAddCmd("minbase",             0, 449, CMD_1, 121);
-  iiArithAddCmd("minor",               0, 450, CMD_M, 122);
-  iiArithAddCmd("minpoly",             0, 301, SYSVAR, 123);
-  iiArithAddCmd("minres",              0, 451, CMD_1, 124);
-  iiArithAddCmd("mod",                 0,  37, '/', 125);
-  iiArithAddCmd("module",              0, 279, 314, 126);
-  iiArithAddCmd("modulo",              0, 452, CMD_M, 127);
-  iiArithAddCmd("monitor",             0, 453, CMD_12, 128);
-  iiArithAddCmd("monomial",            0, 293, CMD_1, 129);
-  iiArithAddCmd("mpresmat",            0, 454, CMD_2, 130);
-  iiArithAddCmd("mres",                0, 455, CMD_2, 131);
-  iiArithAddCmd("mres_map",            0, 456, CMD_3, 132);
-  iiArithAddCmd("mstd",                0, 457, CMD_1, 133);
-  iiArithAddCmd("mult",                0, 458, CMD_1, 134);
-  iiArithAddCmd("multBound",           0, 299, SYSVAR, 135);
-  iiArithAddCmd("multiplicity",        1, 458, CMD_1, 136);
-  iiArithAddCmd("nameof",              0, 459, CMD_1, 137);
-  iiArithAddCmd("names",               0, 460, CMD_M, 138);
-  iiArithAddCmd("nc_algebra",          0, 463, CMD_2, 139);
-  iiArithAddCmd("ncalgebra",           2, 462, CMD_2, 140);
-  iiArithAddCmd("ncols",               0, 376, CMD_1, 141);
-  iiArithAddCmd("newstruct",           0, 461, CMD_23, 142);
-  iiArithAddCmd("noether",             0, 300, SYSVAR, 143);
-  iiArithAddCmd("not",                 0, 263, 263, 144);
-  iiArithAddCmd("npars",               0, 465, CMD_1, 145);
-  iiArithAddCmd("nres",                0, 493, CMD_2, 146);
-  iiArithAddCmd("nrows",               0, 501, CMD_1, 147);
-  iiArithAddCmd("number",              0, 280, RING_DECL, 148);
-  iiArithAddCmd("numerator",           0, 466, CMD_1, 149);
-  iiArithAddCmd("nvars",               0, 467, CMD_1, 150);
-  iiArithAddCmd("open",                0, 469, CMD_1, 151);
-  iiArithAddCmd("oppose",              0, 470, CMD_2, 152);
-  iiArithAddCmd("opposite",            0, 471, CMD_1, 153);
-  iiArithAddCmd("option",              0, 472, CMD_M, 154);
-  iiArithAddCmd("or",                  0, 124, '&', 155);
-  iiArithAddCmd("ord",                 0, 468, CMD_1, 156);
-  iiArithAddCmd("ordstr",              0, 473, CMD_1, 157);
-  iiArithAddCmd("package",             0, 474, ROOT_DECL, 158);
-  iiArithAddCmd("pagewidth",           0, 534, SYSVAR, 159);
-  iiArithAddCmd("par",                 0, 294, CMD_1, 160);
-  iiArithAddCmd("parameter",           0, 341, 341, 161);
-  iiArithAddCmd("pardeg",              0, 475, CMD_1, 162);
-  iiArithAddCmd("parstr",              0, 477, CMD_12, 163);
-  iiArithAddCmd("poly",                0, 281, RING_DECL, 164);
-  iiArithAddCmd("polyBucket",          0, 275, RING_DECL, 165);
-  iiArithAddCmd("preimage",            0, 295, CMD_13, 166);
-  iiArithAddCmd("prime",               0, 479, CMD_1, 167);
-  iiArithAddCmd("primefactors",        0, 478, CMD_12, 168);
-  iiArithAddCmd("print",               0, 480, CMD_12, 169);
-  iiArithAddCmd("printlevel",          0, 540, SYSVAR, 170);
-  iiArithAddCmd("proc",                0, 272, 272, 171);
-  iiArithAddCmd("prune",               0, 481, CMD_1, 172);
-  iiArithAddCmd("prune_map",           0, 482, CMD_2, 173);
-  iiArithAddCmd("qhweight",            0, 483, CMD_1, 174);
-  iiArithAddCmd("qrds",                0, 485, CMD_M, 175);
-  iiArithAddCmd("qring",               0, 484, ROOT_DECL, 176);
-  iiArithAddCmd("quote",               0, 335, 335, 177);
-  iiArithAddCmd("quotient",            0, 486, CMD_2, 178);
-  iiArithAddCmd("random",              0, 487, CMD_23, 179);
-  iiArithAddCmd("rank",                0, 488, CMD_12, 180);
-  iiArithAddCmd("read",                0, 489, CMD_12, 181);
-  iiArithAddCmd("reduce",              0, 490, CMD_M, 182);
-  iiArithAddCmd("regularity",          0, 491, CMD_1, 183);
-  iiArithAddCmd("repart",              0, 492, CMD_1, 184);
-  iiArithAddCmd("reservedName",        0, 494, CMD_M, 185);
-  iiArithAddCmd("reservedNameList",    0, 495, CMD_M, 186);
-  iiArithAddCmd("resolution",          0, 282, RING_DECL, 187);
-  iiArithAddCmd("restart",             0, 496, CMD_1, 188);
-  iiArithAddCmd("resultant",           0, 497, CMD_3, 189);
-  iiArithAddCmd("return",              0, 340, 340, 190);
-  iiArithAddCmd("rightstd",            0, 498, CMD_1, 191);
-  iiArithAddCmd("ring",                0, 273, 273, 192);
-  iiArithAddCmd("ring_list",           0, 500, CMD_1, 193);
-  iiArithAddCmd("ringlist",            0, 499, CMD_1, 194);
-  iiArithAddCmd("rtimer",              0, 536, SYSVAR, 195);
-  iiArithAddCmd("rvar",                0, 426, CMD_1, 196);
-  iiArithAddCmd("sba",                 0, 502, CMD_123, 197);
-  iiArithAddCmd("setring",             0, 321, 321, 198);
-  iiArithAddCmd("short",               0, 539, SYSVAR, 199);
-  iiArithAddCmd("simplex",             0, 503, CMD_M, 200);
-  iiArithAddCmd("simplify",            0, 504, CMD_2, 201);
-  iiArithAddCmd("size",                0, 379, CMD_1, 202);
-  iiArithAddCmd("slimgb",              0, 505, CMD_1, 203);
-  iiArithAddCmd("smatrix",             0, 283, 283, 204);
-  iiArithAddCmd("sortvec",             0, 506, CMD_1, 205);
-  iiArithAddCmd("sqrfree",             0, 507, CMD_12, 206);
-  iiArithAddCmd("sres",                0, 508, CMD_2, 207);
-  iiArithAddCmd("status",              0, 509, CMD_M, 208);
-  iiArithAddCmd("std",                 0, 510, CMD_M, 209);
+  iiArithAddCmd("bba",                 0, 510, CMD_M, 15);
+  iiArithAddCmd("betti",               0, 285, CMD_12, 16);
+  iiArithAddCmd("bigint",              0, 362, ROOT_DECL, 17);
+  iiArithAddCmd("bigintmat",           0, 269, 269, 18);
+  iiArithAddCmd("bigintvec",           0, 270, ROOT_DECL_LIST, 19);
+  iiArithAddCmd("bracket",             0, 364, CMD_23, 20);
+  iiArithAddCmd("branchTo",            0, 363, CMD_M, 21);
+  iiArithAddCmd("break",               0, 331, 331, 22);
+  iiArithAddCmd("breakpoint",          0, 365, CMD_M, 23);
+  iiArithAddCmd("char",                0, 366, CMD_1, 24);
+  iiArithAddCmd("char_series",         0, 368, CMD_1, 25);
+  iiArithAddCmd("charstr",             0, 367, CMD_1, 26);
+  iiArithAddCmd("chinrem",             0, 369, CMD_2, 27);
+  iiArithAddCmd("cleardenom",          0, 377, CMD_1, 28);
+  iiArithAddCmd("close",               0, 373, CMD_1, 29);
+  iiArithAddCmd("coef",                0, 375, CMD_M, 30);
+  iiArithAddCmd("coeffs",              0, 374, CMD_123, 31);
+  iiArithAddCmd("continue",            0, 332, 332, 32);
+  iiArithAddCmd("contract",            0, 378, CMD_2, 33);
+  iiArithAddCmd("convhull",            0, 464, CMD_1, 34);
+  iiArithAddCmd("cring",               0, 380, ROOT_DECL, 35);
+  iiArithAddCmd("dbprint",             0, 381, CMD_M, 36);
+  iiArithAddCmd("def",                 0, 382, ROOT_DECL, 37);
+  iiArithAddCmd("defined",             0, 383, CMD_1, 38);
+  iiArithAddCmd("deg",                 0, 384, CMD_12, 39);
+  iiArithAddCmd("degBound",            0, 298, SYSVAR, 40);
+  iiArithAddCmd("degree",              0, 385, CMD_1, 41);
+  iiArithAddCmd("delete",              0, 386, CMD_2, 42);
+  iiArithAddCmd("denominator",         0, 387, CMD_1, 43);
+  iiArithAddCmd("det",                 0, 388, CMD_12, 44);
+  iiArithAddCmd("diff",                0, 389, CMD_2, 45);
+  iiArithAddCmd("dim",                 0, 390, CMD_12, 46);
+  iiArithAddCmd("div",                 0, 421, '/', 47);
+  iiArithAddCmd("division",            0, 391, CMD_M, 48);
+  iiArithAddCmd("dump",                0, 392, CMD_1, 49);
+  iiArithAddCmd("echo",                0, 533, SYSVAR, 50);
+  iiArithAddCmd("eliminate",           0, 393, CMD_23, 51);
+  iiArithAddCmd("else",                0, 333, 333, 52);
+  iiArithAddCmd("envelope",            0, 395, CMD_1, 53);
+  iiArithAddCmd("eval",                0, 334, 334, 54);
+  iiArithAddCmd("example",             0, 315, 315, 55);
+  iiArithAddCmd("execute",             0, 397, CMD_1, 56);
+  iiArithAddCmd("export",              0, 316, 316, 57);
+  iiArithAddCmd("exportto",            0, 398, CMD_2, 58);
+  iiArithAddCmd("extgcd",              0, 399, CMD_2, 59);
+  iiArithAddCmd("facstd",              0, 403, CMD_12, 60);
+  iiArithAddCmd("factmodd",            0, 404, CMD_M, 61);
+  iiArithAddCmd("factorize",           0, 400, CMD_12, 62);
+  iiArithAddCmd("farey",               0, 401, CMD_2, 63);
+  iiArithAddCmd("fetch",               0, 287, CMD_M, 64);
+  iiArithAddCmd("fglm",                0, 407, CMD_2, 65);
+  iiArithAddCmd("fglmquot",            0, 408, CMD_2, 66);
+  iiArithAddCmd("find",                0, 402, CMD_23, 67);
+  iiArithAddCmd("finduni",             0, 409, CMD_1, 68);
+  iiArithAddCmd("forif",               0, 337, 337, 69);
+  iiArithAddCmd("freemodule",          0, 288, CMD_1, 70);
+  iiArithAddCmd("fres",                0, 405, CMD_23, 71);
+  iiArithAddCmd("frwalk",              0, 406, CMD_23, 72);
+  iiArithAddCmd("gcd",                 0, 410, CMD_2, 73);
+  iiArithAddCmd("gen",                 0, 286, CMD_1, 74);
+  iiArithAddCmd("getdump",             0, 411, CMD_1, 75);
+  iiArithAddCmd("highcorner",          0, 412, CMD_1, 76);
+  iiArithAddCmd("hilb",                0, 413, CMD_M, 77);
+  iiArithAddCmd("homog",               0, 414, CMD_123, 78);
+  iiArithAddCmd("hres",                0, 415, CMD_2, 79);
+  iiArithAddCmd("ideal",               0, 276, 314, 80);
+  iiArithAddCmd("if",                  0, 337, 337, 81);
+  iiArithAddCmd("imap",                0, 290, CMD_2, 82);
+  iiArithAddCmd("impart",              0, 416, CMD_1, 83);
+  iiArithAddCmd("importfrom",          0, 417, CMD_2, 84);
+  iiArithAddCmd("indepSet",            0, 418, CMD_12, 85);
+  iiArithAddCmd("insert",              0, 419, CMD_23, 86);
+  iiArithAddCmd("int",                 0, 420, ROOT_DECL, 87);
+  iiArithAddCmd("interpolation",       0, 422, CMD_2, 88);
+  iiArithAddCmd("interred",            0, 423, CMD_1, 89);
+  iiArithAddCmd("intersect",           0, 424, CMD_M, 90);
+  iiArithAddCmd("intmat",              0, 271, 271, 91);
+  iiArithAddCmd("intvec",              0, 425, ROOT_DECL_LIST, 92);
+  iiArithAddCmd("jacob",               0, 427, CMD_1, 93);
+  iiArithAddCmd("janet",               0, 428, CMD_12, 94);
+  iiArithAddCmd("jet",                 0, 429, CMD_M, 95);
+  iiArithAddCmd("kbase",               0, 430, CMD_12, 96);
+  iiArithAddCmd("keepring",            0, 289, 289, 97);
+  iiArithAddCmd("kernel",              0, 431, CMD_12, 98);
+  iiArithAddCmd("kill",                0, 318, 318, 99);
+  iiArithAddCmd("killattrib",          0, 432, CMD_12, 100);
+  iiArithAddCmd("koszul",              0, 291, CMD_23, 101);
+  iiArithAddCmd("kres",                0, 433, CMD_2, 102);
+  iiArithAddCmd("laguerre",            0, 434, CMD_13, 103);
+  iiArithAddCmd("lead",                0, 435, CMD_1, 104);
+  iiArithAddCmd("leadcoef",            0, 436, CMD_1, 105);
+  iiArithAddCmd("leadexp",             0, 437, CMD_1, 106);
+  iiArithAddCmd("leadmonom",           0, 438, CMD_1, 107);
+  iiArithAddCmd("lift",                0, 440, CMD_M, 108);
+  iiArithAddCmd("liftstd",             0, 439, CMD_M, 109);
+  iiArithAddCmd("link",                0, 441, ROOT_DECL, 110);
+  iiArithAddCmd("list",                0, 442, ROOT_DECL_LIST, 111);
+  iiArithAddCmd("listvar",             0, 320, 320, 112);
+  iiArithAddCmd("load",                0, 443, CMD_12, 113);
+  iiArithAddCmd("lres",                0, 444, CMD_2, 114);
+  iiArithAddCmd("ludecomp",            0, 445, CMD_1, 115);
+  iiArithAddCmd("luinverse",           0, 446, CMD_M, 116);
+  iiArithAddCmd("lusolve",             0, 447, CMD_M, 117);
+  iiArithAddCmd("map",                 0, 277, RING_DECL, 118);
+  iiArithAddCmd("matrix",              0, 278, 278, 119);
+  iiArithAddCmd("maxideal",            0, 292, CMD_1, 120);
+  iiArithAddCmd("memory",              0, 448, CMD_1, 121);
+  iiArithAddCmd("minbase",             0, 449, CMD_1, 122);
+  iiArithAddCmd("minor",               0, 450, CMD_M, 123);
+  iiArithAddCmd("minpoly",             0, 301, SYSVAR, 124);
+  iiArithAddCmd("minres",              0, 451, CMD_1, 125);
+  iiArithAddCmd("mod",                 0,  37, '/', 126);
+  iiArithAddCmd("module",              0, 279, 314, 127);
+  iiArithAddCmd("modulo",              0, 452, CMD_M, 128);
+  iiArithAddCmd("monitor",             0, 453, CMD_12, 129);
+  iiArithAddCmd("monomial",            0, 293, CMD_1, 130);
+  iiArithAddCmd("mpresmat",            0, 454, CMD_2, 131);
+  iiArithAddCmd("mres",                0, 455, CMD_2, 132);
+  iiArithAddCmd("mres_map",            0, 456, CMD_3, 133);
+  iiArithAddCmd("mstd",                0, 457, CMD_1, 134);
+  iiArithAddCmd("mult",                0, 458, CMD_1, 135);
+  iiArithAddCmd("multBound",           0, 299, SYSVAR, 136);
+  iiArithAddCmd("multiplicity",        1, 458, CMD_1, 137);
+  iiArithAddCmd("nameof",              0, 459, CMD_1, 138);
+  iiArithAddCmd("names",               0, 460, CMD_M, 139);
+  iiArithAddCmd("nc_algebra",          0, 463, CMD_2, 140);
+  iiArithAddCmd("ncalgebra",           2, 462, CMD_2, 141);
+  iiArithAddCmd("ncols",               0, 376, CMD_1, 142);
+  iiArithAddCmd("newstruct",           0, 461, CMD_23, 143);
+  iiArithAddCmd("noether",             0, 300, SYSVAR, 144);
+  iiArithAddCmd("not",                 0, 263, 263, 145);
+  iiArithAddCmd("npars",               0, 465, CMD_1, 146);
+  iiArithAddCmd("nres",                0, 493, CMD_2, 147);
+  iiArithAddCmd("nrows",               0, 501, CMD_1, 148);
+  iiArithAddCmd("number",              0, 280, RING_DECL, 149);
+  iiArithAddCmd("numerator",           0, 466, CMD_1, 150);
+  iiArithAddCmd("nvars",               0, 467, CMD_1, 151);
+  iiArithAddCmd("open",                0, 469, CMD_1, 152);
+  iiArithAddCmd("oppose",              0, 470, CMD_2, 153);
+  iiArithAddCmd("opposite",            0, 471, CMD_1, 154);
+  iiArithAddCmd("option",              0, 472, CMD_M, 155);
+  iiArithAddCmd("or",                  0, 124, '&', 156);
+  iiArithAddCmd("ord",                 0, 468, CMD_1, 157);
+  iiArithAddCmd("ordstr",              0, 473, CMD_1, 158);
+  iiArithAddCmd("package",             0, 474, ROOT_DECL, 159);
+  iiArithAddCmd("pagewidth",           0, 534, SYSVAR, 160);
+  iiArithAddCmd("par",                 0, 294, CMD_1, 161);
+  iiArithAddCmd("parameter",           0, 341, 341, 162);
+  iiArithAddCmd("pardeg",              0, 475, CMD_1, 163);
+  iiArithAddCmd("parstr",              0, 477, CMD_12, 164);
+  iiArithAddCmd("poly",                0, 281, RING_DECL, 165);
+  iiArithAddCmd("polyBucket",          0, 275, RING_DECL, 166);
+  iiArithAddCmd("preimage",            0, 295, CMD_13, 167);
+  iiArithAddCmd("prime",               0, 479, CMD_1, 168);
+  iiArithAddCmd("primefactors",        0, 478, CMD_12, 169);
+  iiArithAddCmd("print",               0, 480, CMD_12, 170);
+  iiArithAddCmd("printlevel",          0, 540, SYSVAR, 171);
+  iiArithAddCmd("proc",                0, 272, 272, 172);
+  iiArithAddCmd("prune",               0, 481, CMD_1, 173);
+  iiArithAddCmd("prune_map",           0, 482, CMD_2, 174);
+  iiArithAddCmd("qhweight",            0, 483, CMD_1, 175);
+  iiArithAddCmd("qrds",                0, 485, CMD_M, 176);
+  iiArithAddCmd("qring",               0, 484, ROOT_DECL, 177);
+  iiArithAddCmd("quote",               0, 335, 335, 178);
+  iiArithAddCmd("quotient",            0, 486, CMD_2, 179);
+  iiArithAddCmd("random",              0, 487, CMD_23, 180);
+  iiArithAddCmd("rank",                0, 488, CMD_12, 181);
+  iiArithAddCmd("read",                0, 489, CMD_12, 182);
+  iiArithAddCmd("reduce",              0, 490, CMD_M, 183);
+  iiArithAddCmd("regularity",          0, 491, CMD_1, 184);
+  iiArithAddCmd("repart",              0, 492, CMD_1, 185);
+  iiArithAddCmd("reservedName",        0, 494, CMD_M, 186);
+  iiArithAddCmd("reservedNameList",    0, 495, CMD_M, 187);
+  iiArithAddCmd("resolution",          0, 282, RING_DECL, 188);
+  iiArithAddCmd("restart",             0, 496, CMD_1, 189);
+  iiArithAddCmd("resultant",           0, 497, CMD_3, 190);
+  iiArithAddCmd("return",              0, 340, 340, 191);
+  iiArithAddCmd("rightstd",            0, 498, CMD_1, 192);
+  iiArithAddCmd("ring",                0, 273, 273, 193);
+  iiArithAddCmd("ring_list",           0, 500, CMD_1, 194);
+  iiArithAddCmd("ringlist",            0, 499, CMD_1, 195);
+  iiArithAddCmd("rtimer",              0, 536, SYSVAR, 196);
+  iiArithAddCmd("rvar",                0, 426, CMD_1, 197);
+  iiArithAddCmd("sba",                 0, 502, CMD_123, 198);
+  iiArithAddCmd("setring",             0, 321, 321, 199);
+  iiArithAddCmd("short",               0, 539, SYSVAR, 200);
+  iiArithAddCmd("simplex",             0, 503, CMD_M, 201);
+  iiArithAddCmd("simplify",            0, 504, CMD_2, 202);
+  iiArithAddCmd("size",                0, 379, CMD_1, 203);
+  iiArithAddCmd("slimgb",              0, 505, CMD_1, 204);
+  iiArithAddCmd("smatrix",             0, 283, 283, 205);
+  iiArithAddCmd("sortvec",             0, 506, CMD_1, 206);
+  iiArithAddCmd("sqrfree",             0, 507, CMD_12, 207);
+  iiArithAddCmd("sres",                0, 508, CMD_2, 208);
+  iiArithAddCmd("status",              0, 509, CMD_M, 209);
   iiArithAddCmd("string",              0, 511, ROOT_DECL_LIST, 210);
   iiArithAddCmd("subst",               0, 512, CMD_M, 211);
   iiArithAddCmd("system",              0, 513, CMD_M, 212);

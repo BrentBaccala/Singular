@@ -27,6 +27,23 @@ PROCEDURES:
 
 //////////////////////////////////////////////////////////////////////////////
 
+proc std (def I, list #)
+"SYNTAX: @code{std (} ideal_expression @code{)} @*
+         @code{std (} ideal_expression@code{,} poly_expression @code{)} @*
+         @code{std (} ideal_expression@code{,} bigintvec_expression @code{)}
+TYPE:    same as type of first argument
+PURPOSE: pass-through wrapper around the renamed kernel command @code{bba}.
+         Exists so libraries or external dispatchers (e.g. rustgb-dispatch)
+         can override @code{std} with a procedure that selects an
+         alternative GB engine for matching rings, falling back to
+         @code{bba} otherwise.
+"
+{
+  if (size(#) == 0) { return(bba(I)); }
+  if (size(#) == 1) { return(bba(I, #[1])); }
+  ERROR("std: 1 or 2 arguments expected, got " + string(size(#)+1));
+}
+
 proc stdfglm (ideal i, list #)
 "SYNTAX: @code{stdfglm (} ideal_expression @code{)} @*
          @code{stdfglm (} ideal_expression@code{,} string_expression @code{)}

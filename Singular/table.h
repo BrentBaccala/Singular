@@ -1036,6 +1036,7 @@ VAR cmdnames cmds[] =
   { "apply",       0, APPLY,              APPLY},
   { "attrib",      0, ATTRIB_CMD ,        CMD_123},
   { "bareiss",     0, BAREISS_CMD ,       CMD_13},
+  { "bba",         0, STD_CMD ,           CMD_M},
   { "betti",       0, BETTI_CMD ,         CMD_12},
   { "bigint",      0, BIGINT_CMD ,        ROOT_DECL},
   { "bigintmat",   0, BIGINTMAT_CMD ,     BIGINTMAT_CMD},
@@ -1251,7 +1252,6 @@ VAR cmdnames cmds[] =
   { "sres",        0, SRES_CMD ,          CMD_2},
 #endif /* OLD_RES */
   { "status",      0, STATUS_CMD,         CMD_M},
-  { "std",         0, STD_CMD ,           CMD_M},
   { "string",      0, STRING_CMD ,        ROOT_DECL_LIST},
   { "subst",       0, SUBST_CMD ,         CMD_M},
   { "system",      0, SYSTEM_CMD,         CMD_M},
