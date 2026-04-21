@@ -412,6 +412,7 @@ AC_DEFUN([SING_BUILTIN_MODULES],
  AM_CONDITIONAL([SI_BUILTIN_PYTHON_MODULE], [test x$bi_python = xtrue])
  AM_CONDITIONAL([SI_BUILTIN_CUSTOMSTD], [test x$bi_customstd = xtrue])
  AM_CONDITIONAL([SI_BUILTIN_SINGMATHIC], [test x$bi_singmathic = xtrue])
+ AM_CONDITIONAL([SI_BUILTIN_SINGRUST], [test x$bi_singrust = xtrue])
  AM_CONDITIONAL([SI_BUILTIN_BIGINTM], [test x$bi_bigintm = xtrue])
  AM_CONDITIONAL([SI_BUILTIN_ORDER], [test x$bi_Order = xtrue])
  AM_CONDITIONAL([SI_BUILTIN_GITFAN], [test x$bi_gitfan = xtrue])

@@ -107,6 +107,8 @@ LB_CHECK_CCLUSTER()
 
 LB_CHECK_MATHICGB
 
+LB_CHECK_RUSTGB
+
 AC_FUNC_ERROR_AT_LINE
 
 # check for cpu properties
@@ -273,6 +275,7 @@ AC_CONFIG_FILES([Singular/dyn_modules/python/Makefile])
 AC_CONFIG_FILES([Singular/dyn_modules/customstd/Makefile])
 AC_CONFIG_FILES([Singular/dyn_modules/pyobject/Makefile])
 AC_CONFIG_FILES([Singular/dyn_modules/singmathic/Makefile])
+AC_CONFIG_FILES([Singular/dyn_modules/singrust/Makefile])
 AC_CONFIG_FILES([Singular/dyn_modules/staticdemo/Makefile])
 AC_CONFIG_FILES([Singular/dyn_modules/subsets/Makefile])
 AC_CONFIG_FILES([Singular/dyn_modules/freealgebra/Makefile])
