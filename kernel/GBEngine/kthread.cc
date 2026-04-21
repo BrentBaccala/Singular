@@ -1435,11 +1435,6 @@ static void close_slot(SweepContext *ctx, int s, int thread_id)
   OpTag _close_tag(thread_id, "close_slot", NULL, s);
   ActivePoly *ap = &ctx->active[s];
 
-  if (getenv("SINGULAR_TRACE_REDUCE") != NULL)
-    fprintf(stdout, "[close_slot tid=%d slot=%d occ=%d surv=%d best_r=%d best_g=%d]\n",
-            thread_id, s, ap->occupied ? 1 : 0, ap->is_survivor ? 1 : 0,
-            ap->best_reducer, ap->best_good);
-
   // Unoccupied or already-survivor: should not happen in the continuous
   // design (batches only fire for FILLED slots) but keep as a safety.
   if (!ap->occupied || ap->is_survivor) return;
@@ -1776,8 +1771,6 @@ static void reduce_slot_from_sweep(SweepContext *ctx, int slot, int thread_id)
 
   if (ap->P.IsNull())
   {
-    if (getenv("SINGULAR_TRACE_REDUCE") != NULL)
-      fprintf(stdout, "[reduce tid=%d slot=%d] -> ZERO\n", thread_id, slot);
     kDeleteLcm(&ap->P);
     ap->P.Clear();
     ap->occupied = false;
@@ -1876,13 +1869,8 @@ static int refill_and_publish(SweepContext *ctx)
 
       // Try to fill from L.
       kt_L_lock(ctx, 0);
-      int __L_before = (int)ctx->strat->L.size();
       BOOLEAN got = pop_and_prepare(ctx, ap, sl_snapshot);
-      int __L_after = (int)ctx->strat->L.size();
       pthread_mutex_unlock(&ctx->L_lock);
-      if (getenv("SINGULAR_TRACE_REDUCE") != NULL)
-        fprintf(stdout, "[refill slot=%d] pop got=%d L %d->%d sl_snap=%d\n",
-                s, got ? 1 : 0, __L_before, __L_after, sl_snapshot);
       if (got)
       {
         ctx->stat_rounds.fetch_add(1, std::memory_order_relaxed);
@@ -2074,14 +2062,6 @@ static void process_survivor_lobject(SweepContext *ctx, LObject *P, int thread_i
       // it — that's the atT for appendEnd).  Lets us correlate pair
       // construction with the T slot it will occupy.
       OpTag _r(thread_id, "enterT", P->p, strat->T.size(), 0);
-      if (getenv("SINGULAR_TRACE_ENTERT") != NULL)
-      {
-        char *s = pString(P->p);
-        fprintf(stderr, "[enterT tid=%d #T=%d |L|=%d] %s\n",
-                thread_id, (int)strat->T.size(),
-                (int)strat->L.size(), s ? s : "0");
-        if (s) omFree(s);
-      }
       enterT(*P, strat);
     }
     audit_T_pLength(ctx, "ps-phase0-post-enterT", thread_id);
@@ -2269,18 +2249,10 @@ static void process_survivor_lobject(SweepContext *ctx, LObject *P, int thread_i
       kt_debug_tag("enterpairs:T[atR]!=P->p (cosmetic)",
                    (void*)P->p, atR_for_pairs, P->i_r);
     }
-    int __L_before_ep = (int)strat->L.size();
     if (rField_is_Ring(currRing))
       superenterpairs(P->p, strat->S.size()-1, P->ecart, pos_it, strat, atR_for_pairs);
     else
       enterpairs(P->p, strat->S.size()-1, P->ecart, pos_it, strat, atR_for_pairs);
-    if (getenv("SINGULAR_TRACE_ENTERT") != NULL)
-    {
-      int __L_after_ep = (int)strat->L.size();
-      fprintf(stderr, "[enterpairs tid=%d] L %d -> %d (|S|=%d atR=%d)\n",
-              thread_id, __L_before_ep, __L_after_ep,
-              (int)strat->S.size(), atR_for_pairs);
-    }
 
 #ifdef KTHREAD_INSTRUMENT
     if (KT_STATS(ctx))

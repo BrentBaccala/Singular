@@ -2839,25 +2839,19 @@ ideal bba (ideal F, ideal Q,intvec *w,bigintmat *hilb,kStrategy strat)
   // Skip kStratInitChangeTailRing when going parallel.  It reduces
   // strat->tailRing's bitmask (memory saving) but leaves tailRing
   // != currRing, which breaks the invariant that redtailBba at
-  // kutil.cc:6977 relies on.  There, `pNext(L->p) = pNext(p)` with
-  // p = L->t_p aliases L->p (currRing) and L->t_p (tailRing) tail
-  // chains — safe when currRing == tailRing (L->p IS L->t_p), a
-  // use-after-free when the rings differ.  The serial path repairs
-  // this via the completeReduce retry at kstd2.cc:3153-3167; the
-  // parallel path's "Pre-expand tailRing" at kthread.cc:2564-2569
-  // only partially works (the exp-bound doubling can't always hit
-  // currRing->bitmask exactly, so the loop breaks with tailRing
-  // != currRing).  Simplest fix: don't change tailRing when we're
-  // going parallel — the parallel reducer pays memory to keep the
-  // invariant that downstream code assumes.  Bug: rr-replay
-  // watchpoint, 20 Apr 2026 progress reports 19:50, 20:30.
+  // kutil.cc:6977 relies on: `pNext(L->p) = pNext(p)` with p =
+  // L->t_p aliases L->p (currRing) and L->t_p (tailRing) tail
+  // chains — safe when currRing == tailRing (L->p IS L->t_p); a
+  // use-after-free when rings differ.  Serial path repairs this
+  // via the completeReduce retry at kstd2.cc:3153-3167; the
+  // parallel path's pre-expand at kthread.cc:2564-2569 only
+  // partially works.  Simplest fix: keep tailRing == currRing
+  // across parallel dispatch.  Parallel reducer pays memory to
+  // keep the invariant downstream code assumes.  Found via
+  // rr-replay hardware watchpoint, 20 Apr 2026.
   {
     int __st = get_singular_threads();
-    int __min_f = 4;
-    const char *__mfs = getenv("SINGULAR_MIN_F_PARALLEL");
-    if (__mfs != NULL) __min_f = atoi(__mfs);
-    bool __will_go_parallel = (__st > 1) && (strat->red == redHoney)
-                              && (IDELEMS(F) >= __min_f);
+    bool __will_go_parallel = (__st > 1) && (strat->red == redHoney);
     if(!__will_go_parallel && !idIs0(F) &&(!rField_is_Ring(currRing)))
       kStratInitChangeTailRing(strat);
   }
@@ -2870,60 +2864,13 @@ ideal bba (ideal F, ideal Q,intvec *w,bigintmat *hilb,kStrategy strat)
   /* parallel bba: dispatch to parallel loop if SINGULAR_THREADS > 1. */
   {
     int singular_threads = get_singular_threads();
-    int min_f = 4;
-    const char *mfs = getenv("SINGULAR_MIN_F_PARALLEL");
-    if (mfs != NULL) min_f = atoi(mfs);
-    static int __dispatch_id = 0;
-    int __my_id = __dispatch_id++;
-    // Skip list: SINGULAR_SKIP_DISPATCH="3,7,9" forces these ids serial
-    bool __skip_me = false;
-    const char *__skip_list = getenv("SINGULAR_SKIP_DISPATCH");
-    if (__skip_list != NULL) {
-      char buf[256]; strncpy(buf, __skip_list, 255); buf[255] = 0;
-      char *tok = strtok(buf, ",");
-      while (tok) {
-        if (atoi(tok) == __my_id) { __skip_me = true; break; }
-        tok = strtok(NULL, ",");
-      }
-    }
-    if (singular_threads > 1 && strat->red == redHoney
-        && IDELEMS(F) >= min_f && !__skip_me)
+    if (singular_threads > 1 && strat->red == redHoney)
     {
-      if (getenv("SINGULAR_LOG_DISPATCH") != NULL)
-        fprintf(stderr, "[bba#%d] parallel dispatch |L|=%d |F|=%d\n",
-                __my_id, (int)strat->L.size(), IDELEMS(F));
-      if (getenv("SINGULAR_DUMP_DISPATCH_F") != NULL)
-      {
-        char path[128];
-        snprintf(path, sizeof(path),
-                 "/tmp/audit-run/F-dispatch-%d.txt", __my_id);
-        FILE *fp = fopen(path, "w");
-        if (fp)
-        {
-          fprintf(fp, "dispatch id %d  |F|=%d\n", __my_id, IDELEMS(F));
-          fprintf(fp, "ring-nvars=%d  pCompIndex=%d  bitmask=%lu\n",
-                  currRing->N, currRing->pCompIndex,
-                  (unsigned long)currRing->bitmask);
-          for (int __i = 0; __i < IDELEMS(F); __i++)
-          {
-            char *s = pString(F->m[__i]);
-            fprintf(fp, "F[%d] = %s\n", __i, s ? s : "0");
-            if (s) omFree(s);
-          }
-          // Also dump G (output) after bba finishes — but we're
-          // pre-dispatch here, so just flag; full dump not feasible
-          // at this point.
-          fclose(fp);
-        }
-      }
       SweepContext *pctx = sweep_context_init(strat, singular_threads);
       bba_parallel_loop(pctx);
       sweep_context_destroy(pctx);
       goto bba_post_loop;
     }
-    else if (getenv("SINGULAR_LOG_DISPATCH") != NULL)
-      fprintf(stderr, "[bba#%d] serial |F|=%d skip=%d\n",
-              __my_id, IDELEMS(F), __skip_me ? 1 : 0);
   }
 
   /* compute------------------------------------------------------- */
