@@ -405,6 +405,96 @@ void kt_paircrit_reset_tls() {
   t_paircrit_fp = NULL;
 }
 
+// ====================================================================
+// SINGULAR_TRACE_REDUCE=N — per-thread pop/reduce/enterT/enterS trace.
+// ====================================================================
+// Sibling of SINGULAR_TRACE_PAIRCRIT (task 323 / investigation 4).
+// Paircrit proved that chainCritNormal is NOT the first divergence
+// point — the bad run's strat->S already contains the wrong polynomial
+// BEFORE chainCritNormal runs.  Whatever landed at arrival_id>=5 is
+// the survivor of a parallel spoly-pop + reduce cycle that diverged
+// from the good parallel runs.  This tracer instruments the pop,
+// reduce, enterT, enterS, and L.push sites so we can diff bad vs
+// good at the earliest possible pop/reduce event.
+//
+// File naming: /tmp/audit-run/reduce-trace-<disp_id>-tid<TID>.log.
+// Per-thread, no shared mutex — same rationale as paircrit.
+//
+// Events emitted:
+//   POP          — L.pop() in pop_and_prepare (pair identity +
+//                  context at pop time)
+//   LINSERT      — strat->L.push() sites (chainCritNormal B→L flush
+//                  and direct L pushes)
+//   REDUCE-START — reduce_slot_from_sweep entry (T snapshot + the
+//                  pair being reduced)
+//   REDSTEP      — ksReducePoly call (which T entry applied)
+//   REDUCE-END   — reduce_slot_from_sweep exit (outcome, survivor lm)
+//   REDTAIL      — redtailBba call in process_survivor_lobject
+//   ENTERT       — enterT call site (poly being appended to T)
+//   ENTERS       — enterS call site (arrival_id assignment event —
+//                  the critical one: task 323's paircrit observed
+//                  arrival_ids indirectly, we want the direct write).
+bool g_reduce_this_dispatch = false;
+
+static thread_local FILE *t_reduce_fp = NULL;
+
+static std::vector<FILE *> *g_reduce_fp_registry = NULL;
+static pthread_mutex_t g_reduce_reg_lock = PTHREAD_MUTEX_INITIALIZER;
+
+static int g_reduce_want_disp = -2;  // -2 means "env not set yet"
+
+static void bpl_reduce_refresh() {
+  const char *s = getenv("SINGULAR_TRACE_REDUCE");
+  if (s == NULL) { g_reduce_this_dispatch = false; return; }
+  g_reduce_want_disp = atoi(s);
+  g_reduce_this_dispatch = (g_current_disp_id == g_reduce_want_disp);
+}
+
+static FILE *kt_reduce_open_tls() {
+  if (t_reduce_fp != NULL) return t_reduce_fp;
+  char path[160];
+  snprintf(path, sizeof(path),
+           "/tmp/audit-run/reduce-trace-%d-tid%d.log",
+           g_current_disp_id, kt_debug_tid);
+  FILE *fp = fopen(path, "w");
+  if (fp == NULL) return NULL;
+  setvbuf(fp, NULL, _IONBF, 0);
+  t_reduce_fp = fp;
+  pthread_mutex_lock(&g_reduce_reg_lock);
+  if (g_reduce_fp_registry == NULL)
+    g_reduce_fp_registry = new std::vector<FILE *>();
+  g_reduce_fp_registry->push_back(fp);
+  pthread_mutex_unlock(&g_reduce_reg_lock);
+  return fp;
+}
+
+void kt_reduce_logf(const char *fmt, ...) {
+  if (!g_reduce_this_dispatch) return;
+  FILE *fp = kt_reduce_open_tls();
+  if (fp == NULL) return;
+  va_list ap;
+  va_start(ap, fmt);
+  vfprintf(fp, fmt, ap);
+  va_end(ap);
+}
+
+static void kt_reduce_close_all() {
+  pthread_mutex_lock(&g_reduce_reg_lock);
+  if (g_reduce_fp_registry != NULL) {
+    for (FILE *fp : *g_reduce_fp_registry) {
+      if (fp) fclose(fp);
+    }
+    g_reduce_fp_registry->clear();
+    delete g_reduce_fp_registry;
+    g_reduce_fp_registry = NULL;
+  }
+  pthread_mutex_unlock(&g_reduce_reg_lock);
+}
+
+void kt_reduce_reset_tls() {
+  t_reduce_fp = NULL;
+}
+
 // Public breadcrumb entry point.  Thin wrapper around tag_log.
 void kt_debug_tag(const char *op, void *poly, int slot, int arg)
 {
@@ -1249,6 +1339,33 @@ static BOOLEAN pop_and_prepare(SweepContext *ctx, ActivePoly *ap,
                      (int)strat->L.size());
     }
 
+    // Reduce-trace: POP event.  Logs the pair identity at pop time
+    // (i_r1, i_r2, LMs of the two T entries, LM of the lcm, L.size
+    // before/after pop).  Paired with ENTERT events to recover
+    // arrival_ids (T entries don't carry arrival_id directly — only
+    // SElement does, so we post-process against the ENTERT log).
+    if (g_reduce_this_dispatch) {
+      int ir1 = ap->P.i_r1;
+      int ir2 = ap->P.i_r2;
+      int Tsz = (int)strat->T.size();
+      poly p1_lm_src = (ir1 >= 0 && ir1 < Tsz) ? strat->T[ir1].p : NULL;
+      poly p2_lm_src = (ir2 >= 0 && ir2 < Tsz) ? strat->T[ir2].p : NULL;
+      char *p1_lm = kt_lm_str(p1_lm_src);
+      char *p2_lm = kt_lm_str(p2_lm_src);
+      char *lcm_lm = kt_lm_str(ap->P.lcm);
+      kt_reduce_logf(
+        "POP tid=%d atT=%d i_r1=%d i_r2=%d p1_lm=%s p2_lm=%s lcm_lm=%s "
+        "|L|_before=%d |L|_after=%d ecart=%d\n",
+        kt_debug_tid, Tsz, ir1, ir2,
+        p1_lm ? p1_lm : "NULL", p2_lm ? p2_lm : "NULL",
+        lcm_lm ? lcm_lm : "NULL",
+        (int)strat->L.size() + 1, (int)strat->L.size(),
+        (int)ap->P.ecart);
+      if (p1_lm) omFree(p1_lm);
+      if (p2_lm) omFree(p2_lm);
+      if (lcm_lm) omFree(lcm_lm);
+    }
+
     // pop-time sanity check.  pair.i_r{1,2} is an R-SLOT INDEX (stable
     // across T shifts — enterT updates R via the persistent .i_r
     // field).  The authoritative comparison is R[ir]->p.  T[ir].p
@@ -1877,9 +1994,57 @@ static void reduce_slot_from_sweep(SweepContext *ctx, int slot, int thread_id)
 
   int best = (ap->best_good >= 0) ? ap->best_good : ap->best_reducer;
 
+  // Reduce-trace: REDUCE-START event.  Captures the pair being reduced
+  // (ap->P), the best reducer chosen by cooperative sweep, and a T
+  // fingerprint: size + first 12 T LMs.  Everything we need to answer
+  // "what did this worker see at reduce-start?" for verdict (2)
+  // (T-visibility race).
+  if (g_reduce_this_dispatch) {
+    int Tsz = (int)strat->T.size();
+    char *p_lm = kt_lm_str(ap->P.p);
+    char *lcm_lm = kt_lm_str(ap->P.lcm);
+    char *best_lm = (best >= 0 && best < Tsz) ? kt_lm_str(strat->T[best].p) : NULL;
+    // T-head LMs — up to 12 entries for compactness.  If paircrit showed
+    // the divergence appears by atT~5, 12 is plenty.  For atT >> 12 we
+    // still show head-12 plus tail-6 so the bad/good diff stays readable.
+    char buf[2048];
+    int off = 0;
+    int n_head = Tsz < 12 ? Tsz : 12;
+    for (int j = 0; j < n_head; j++) {
+      char *lm = kt_lm_str(strat->T[j].p);
+      int n = snprintf(buf + off, sizeof(buf) - off, "%s%s",
+                       j ? "," : "", lm ? lm : "NULL");
+      if (n > 0 && (size_t)n < sizeof(buf) - off) off += n;
+      if (lm) omFree(lm);
+    }
+    if (Tsz > n_head) {
+      int n = snprintf(buf + off, sizeof(buf) - off, ",...(+%d)", Tsz - n_head);
+      if (n > 0 && (size_t)n < sizeof(buf) - off) off += n;
+    }
+    kt_reduce_logf(
+      "REDUCE-START tid=%d atT=%d slot=%d i_r1=%d i_r2=%d "
+      "starting_lm=%s lcm=%s best_T_idx=%d best_T_lm=%s "
+      "T_size=%d T_head=[%s]\n",
+      thread_id, Tsz, slot, ap->P.i_r1, ap->P.i_r2,
+      p_lm ? p_lm : "NULL", lcm_lm ? lcm_lm : "NULL",
+      best, best_lm ? best_lm : "NULL",
+      Tsz, buf);
+    if (p_lm) omFree(p_lm);
+    if (lcm_lm) omFree(lcm_lm);
+    if (best_lm) omFree(best_lm);
+  }
+
   if (best < 0)
   {
     // No reducer found by cooperative sweep — survivor
+    if (g_reduce_this_dispatch) {
+      char *lm = kt_lm_str(ap->P.p);
+      kt_reduce_logf(
+        "REDUCE-END tid=%d atT=%d slot=%d outcome=survivor "
+        "survivor_lm=%s reduced_via=none\n",
+        thread_id, (int)strat->T.size(), slot, lm ? lm : "NULL");
+      if (lm) omFree(lm);
+    }
     ap->is_survivor = true;
     return;
   }
@@ -1928,6 +2093,23 @@ static void reduce_slot_from_sweep(SweepContext *ctx, int slot, int thread_id)
   // If 0, the writer hasn't struck yet (or has struck and recovered).
   kt_debug_R_scan_L(strat, "reduce_slot:pre_ksReducePoly");
 
+  // Reduce-trace: REDSTEP event.  Which T entry is being consumed,
+  // and the input LM before ksReducePoly runs.  The output LM is
+  // emitted post-call below.
+  poly input_lm_before = ap->P.p;
+  char *input_lm_before_s = NULL;
+  if (g_reduce_this_dispatch) {
+    input_lm_before_s = kt_lm_str(input_lm_before);
+    char *t_lm = (best >= 0 && best < (int)strat->T.size())
+                 ? kt_lm_str(strat->T[best].p) : NULL;
+    kt_reduce_logf(
+      "REDSTEP tid=%d atT=%d slot=%d T_idx=%d T_lm=%s input_lm_before=%s\n",
+      thread_id, (int)strat->T.size(), slot, best,
+      t_lm ? t_lm : "NULL",
+      input_lm_before_s ? input_lm_before_s : "NULL");
+    if (t_lm) omFree(t_lm);
+  }
+
   {
     // Tag includes the T[best] reducer so the dump shows exactly which
     // T entry this worker is consuming when the audit fires on some
@@ -1945,8 +2127,28 @@ static void reduce_slot_from_sweep(SweepContext *ctx, int slot, int thread_id)
 
   ctx->stat_reductions.fetch_add(1, std::memory_order_relaxed);
 
+  // Reduce-trace: REDSTEP output LM (after ksReducePoly).
+  if (g_reduce_this_dispatch) {
+    char *after_lm = kt_lm_str(ap->P.p);
+    kt_reduce_logf(
+      "REDSTEP-AFTER tid=%d atT=%d slot=%d input_lm_before=%s "
+      "output_lm=%s is_null=%d\n",
+      thread_id, (int)strat->T.size(), slot,
+      input_lm_before_s ? input_lm_before_s : "NULL",
+      after_lm ? after_lm : "NULL", ap->P.IsNull() ? 1 : 0);
+    if (after_lm) omFree(after_lm);
+    if (input_lm_before_s) omFree(input_lm_before_s);
+    input_lm_before_s = NULL;
+  }
+
   if (ap->P.IsNull())
   {
+    if (g_reduce_this_dispatch) {
+      kt_reduce_logf(
+        "REDUCE-END tid=%d atT=%d slot=%d outcome=zero "
+        "survivor_lm=NULL reduced_via=ksReducePoly\n",
+        thread_id, (int)strat->T.size(), slot);
+    }
     kDeleteLcm(&ap->P);
     ap->P.Clear();
     ap->occupied = false;
@@ -1960,6 +2162,12 @@ static void reduce_slot_from_sweep(SweepContext *ctx, int slot, int thread_id)
     poly hp = ap->P.p ? ap->P.p : ap->P.t_p;
     if (hp && p_GetComp(hp, currRing) > strat->syzComp)
     {
+      if (g_reduce_this_dispatch) {
+        kt_reduce_logf(
+          "REDUCE-END tid=%d atT=%d slot=%d outcome=syz_drop "
+          "survivor_lm=NULL reduced_via=ksReducePoly\n",
+          thread_id, (int)strat->T.size(), slot);
+      }
       ap->P.Delete();
       ap->occupied = false;
       ctx->stat_zeros.fetch_add(1, std::memory_order_relaxed);
@@ -1971,6 +2179,14 @@ static void reduce_slot_from_sweep(SweepContext *ctx, int slot, int thread_id)
     poly hp = ap->P.p ? ap->P.p : ap->P.t_p;
     if (hp && p_GetComp(hp, currRing) > strat->syzComp)
     {
+      if (g_reduce_this_dispatch) {
+        char *lm = kt_lm_str(ap->P.p);
+        kt_reduce_logf(
+          "REDUCE-END tid=%d atT=%d slot=%d outcome=survivor_syz "
+          "survivor_lm=%s reduced_via=ksReducePoly\n",
+          thread_id, (int)strat->T.size(), slot, lm ? lm : "NULL");
+        if (lm) omFree(lm);
+      }
       ap->is_survivor = true;
       return;
     }
@@ -1992,6 +2208,12 @@ static void reduce_slot_from_sweep(SweepContext *ctx, int slot, int thread_id)
     {
       if (ap->P.pTotalDeg() + ap->P.ecart >= (long)strat->tailRing->bitmask)
       {
+        if (g_reduce_this_dispatch) {
+          kt_reduce_logf(
+            "REDUCE-END tid=%d atT=%d slot=%d outcome=overflow "
+            "survivor_lm=NULL reduced_via=ksReducePoly\n",
+            thread_id, (int)strat->T.size(), slot);
+        }
         strat->overflow = TRUE;
         ap->P.GetP();
         ap->P.Clear();
@@ -2006,6 +2228,17 @@ static void reduce_slot_from_sweep(SweepContext *ctx, int slot, int thread_id)
   ap->P.SetShortExpVector();
   ap->not_sev = ~ap->P.sev;
 
+  // Reduce-trace: REDUCE-END event for the "slot stays occupied"
+  // path.  The P has been reduced once but isn't yet a survivor;
+  // it'll be swept again in the next round.
+  if (g_reduce_this_dispatch) {
+    char *lm = kt_lm_str(ap->P.p);
+    kt_reduce_logf(
+      "REDUCE-END tid=%d atT=%d slot=%d outcome=continue "
+      "survivor_lm=%s reduced_via=ksReducePoly\n",
+      thread_id, (int)strat->T.size(), slot, lm ? lm : "NULL");
+    if (lm) omFree(lm);
+  }
   // Slot stays occupied — will be swept again on the next round
 }
 
@@ -2190,8 +2423,21 @@ static void process_survivor_lobject(SweepContext *ctx, LObject *P, int thread_i
       if (!skip_redtail)
       {
         OpTag _r(thread_id, "redtailBba(Z)", P->p);
+        poly rt_in = P->p;
+        char *rt_in_lm = g_reduce_this_dispatch ? kt_lm_str(rt_in) : NULL;
         P->p = redtailBba(P, pos_it, strat, withT,
                           !TEST_OPT_CONTENTSB);
+        if (g_reduce_this_dispatch) {
+          char *rt_out_lm = kt_lm_str(P->p);
+          kt_reduce_logf(
+            "REDTAIL tid=%d atT=%d mode=Z input_lm=%s output_lm=%s changed=%d\n",
+            thread_id, (int)strat->T.size(),
+            rt_in_lm ? rt_in_lm : "NULL",
+            rt_out_lm ? rt_out_lm : "NULL",
+            strat->redTailChange ? 1 : 0);
+          if (rt_out_lm) omFree(rt_out_lm);
+          if (rt_in_lm) omFree(rt_in_lm);
+        }
       }
 #ifdef KTHREAD_INSTRUMENT
       if (KT_STATS(ctx)) redtail_accum += kt_now_ns() - rt0;
@@ -2211,7 +2457,20 @@ static void process_survivor_lobject(SweepContext *ctx, LObject *P, int thread_i
       if (!skip_redtail)
       {
         OpTag _r(thread_id, "redtailBba", P->p);
+        poly rt_in = P->p;
+        char *rt_in_lm = g_reduce_this_dispatch ? kt_lm_str(rt_in) : NULL;
         P->p = redtailBba(P, pos_it, strat, withT);
+        if (g_reduce_this_dispatch) {
+          char *rt_out_lm = kt_lm_str(P->p);
+          kt_reduce_logf(
+            "REDTAIL tid=%d atT=%d mode=std input_lm=%s output_lm=%s changed=%d\n",
+            thread_id, (int)strat->T.size(),
+            rt_in_lm ? rt_in_lm : "NULL",
+            rt_out_lm ? rt_out_lm : "NULL",
+            strat->redTailChange ? 1 : 0);
+          if (rt_out_lm) omFree(rt_out_lm);
+          if (rt_in_lm) omFree(rt_in_lm);
+        }
       }
 #ifdef KTHREAD_INSTRUMENT
       if (KT_STATS(ctx)) redtail_accum += kt_now_ns() - rt0;
@@ -2245,6 +2504,14 @@ static void process_survivor_lobject(SweepContext *ctx, LObject *P, int thread_i
         kt_disp_tracef("[tid=%d] enterT atT=%d  poly=%s\n",
                        thread_id, (int)strat->T.size(), s ? s : "0");
         if (s) omFree(s);
+      }
+      if (g_reduce_this_dispatch) {
+        char *lm = kt_lm_str(P->p);
+        kt_reduce_logf(
+          "ENTERT tid=%d atT=%d T_idx=%d lm=%s ecart=%d\n",
+          thread_id, (int)strat->T.size(),
+          (int)strat->T.size(), lm ? lm : "NULL", (int)P->ecart);
+        if (lm) omFree(lm);
       }
       enterT(*P, strat);
     }
@@ -2334,6 +2601,15 @@ static void process_survivor_lobject(SweepContext *ctx, LObject *P, int thread_i
                      thread_id, (unsigned long)my_arrival,
                      (int)strat->S.size(), s ? s : "0");
       if (s) omFree(s);
+    }
+    if (g_reduce_this_dispatch) {
+      char *lm = kt_lm_str(P->p);
+      kt_reduce_logf(
+        "ENTERS tid=%d atT=%d arrival_id=%lu lm=%s S_size_pre=%d ecart=%d\n",
+        thread_id, (int)strat->T.size(),
+        (unsigned long)my_arrival, lm ? lm : "NULL",
+        (int)strat->S.size(), (int)P->ecart);
+      if (lm) omFree(lm);
     }
     strat->enterS(*P, strat, strat->T.size()-1, strat->S.end());
     did_enterS = true;
@@ -2673,6 +2949,8 @@ static void *worker_thread(void *arg)
   // Reset per-thread paircrit FP so this worker opens a fresh log
   // file on its first decision-site write in this dispatch.
   kt_paircrit_reset_tls();
+  // Same for the reduce-trace gate (SINGULAR_TRACE_REDUCE).
+  kt_reduce_reset_tls();
 
   // Wait for all threads to be created and main to be ready
   pthread_barrier_wait(&ctx->startup_barrier);
@@ -2705,6 +2983,8 @@ void bba_parallel_loop(SweepContext *ctx)
   bpl_trace_refresh();
   bpl_paircrit_refresh();
   kt_paircrit_reset_tls();
+  bpl_reduce_refresh();
+  kt_reduce_reset_tls();
 
   // Two layers of debug enablement:
   //   SINGULAR_AUDIT_T=1     -> audit-walks on top of the ring
@@ -3246,5 +3526,13 @@ parallel_shutdown:
                      (int)strat->S.size(), (int)strat->L.size());
     kt_paircrit_close_all();
     g_paircrit_this_dispatch = false;
+  }
+  // Close per-thread reduce-trace log files (no-op if none opened).
+  if (g_reduce_this_dispatch) {
+    kt_reduce_logf("[END] tid=%d bba_parallel_loop exit |T|=%d |S|=%d |L|=%d\n",
+                   kt_debug_tid, (int)strat->T.size(),
+                   (int)strat->S.size(), (int)strat->L.size());
+    kt_reduce_close_all();
+    g_reduce_this_dispatch = false;
   }
 }

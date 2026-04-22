@@ -446,6 +446,26 @@ void kt_paircrit_logf(const char *fmt, ...)
   __attribute__((format(printf, 1, 2)));
 void kt_paircrit_reset_tls();
 
+// SINGULAR_TRACE_REDUCE=<disp_id> — per-thread pop / reduce / enterT /
+// enterS trace.  Sibling of SINGULAR_TRACE_PAIRCRIT.  Purpose: isolate
+// whether a bad parallel run diverges because of a different pair
+// popped (verdict 1), same pair but different T visibility (verdict
+// 2), or identical pair + T but different reduction output (verdict
+// 3).  See task 324 notes and kthread.cc for details.  Callers must
+// gate on g_reduce_this_dispatch to avoid formatting cost when
+// disabled.
+extern bool g_reduce_this_dispatch;
+void kt_reduce_logf(const char *fmt, ...)
+  __attribute__((format(printf, 1, 2)));
+void kt_reduce_reset_tls();
+
+// Monomial-only LM formatter.  Returns an omAlloc'd string (caller
+// must omFree).  Safe with NULL (returns NULL).  Does NOT touch any
+// per-ring bins (no p_Head / p_LmFree), so it's safe to call from
+// any worker thread.  Defined in kutil.cc; used by paircrit and
+// reduce tracers.
+char *kt_lm_str(poly p);
+
 // Scan strat->L for R-inconsistent pairs.  Returns count.  Emits an
 // audit-log line on any nonzero count.  Used for time-bisecting
 // where the R-rewrite occurs in the parallel-phase main loop.

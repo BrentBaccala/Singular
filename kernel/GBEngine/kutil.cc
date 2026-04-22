@@ -2173,7 +2173,13 @@ static BOOLEAN enterOneStrongPolySig (const SElement &si_elem,poly p,poly sig,in
 // coefficient, producing a stable LM-only string like "3xy2z" or
 // "-5" for a constant.  No ring-bin allocation; just omStrDup at the
 // end to match the omFree contract the callers already use.
-static inline char *paircrit_lm_str(poly p) {
+//
+// Exported as kt_lm_str for use by the reduce-tracer in kthread.cc
+// (and any future tracer that needs a monomial-only LM format
+// without touching ring bins).  paircrit_lm_str stays as a local
+// alias so the chainCritNormal / enterOnePairNormal call sites below
+// don't need to be renamed.
+char *kt_lm_str(poly p) {
   if (p == NULL) return NULL;
   const ring r = currRing;
   // 64 bytes per variable is enough for any sane exponent + name.
@@ -2228,6 +2234,10 @@ static inline char *paircrit_lm_str(poly p) {
   out[off] = 0;
   return out;
 }
+
+// Local alias so the paircrit call sites (all in this file) don't need
+// to be renamed.  static inline lets the compiler fold the call away.
+static inline char *paircrit_lm_str(poly p) { return kt_lm_str(p); }
 
 void enterOnePairNormal (const SElement &si,poly p,int ecart, int isFromQ,kStrategy strat, int atR = -1)
 {
@@ -3723,6 +3733,19 @@ void kMergeBintoL(kStrategy strat)
   while (!strat_B(strat).empty()) {
     auto Lobj = strat_B(strat).top();
     strat_B(strat).pop();
+    if (g_reduce_this_dispatch) {
+      char *lcm_lm = kt_lm_str(Lobj.lcm);
+      char *p_lm = kt_lm_str(Lobj.p);
+      kt_reduce_logf(
+        "LINSERT tid=%d atT=%d site=kMergeBintoL i_r1=%d i_r2=%d "
+        "lcm_lm=%s p_lm=%s ecart=%d FDeg=%ld length=%d\n",
+        kt_debug_tid, (int)strat->T.size(),
+        Lobj.i_r1, Lobj.i_r2,
+        lcm_lm ? lcm_lm : "NULL", p_lm ? p_lm : "NULL",
+        (int)Lobj.ecart, (long)Lobj.GetpFDeg(), (int)Lobj.length);
+      if (lcm_lm) omFree(lcm_lm);
+      if (p_lm) omFree(p_lm);
+    }
     strat->L.push(Lobj);
   }
   strat_B(strat).clear();  // reset flat_ array to prevent unbounded growth
@@ -3743,6 +3766,19 @@ std::vector<LSet::iterator> kMergeBintoL_and_return_iterators(kStrategy strat)
   while (!strat_B(strat).empty()) {
     auto Lobj = strat_B(strat).top();
     strat_B(strat).pop();
+    if (g_reduce_this_dispatch) {
+      char *lcm_lm = kt_lm_str(Lobj.lcm);
+      char *p_lm = kt_lm_str(Lobj.p);
+      kt_reduce_logf(
+        "LINSERT tid=%d atT=%d site=kMergeBintoL_ret i_r1=%d i_r2=%d "
+        "lcm_lm=%s p_lm=%s ecart=%d FDeg=%ld length=%d\n",
+        kt_debug_tid, (int)strat->T.size(),
+        Lobj.i_r1, Lobj.i_r2,
+        lcm_lm ? lcm_lm : "NULL", p_lm ? p_lm : "NULL",
+        (int)Lobj.ecart, (long)Lobj.GetpFDeg(), (int)Lobj.length);
+      if (lcm_lm) omFree(lcm_lm);
+      if (p_lm) omFree(p_lm);
+    }
     iterators.push_back(strat->L.push(Lobj));
   }
   // Sort iterators to match the ordering of their objects in L
