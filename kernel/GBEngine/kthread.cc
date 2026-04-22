@@ -300,6 +300,111 @@ void kt_disp_tracef(const char *fmt, ...) {
   pthread_mutex_unlock(&g_disp_trace_lock);
 }
 
+// ====================================================================
+// SINGULAR_TRACE_PAIRCRIT=N — per-thread pair-criterion decision log.
+// ====================================================================
+// Sibling of SINGULAR_TRACE_DISP that instruments enterOnePairNormal
+// and chainCritNormal.  Needs PER-THREAD log files (not one shared
+// file behind a mutex) because the flake the investigation is hunting
+// is timing-sensitive; a shared lock would perturb enough to mask it.
+//
+// File naming: /tmp/audit-run/paircrit-trace-<disp_id>-tid<TID>.log.
+// Opened lazily on the thread's first write via kt_paircrit_logf().
+// Closed at the end of bba_parallel_loop (via kt_paircrit_close_all).
+// "atT" in log lines = strat->S.size() at the call — monotone per
+// thread, approximately global.
+bool g_paircrit_this_dispatch = false;
+
+// Per-thread log file handle.  thread_local so there's no cross-thread
+// interference; each thread writes only its own FILE.  Registered in a
+// lock-protected vector so kt_paircrit_close_all can flush/close them
+// at dispatch end.
+static thread_local FILE *t_paircrit_fp = NULL;
+
+// Registry of opened per-thread FPs.  Protected by g_paircrit_reg_lock.
+// Only touched on open/close, not in the hot path, so a shared mutex
+// here is fine (does not perturb timing of the decision log itself).
+static std::vector<FILE *> *g_paircrit_fp_registry = NULL;
+static pthread_mutex_t g_paircrit_reg_lock = PTHREAD_MUTEX_INITIALIZER;
+
+// Cached paircrit disp-id (parsed once per bpl entry in bpl_trace_refresh).
+static int g_paircrit_want_disp = -2;  // -2 means "env not set yet"
+
+static void bpl_paircrit_refresh() {
+  const char *s = getenv("SINGULAR_TRACE_PAIRCRIT");
+  if (s == NULL) { g_paircrit_this_dispatch = false; return; }
+  g_paircrit_want_disp = atoi(s);
+  g_paircrit_this_dispatch = (g_current_disp_id == g_paircrit_want_disp);
+}
+
+// Lazily open the per-thread FP for the current dispatch.  Registers
+// it so the registry can close it at dispatch end.  Returns the FP or
+// NULL on open failure.
+static FILE *kt_paircrit_open_tls() {
+  if (t_paircrit_fp != NULL) return t_paircrit_fp;
+  char path[160];
+  snprintf(path, sizeof(path),
+           "/tmp/audit-run/paircrit-trace-%d-tid%d.log",
+           g_current_disp_id, kt_debug_tid);
+  FILE *fp = fopen(path, "w");
+  if (fp == NULL) return NULL;
+  // Unbuffered: we want every line visible immediately in case the
+  // process crashes before the trace is closed.
+  setvbuf(fp, NULL, _IONBF, 0);
+  t_paircrit_fp = fp;
+  pthread_mutex_lock(&g_paircrit_reg_lock);
+  if (g_paircrit_fp_registry == NULL)
+    g_paircrit_fp_registry = new std::vector<FILE *>();
+  g_paircrit_fp_registry->push_back(fp);
+  pthread_mutex_unlock(&g_paircrit_reg_lock);
+  return fp;
+}
+
+// Public logger.  Callers MUST gate on g_paircrit_this_dispatch before
+// the call to avoid the formatting cost.  Early-returns again here as
+// a defensive safety net (no-op when gate is off).
+void kt_paircrit_logf(const char *fmt, ...) {
+  if (!g_paircrit_this_dispatch) return;
+  FILE *fp = kt_paircrit_open_tls();
+  if (fp == NULL) return;
+  va_list ap;
+  va_start(ap, fmt);
+  vfprintf(fp, fmt, ap);
+  va_end(ap);
+  // No fflush: unbuffered stream.
+}
+
+// Close all registered paircrit FPs at dispatch end.  Safe to call
+// even if no thread ever opened one.
+static void kt_paircrit_close_all() {
+  pthread_mutex_lock(&g_paircrit_reg_lock);
+  if (g_paircrit_fp_registry != NULL) {
+    for (FILE *fp : *g_paircrit_fp_registry) {
+      if (fp) fclose(fp);
+    }
+    g_paircrit_fp_registry->clear();
+    delete g_paircrit_fp_registry;
+    g_paircrit_fp_registry = NULL;
+  }
+  pthread_mutex_unlock(&g_paircrit_reg_lock);
+  // NOTE: t_paircrit_fp in each thread now dangles.  Acceptable: these
+  // threads are about to exit the parallel region, and the pointer is
+  // thread-local so no cross-thread harm.  The next dispatch that
+  // enables paircrit will re-open fresh files.
+  //
+  // We can't safely write t_paircrit_fp = NULL from outside the
+  // owning thread, so we rely on the fact that bpl_paircrit_refresh()
+  // resets this at the start of the next parallel region's worker
+  // startup — see the kt_paircrit_reset_tls() call.
+}
+
+// Called from each worker at startup (and main at bpl entry) to clear
+// the thread-local FP so a new per-dispatch file is opened on first
+// write of the next dispatch.
+void kt_paircrit_reset_tls() {
+  t_paircrit_fp = NULL;
+}
+
 // Public breadcrumb entry point.  Thin wrapper around tag_log.
 void kt_debug_tag(const char *op, void *poly, int slot, int arg)
 {
@@ -2565,6 +2670,10 @@ static void *worker_thread(void *arg)
   si_opt_1 = ctx->saved_si_opt_1;
   si_opt_2 = ctx->saved_si_opt_2;
 
+  // Reset per-thread paircrit FP so this worker opens a fresh log
+  // file on its first decision-site write in this dispatch.
+  kt_paircrit_reset_tls();
+
   // Wait for all threads to be created and main to be ready
   pthread_barrier_wait(&ctx->startup_barrier);
 
@@ -2594,6 +2703,8 @@ void bba_parallel_loop(SweepContext *ctx)
   int nthreads = ctx->num_threads;
 
   bpl_trace_refresh();
+  bpl_paircrit_refresh();
+  kt_paircrit_reset_tls();
 
   // Two layers of debug enablement:
   //   SINGULAR_AUDIT_T=1     -> audit-walks on top of the ring
@@ -3127,5 +3238,13 @@ parallel_shutdown:
                    (int)strat->L.size());
     fclose(g_disp_trace_fp);
     g_disp_trace_fp = NULL;
+  }
+  // Close per-thread paircrit log files (no-op if none opened).
+  if (g_paircrit_this_dispatch) {
+    kt_paircrit_logf("[END] tid=%d bba_parallel_loop exit |T|=%d |S|=%d |L|=%d\n",
+                     kt_debug_tid, (int)strat->T.size(),
+                     (int)strat->S.size(), (int)strat->L.size());
+    kt_paircrit_close_all();
+    g_paircrit_this_dispatch = false;
   }
 }

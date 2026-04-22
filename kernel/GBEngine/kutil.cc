@@ -2143,16 +2143,125 @@ static BOOLEAN enterOneStrongPolySig (const SElement &si_elem,poly p,poly sig,in
 * put the pair (s[i],p)  into the set B, ecart=ecart(p)
 */
 
+// =====================================================================
+// SINGULAR_TRACE_PAIRCRIT instrumentation.
+//
+// enterOnePairNormal is instrumented at every decision point:
+//   ENTER           - function entry (after si is bound to p)
+//   KILL by=fromT   - fromT ecart kill (sugarCrit branch and else)
+//   KILL by=prodCrit- product criterion kill
+//   KILL by=domByB  - dominated by existing B entry, pair rejected
+//   BKILL           - existing B entry erased by new pair (dominates)
+//   ZERO            - spoly(si, p) reduced to 0 at construction
+//   KEEP            - pair accepted, pushed into B
+// "atT" field = strat->S.size() at the call (monotone per thread).
+// LMs are formatted with p_String(...,currRing) and freed.
+//
+// Callers MUST guard with g_paircrit_this_dispatch to skip formatting
+// cost when the trace is disabled.
+// =====================================================================
+
+// Helper: format LM (leading monomial only, NOT the full polynomial)
+// as a C string.  Caller must omFree() the returned buffer.  Safe
+// with NULL.
+//
+// Writes into a caller-allocated char buffer.  We avoid p_Head /
+// p_LmFree because ommalloc/omFree against per-ring bins is not
+// guaranteed thread-safe in all parallel contexts (observed SEGV in
+// smoke test when called from enterOnePairNormal across worker
+// threads).  Instead we manually iterate exponents and format the
+// coefficient, producing a stable LM-only string like "3xy2z" or
+// "-5" for a constant.  No ring-bin allocation; just omStrDup at the
+// end to match the omFree contract the callers already use.
+static inline char *paircrit_lm_str(poly p) {
+  if (p == NULL) return NULL;
+  const ring r = currRing;
+  // 64 bytes per variable is enough for any sane exponent + name.
+  // We also reserve room for the coefficient (n_Write produces
+  // unbounded strings for multiprecision rationals, so we fall back
+  // to a placeholder when the coef is not 1/-1/small-int).  For this
+  // diagnostic, a short "cN" tag is sufficient — we're primarily
+  // comparing monomials, not coefficients.
+  int nvars = rVar(r);
+  size_t cap = 64 + (size_t)nvars * 32;
+  char *out = (char *)omAlloc(cap);
+  size_t off = 0;
+  out[0] = 0;
+  // Coefficient: for Q we want readable leading coefficient.  Try a
+  // minimal formatter: long integer / rational check via n_IsOne /
+  // n_IsMOne; otherwise print "c" + pointer-ish tag.
+  number coef = p_GetCoeff(p, r);
+  if (coef != NULL && r->cf != NULL) {
+    if (n_IsOne(coef, r->cf)) {
+      /* no sign */
+    } else if (n_IsMOne(coef, r->cf)) {
+      if (off + 1 < cap) out[off++] = '-';
+    } else {
+      // Generic: mark with "c" placeholder; not core to the diff.
+      int n = snprintf(out + off, cap - off, "c?");
+      if (n > 0 && (size_t)n < cap - off) off += (size_t)n;
+    }
+  }
+  bool wrote_var = false;
+  for (int v = 1; v <= nvars; v++) {
+    long e = p_GetExp(p, v, r);
+    if (e == 0) continue;
+    const char *name = r->names[v - 1];
+    if (!name) name = "?";
+    int n;
+    if (e == 1)
+      n = snprintf(out + off, cap - off, "%s", name);
+    else
+      n = snprintf(out + off, cap - off, "%s%ld", name, e);
+    if (n > 0 && (size_t)n < cap - off) off += (size_t)n;
+    wrote_var = true;
+  }
+  if (!wrote_var) {
+    // Constant LM — emit "1" if we haven't printed sign/coef.
+    if (off == 0 || (off == 1 && out[0] == '-')) {
+      int n = snprintf(out + off, cap - off, "1");
+      if (n > 0 && (size_t)n < cap - off) off += (size_t)n;
+    }
+  }
+  // Ensure NUL termination.
+  if (off >= cap) off = cap - 1;
+  out[off] = 0;
+  return out;
+}
+
 void enterOnePairNormal (const SElement &si,poly p,int ecart, int isFromQ,kStrategy strat, int atR = -1)
 {
 
   int      compare;
+
+  if (g_paircrit_this_dispatch)
+  {
+    char *h_lm = paircrit_lm_str(p);
+    char *s_lm = paircrit_lm_str(si.p);
+    kt_paircrit_logf(
+      "ENTER tid=%d atT=%d h_lm=%s si_s2r=%d si_arrival=%lu si_lm=%s ecart=%d si_ecart=%d\n",
+      kt_debug_tid, (int)strat->S.size(),
+      h_lm ? h_lm : "NULL", (int)si.s_2_r, (unsigned long)si.arrival_id,
+      s_lm ? s_lm : "NULL", ecart, si.ecart);
+    if (h_lm) omFree(h_lm);
+    if (s_lm) omFree(s_lm);
+  }
 
   /*- check product criterion and ecart BEFORE computing the lcm -*/
   if (strat->sugarCrit && ALLOW_PROD_CRIT(strat))
   {
     if (strat->fromT && (si.ecart>ecart))
     {
+      if (g_paircrit_this_dispatch) {
+        char *h_lm = paircrit_lm_str(p);
+        char *s_lm = paircrit_lm_str(si.p);
+        kt_paircrit_logf(
+          "KILL tid=%d atT=%d h_lm=%s si_s2r=%d si_lm=%s by=fromT_ecart\n",
+          kt_debug_tid, (int)strat->S.size(),
+          h_lm ? h_lm : "NULL", (int)si.s_2_r, s_lm ? s_lm : "NULL");
+        if (h_lm) omFree(h_lm);
+        if (s_lm) omFree(s_lm);
+      }
       return;
       /*the pair is (s[i],t[.]), discard it if the ecart is too big*/
     }
@@ -2174,6 +2283,16 @@ void enterOnePairNormal (const SElement &si,poly p,int ecart, int isFromQ,kStrat
     *Moreover, skipping (s,r) holds also for the noncommutative case.
     */
       strat->cp++;
+      if (g_paircrit_this_dispatch) {
+        char *h_lm = paircrit_lm_str(p);
+        char *s_lm = paircrit_lm_str(si.p);
+        kt_paircrit_logf(
+          "KILL tid=%d atT=%d h_lm=%s si_s2r=%d si_lm=%s by=prodCrit (sugar)\n",
+          kt_debug_tid, (int)strat->S.size(),
+          h_lm ? h_lm : "NULL", (int)si.s_2_r, s_lm ? s_lm : "NULL");
+        if (h_lm) omFree(h_lm);
+        if (s_lm) omFree(s_lm);
+      }
       return;
     }
   }
@@ -2183,6 +2302,16 @@ void enterOnePairNormal (const SElement &si,poly p,int ecart, int isFromQ,kStrat
     {
       if (strat->fromT && (si.ecart>ecart))
       {
+        if (g_paircrit_this_dispatch) {
+          char *h_lm = paircrit_lm_str(p);
+          char *s_lm = paircrit_lm_str(si.p);
+          kt_paircrit_logf(
+            "KILL tid=%d atT=%d h_lm=%s si_s2r=%d si_lm=%s by=fromT_ecart\n",
+            kt_debug_tid, (int)strat->S.size(),
+            h_lm ? h_lm : "NULL", (int)si.s_2_r, s_lm ? s_lm : "NULL");
+          if (h_lm) omFree(h_lm);
+          if (s_lm) omFree(s_lm);
+        }
         return;
         /*the pair is (s[i],t[.]), discard it if the ecart is too big*/
       }
@@ -2204,6 +2333,16 @@ void enterOnePairNormal (const SElement &si,poly p,int ecart, int isFromQ,kStrat
       *case lcm(s,r)=lcm(s,p) is not covered by chainCrit.
       */
           strat->cp++;
+          if (g_paircrit_this_dispatch) {
+            char *h_lm = paircrit_lm_str(p);
+            char *s_lm = paircrit_lm_str(si.p);
+            kt_paircrit_logf(
+              "KILL tid=%d atT=%d h_lm=%s si_s2r=%d si_lm=%s by=prodCrit\n",
+              kt_debug_tid, (int)strat->S.size(),
+              h_lm ? h_lm : "NULL", (int)si.s_2_r, s_lm ? s_lm : "NULL");
+            if (h_lm) omFree(h_lm);
+            if (s_lm) omFree(s_lm);
+          }
           return;
       }
     }
@@ -2255,6 +2394,22 @@ void enterOnePairNormal (const SElement &si,poly p,int ecart, int isFromQ,kStrat
           strat->c3++;
           if ((!strat->hasFromQ) || (isFromQ==0) || (si.fromQ==0))
           {
+            if (g_paircrit_this_dispatch) {
+              char *h_lm = paircrit_lm_str(p);
+              char *s_lm = paircrit_lm_str(si.p);
+              char *lp_lm = paircrit_lm_str(Lp.lcm);
+              char *it_lm = paircrit_lm_str(it->lcm);
+              kt_paircrit_logf(
+                "KILL tid=%d atT=%d h_lm=%s si_s2r=%d si_lm=%s lp_lcm=%s "
+                "by=domByB victim_lcm=%s (sugar)\n",
+                kt_debug_tid, (int)strat->S.size(),
+                h_lm ? h_lm : "NULL", (int)si.s_2_r, s_lm ? s_lm : "NULL",
+                lp_lm ? lp_lm : "NULL", it_lm ? it_lm : "NULL");
+              if (h_lm) omFree(h_lm);
+              if (s_lm) omFree(s_lm);
+              if (lp_lm) omFree(lp_lm);
+              if (it_lm) omFree(it_lm);
+            }
             pLmFree(Lp.lcm);
             return;
           }
@@ -2264,6 +2419,16 @@ void enterOnePairNormal (const SElement &si,poly p,int ecart, int isFromQ,kStrat
         if ((compare ==-1)
         && sugarDivisibleBy(Lp.ecart,it->ecart))
         {
+          if (g_paircrit_this_dispatch) {
+            char *lp_lm = paircrit_lm_str(Lp.lcm);
+            char *it_lm = paircrit_lm_str(it->lcm);
+            kt_paircrit_logf(
+              "BKILL tid=%d atT=%d victim_lcm=%s killer_lcm=%s (sugar)\n",
+              kt_debug_tid, (int)strat->S.size(),
+              it_lm ? it_lm : "NULL", lp_lm ? lp_lm : "NULL");
+            if (lp_lm) omFree(lp_lm);
+            if (it_lm) omFree(it_lm);
+          }
           it = strat_B(strat).erase(it);
           strat->c3++;
         }
@@ -2291,6 +2456,22 @@ void enterOnePairNormal (const SElement &si,poly p,int ecart, int isFromQ,kStrat
           strat->c3++;
           if ((!strat->hasFromQ) || (isFromQ==0) || (si.fromQ==0))
           {
+            if (g_paircrit_this_dispatch) {
+              char *h_lm = paircrit_lm_str(p);
+              char *s_lm = paircrit_lm_str(si.p);
+              char *lp_lm = paircrit_lm_str(Lp.lcm);
+              char *it_lm = paircrit_lm_str(it->lcm);
+              kt_paircrit_logf(
+                "KILL tid=%d atT=%d h_lm=%s si_s2r=%d si_lm=%s lp_lcm=%s "
+                "by=domByB victim_lcm=%s\n",
+                kt_debug_tid, (int)strat->S.size(),
+                h_lm ? h_lm : "NULL", (int)si.s_2_r, s_lm ? s_lm : "NULL",
+                lp_lm ? lp_lm : "NULL", it_lm ? it_lm : "NULL");
+              if (h_lm) omFree(h_lm);
+              if (s_lm) omFree(s_lm);
+              if (lp_lm) omFree(lp_lm);
+              if (it_lm) omFree(it_lm);
+            }
             pLmFree(Lp.lcm);
             return;
           }
@@ -2299,6 +2480,16 @@ void enterOnePairNormal (const SElement &si,poly p,int ecart, int isFromQ,kStrat
         else
         if (compare ==-1)
         {
+          if (g_paircrit_this_dispatch) {
+            char *lp_lm = paircrit_lm_str(Lp.lcm);
+            char *it_lm = paircrit_lm_str(it->lcm);
+            kt_paircrit_logf(
+              "BKILL tid=%d atT=%d victim_lcm=%s killer_lcm=%s\n",
+              kt_debug_tid, (int)strat->S.size(),
+              it_lm ? it_lm : "NULL", lp_lm ? lp_lm : "NULL");
+            if (lp_lm) omFree(lp_lm);
+            if (it_lm) omFree(it_lm);
+          }
           it = strat_B(strat).erase(it);
           strat->c3++;
         }
@@ -2365,6 +2556,19 @@ void enterOnePairNormal (const SElement &si,poly p,int ecart, int isFromQ,kStrat
   }
   if (Lp.p == NULL)
   {
+    if (g_paircrit_this_dispatch) {
+      char *h_lm = paircrit_lm_str(p);
+      char *s_lm = paircrit_lm_str(si.p);
+      char *lp_lm = paircrit_lm_str(Lp.lcm);
+      kt_paircrit_logf(
+        "ZERO tid=%d atT=%d h_lm=%s si_s2r=%d si_lm=%s lcm=%s\n",
+        kt_debug_tid, (int)strat->S.size(),
+        h_lm ? h_lm : "NULL", (int)si.s_2_r, s_lm ? s_lm : "NULL",
+        lp_lm ? lp_lm : "NULL");
+      if (h_lm) omFree(h_lm);
+      if (s_lm) omFree(s_lm);
+      if (lp_lm) omFree(lp_lm);
+    }
     /*- the case that the s-poly is 0 -*/
     record_pairtest_hit(si, strat);
     /*hint for spoly(S[i],p) == 0 for some i,0 <= i <= sl*/
@@ -2450,6 +2654,19 @@ void enterOnePairNormal (const SElement &si,poly p,int ecart, int isFromQ,kStrat
     Lp.dbg_fp = kt_debug_pair_fp((void*)Lp.p1, (void*)Lp.p2,
                                  Lp.i_r1, Lp.i_r2);
 
+    if (g_paircrit_this_dispatch) {
+      char *h_lm = paircrit_lm_str(p);
+      char *s_lm = paircrit_lm_str(si.p);
+      char *lp_lm = paircrit_lm_str(Lp.lcm);
+      kt_paircrit_logf(
+        "KEEP tid=%d atT=%d h_lm=%s si_s2r=%d si_lm=%s lcm=%s ecart=%d\n",
+        kt_debug_tid, (int)strat->S.size(),
+        h_lm ? h_lm : "NULL", (int)si.s_2_r, s_lm ? s_lm : "NULL",
+        lp_lm ? lp_lm : "NULL", (int)Lp.ecart);
+      if (h_lm) omFree(h_lm);
+      if (s_lm) omFree(s_lm);
+      if (lp_lm) omFree(lp_lm);
+    }
     strat_B(strat).push(Lp);
   }
 }
@@ -3546,6 +3763,22 @@ void chainCritNormal (poly p,int ecart,kStrategy strat)
   int j;
   unsigned long sev_p = p_GetShortExpVector(p, currRing);
 
+  if (g_paircrit_this_dispatch) {
+    char *p_lm = paircrit_lm_str(p);
+    kt_paircrit_logf(
+      "CHAIN_ENTER tid=%d atT=%d p_lm=%s ecart=%d B.size=%d S.size=%d L.size=%d "
+      "Gebauer=%d fromT=%d sugarCrit=%d local_hits=%d\n",
+      kt_debug_tid, (int)strat->S.size(),
+      p_lm ? p_lm : "NULL", ecart,
+      (int)strat_B(strat).size(), (int)strat->S.size(),
+      (int)strat->L.size(),
+      strat->Gebauer ? 1 : 0, strat->fromT ? 1 : 0,
+      strat->sugarCrit ? 1 : 0,
+      (t_local_pairtest_hits != NULL)
+        ? (int)t_local_pairtest_hits->size() : -1);
+    if (p_lm) omFree(p_lm);
+  }
+
   // sev_flat_ is now maintained incrementally by LSet's insert/erase/pop/
   // reorder/copy/move methods.  No rebuild needed here.
 
@@ -3570,6 +3803,18 @@ void chainCritNormal (poly p,int ecart,kStrategy strat)
         {
           if (pLPDivisibleBy(sit->p, it->lcm))
           {
+            if (g_paircrit_this_dispatch) {
+              char *k_lm = paircrit_lm_str(sit->p);
+              char *v_lm = paircrit_lm_str(it->lcm);
+              kt_paircrit_logf(
+                "CHAINKILL tid=%d atT=%d src=local_hits_LP killer_lm=%s "
+                "killer_arrival=%lu victim_lcm=%s\n",
+                kt_debug_tid, (int)strat->S.size(),
+                k_lm ? k_lm : "NULL", (unsigned long)sit->arrival_id,
+                v_lm ? v_lm : "NULL");
+              if (k_lm) omFree(k_lm);
+              if (v_lm) omFree(v_lm);
+            }
             it = strat_B(strat).erase(it);
             strat->c3++;
           }
@@ -3587,6 +3832,18 @@ void chainCritNormal (poly p,int ecart,kStrategy strat)
           if (!(sit->sev & ~it->sev_lcm)
               && pDivisibleBy(sit->p, it->lcm))
           {
+            if (g_paircrit_this_dispatch) {
+              char *k_lm = paircrit_lm_str(sit->p);
+              char *v_lm = paircrit_lm_str(it->lcm);
+              kt_paircrit_logf(
+                "CHAINKILL tid=%d atT=%d src=local_hits killer_lm=%s "
+                "killer_arrival=%lu victim_lcm=%s\n",
+                kt_debug_tid, (int)strat->S.size(),
+                k_lm ? k_lm : "NULL", (unsigned long)sit->arrival_id,
+                v_lm ? v_lm : "NULL");
+              if (k_lm) omFree(k_lm);
+              if (v_lm) omFree(v_lm);
+            }
             it = strat_B(strat).erase(it);
             strat->c3++;
           }
@@ -3610,6 +3867,19 @@ void chainCritNormal (poly p,int ecart,kStrategy strat)
           {
             if (pLPDivisibleBy(sit->p,it->lcm))
             {
+              if (g_paircrit_this_dispatch) {
+                char *k_lm = paircrit_lm_str(sit->p);
+                char *v_lm = paircrit_lm_str(it->lcm);
+                kt_paircrit_logf(
+                  "CHAINKILL tid=%d atT=%d src=S_pairtest_LP killer_idx=%ld "
+                  "killer_lm=%s victim_lcm=%s\n",
+                  kt_debug_tid, (int)strat->S.size(),
+                  (long)sit.index(),
+                  k_lm ? k_lm : "NULL",
+                  v_lm ? v_lm : "NULL");
+                if (k_lm) omFree(k_lm);
+                if (v_lm) omFree(v_lm);
+              }
               it = strat_B(strat).erase(it);
               strat->c3++;
             }
@@ -3632,6 +3902,19 @@ void chainCritNormal (poly p,int ecart,kStrategy strat)
             if (!(sit->sev & ~it->sev_lcm)
             && pDivisibleBy(sit->p,it->lcm))
             {
+              if (g_paircrit_this_dispatch) {
+                char *k_lm = paircrit_lm_str(sit->p);
+                char *v_lm = paircrit_lm_str(it->lcm);
+                kt_paircrit_logf(
+                  "CHAINKILL tid=%d atT=%d src=S_pairtest killer_idx=%ld "
+                  "killer_lm=%s victim_lcm=%s\n",
+                  kt_debug_tid, (int)strat->S.size(),
+                  (long)sit.index(),
+                  k_lm ? k_lm : "NULL",
+                  v_lm ? v_lm : "NULL");
+                if (k_lm) omFree(k_lm);
+                if (v_lm) omFree(v_lm);
+              }
               it = strat_B(strat).erase(it);
               strat->c3++;
             }
@@ -3660,6 +3943,17 @@ void chainCritNormal (poly p,int ecart,kStrategy strat)
           && pCompareChain(p,it->p1,it->p2,it->lcm)
           && (it->p == strat->tail))
           {
+            if (g_paircrit_this_dispatch) {
+              char *p_lm = paircrit_lm_str(p);
+              char *v_lm = paircrit_lm_str(it->lcm);
+              kt_paircrit_logf(
+                "LKILL tid=%d atT=%d src=pCompareChain_sugar_GM killer_lm=%s "
+                "victim_lcm=%s\n",
+                kt_debug_tid, (int)strat->S.size(),
+                p_lm ? p_lm : "NULL", v_lm ? v_lm : "NULL");
+              if (p_lm) omFree(p_lm);
+              if (v_lm) omFree(v_lm);
+            }
             it = strat->L.erase(it);
             strat->c3++;
           }
@@ -3689,10 +3983,34 @@ void chainCritNormal (poly p,int ecart,kStrategy strat)
               strat->c3++;
               if (a->ecart < b->ecart)
               {
+                if (g_paircrit_this_dispatch) {
+                  char *v_lm = paircrit_lm_str(b->lcm);
+                  char *k_lm = paircrit_lm_str(a->lcm);
+                  kt_paircrit_logf(
+                    "GMKILL tid=%d atT=%d src=sugar_GM_ecart victim_lcm=%s "
+                    "killer_lcm=%s victim_ecart=%d killer_ecart=%d\n",
+                    kt_debug_tid, (int)strat->S.size(),
+                    v_lm ? v_lm : "NULL", k_lm ? k_lm : "NULL",
+                    b->ecart, a->ecart);
+                  if (v_lm) omFree(v_lm);
+                  if (k_lm) omFree(k_lm);
+                }
                 strat_B(strat).erase(strat_B(strat).uiter_at(j));
               }
               else if (a->ecart > b->ecart)
               {
+                if (g_paircrit_this_dispatch) {
+                  char *v_lm = paircrit_lm_str(a->lcm);
+                  char *k_lm = paircrit_lm_str(b->lcm);
+                  kt_paircrit_logf(
+                    "GMKILL tid=%d atT=%d src=sugar_GM_ecart victim_lcm=%s "
+                    "killer_lcm=%s victim_ecart=%d killer_ecart=%d\n",
+                    kt_debug_tid, (int)strat->S.size(),
+                    v_lm ? v_lm : "NULL", k_lm ? k_lm : "NULL",
+                    a->ecart, b->ecart);
+                  if (v_lm) omFree(v_lm);
+                  if (k_lm) omFree(k_lm);
+                }
                 strat_B(strat).erase(strat_B(strat).uiter_at(i));
                 break;  // i is gone, move to next i
               }
@@ -3700,9 +4018,33 @@ void chainCritNormal (poly p,int ecart,kStrategy strat)
               {
                 // Equal ecart: use key_comp() tiebreaker for determinism
                 if (strat_B(strat).key_comp()(*a, *b))
+                {
+                  if (g_paircrit_this_dispatch) {
+                    char *v_lm = paircrit_lm_str(b->lcm);
+                    char *k_lm = paircrit_lm_str(a->lcm);
+                    kt_paircrit_logf(
+                      "GMKILL tid=%d atT=%d src=sugar_GM_tiebreak victim_lcm=%s "
+                      "killer_lcm=%s\n",
+                      kt_debug_tid, (int)strat->S.size(),
+                      v_lm ? v_lm : "NULL", k_lm ? k_lm : "NULL");
+                    if (v_lm) omFree(v_lm);
+                    if (k_lm) omFree(k_lm);
+                  }
                   strat_B(strat).erase(strat_B(strat).uiter_at(j));
+                }
                 else
                 {
+                  if (g_paircrit_this_dispatch) {
+                    char *v_lm = paircrit_lm_str(a->lcm);
+                    char *k_lm = paircrit_lm_str(b->lcm);
+                    kt_paircrit_logf(
+                      "GMKILL tid=%d atT=%d src=sugar_GM_tiebreak victim_lcm=%s "
+                      "killer_lcm=%s\n",
+                      kt_debug_tid, (int)strat->S.size(),
+                      v_lm ? v_lm : "NULL", k_lm ? k_lm : "NULL");
+                    if (v_lm) omFree(v_lm);
+                    if (k_lm) omFree(k_lm);
+                  }
                   strat_B(strat).erase(strat_B(strat).uiter_at(i));
                   break;
                 }
@@ -3725,6 +4067,17 @@ void chainCritNormal (poly p,int ecart,kStrategy strat)
           if (pCompareChain(p,it->p1,it->p2,it->lcm)
           && ((pNext(it->p) == strat->tail)||(rHasGlobalOrdering(currRing))))
           {
+            if (g_paircrit_this_dispatch) {
+              char *p_lm = paircrit_lm_str(p);
+              char *v_lm = paircrit_lm_str(it->lcm);
+              kt_paircrit_logf(
+                "LKILL tid=%d atT=%d src=pCompareChain_GM killer_lm=%s "
+                "victim_lcm=%s\n",
+                kt_debug_tid, (int)strat->S.size(),
+                p_lm ? p_lm : "NULL", v_lm ? v_lm : "NULL");
+              if (p_lm) omFree(p_lm);
+              if (v_lm) omFree(v_lm);
+            }
             it = strat->L.erase(it);
             strat->c3++;
           }
@@ -3754,9 +4107,33 @@ void chainCritNormal (poly p,int ecart,kStrategy strat)
               strat->c3++;
               // Erase the worse element; keep the one that sorts first
               if (strat_B(strat).key_comp()(*a, *b))
+              {
+                if (g_paircrit_this_dispatch) {
+                  char *v_lm = paircrit_lm_str(b->lcm);
+                  char *k_lm = paircrit_lm_str(a->lcm);
+                  kt_paircrit_logf(
+                    "GMKILL tid=%d atT=%d src=GM_tiebreak victim_lcm=%s "
+                    "killer_lcm=%s\n",
+                    kt_debug_tid, (int)strat->S.size(),
+                    v_lm ? v_lm : "NULL", k_lm ? k_lm : "NULL");
+                  if (v_lm) omFree(v_lm);
+                  if (k_lm) omFree(k_lm);
+                }
                 strat_B(strat).erase(strat_B(strat).uiter_at(j));
+              }
               else
               {
+                if (g_paircrit_this_dispatch) {
+                  char *v_lm = paircrit_lm_str(a->lcm);
+                  char *k_lm = paircrit_lm_str(b->lcm);
+                  kt_paircrit_logf(
+                    "GMKILL tid=%d atT=%d src=GM_tiebreak victim_lcm=%s "
+                    "killer_lcm=%s\n",
+                    kt_debug_tid, (int)strat->S.size(),
+                    v_lm ? v_lm : "NULL", k_lm ? k_lm : "NULL");
+                  if (v_lm) omFree(v_lm);
+                  if (k_lm) omFree(k_lm);
+                }
                 strat_B(strat).erase(strat_B(strat).uiter_at(i));
                 break;  // i is gone
               }
@@ -3784,6 +4161,22 @@ void chainCritNormal (poly p,int ecart,kStrategy strat)
         {
           if ((pNext(it->p) == strat->tail)||(rHasGlobalOrdering(currRing)))
           {
+            if (g_paircrit_this_dispatch) {
+              char *p_lm = paircrit_lm_str(p);
+              char *v_lm = paircrit_lm_str(it->lcm);
+              char *vp1_lm = paircrit_lm_str(it->p1);
+              char *vp2_lm = paircrit_lm_str(it->p2);
+              kt_paircrit_logf(
+                "LKILL tid=%d atT=%d src=pCompareChain_nonGebauer killer_lm=%s "
+                "victim_lcm=%s victim_p1_lm=%s victim_p2_lm=%s\n",
+                kt_debug_tid, (int)strat->S.size(),
+                p_lm ? p_lm : "NULL", v_lm ? v_lm : "NULL",
+                vp1_lm ? vp1_lm : "NULL", vp2_lm ? vp2_lm : "NULL");
+              if (p_lm) omFree(p_lm);
+              if (v_lm) omFree(v_lm);
+              if (vp1_lm) omFree(vp1_lm);
+              if (vp2_lm) omFree(vp2_lm);
+            }
             it = strat->L.erase(it);
             strat->c3++;
             continue;
@@ -3820,6 +4213,20 @@ void chainCritNormal (poly p,int ecart,kStrategy strat)
           && (!pLmEqual(bvec[ii]->p,lt->p))
           && pDivisibleBy(p,lt->lcm))
           {
+            if (g_paircrit_this_dispatch) {
+              char *p_lm = paircrit_lm_str(p);
+              char *v_lm = paircrit_lm_str(lt->lcm);
+              char *bji_lm = paircrit_lm_str(bvec[ji]->lcm);
+              kt_paircrit_logf(
+                "LKILL tid=%d atT=%d src=bvec_triangle_L_erase killer_lm=%s "
+                "victim_lcm=%s bvec[ji]_lcm=%s\n",
+                kt_debug_tid, (int)strat->S.size(),
+                p_lm ? p_lm : "NULL", v_lm ? v_lm : "NULL",
+                bji_lm ? bji_lm : "NULL");
+              if (p_lm) omFree(p_lm);
+              if (v_lm) omFree(v_lm);
+              if (bji_lm) omFree(bji_lm);
+            }
             /*
             *"NOT equal(...)" because in case of "equal" the element L[l]
             *is "older" and has to be from theoretical point of view behind
@@ -3834,6 +4241,20 @@ void chainCritNormal (poly p,int ecart,kStrategy strat)
           }
           else
           {
+            if (g_paircrit_this_dispatch) {
+              char *p_lm = paircrit_lm_str(p);
+              char *v_lm = paircrit_lm_str(bvec[ii]->lcm);
+              char *bji_lm = paircrit_lm_str(bvec[ji]->lcm);
+              kt_paircrit_logf(
+                "LKILL tid=%d atT=%d src=bvec_triangle_bvec_erase killer_lm=%s "
+                "victim_lcm=%s bvec[ji]_lcm=%s\n",
+                kt_debug_tid, (int)strat->S.size(),
+                p_lm ? p_lm : "NULL", v_lm ? v_lm : "NULL",
+                bji_lm ? bji_lm : "NULL");
+              if (p_lm) omFree(p_lm);
+              if (v_lm) omFree(v_lm);
+              if (bji_lm) omFree(bji_lm);
+            }
             strat->L.erase(bvec[ii]);
             bvec[ii] = endL;
           }

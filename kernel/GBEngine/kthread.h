@@ -434,6 +434,18 @@ void kt_debug_R_write_probe(const char *site, int k,
 void kt_debug_audit_printf(const char *fmt, ...)
   __attribute__((format(printf, 1, 2)));
 
+// SINGULAR_TRACE_PAIRCRIT=<disp_id> — per-thread pair-criterion
+// decision log.  When enabled, enterOnePairNormal and chainCritNormal
+// emit one line per kill/keep decision to
+// /tmp/audit-run/paircrit-trace-<disp>-tid<TID>.log (one file per
+// thread — no shared mutex).  Callers MUST gate on
+// g_paircrit_this_dispatch to avoid formatting cost when the log is
+// disabled.  See kthread.cc for the refresh/close machinery.
+extern bool g_paircrit_this_dispatch;
+void kt_paircrit_logf(const char *fmt, ...)
+  __attribute__((format(printf, 1, 2)));
+void kt_paircrit_reset_tls();
+
 // Scan strat->L for R-inconsistent pairs.  Returns count.  Emits an
 // audit-log line on any nonzero count.  Used for time-bisecting
 // where the R-rewrite occurs in the parallel-phase main loop.
