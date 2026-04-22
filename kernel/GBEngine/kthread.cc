@@ -254,6 +254,52 @@ static void dump_ring_generic(const char *reason);  // forward decl
 // serial code paths — harmless: the audit is disabled there.
 thread_local int kt_debug_tid = 0;
 
+// Current bba() dispatch id, set by bba() entry in kstd2.cc.  Used to
+// gate per-dispatch trace output (SINGULAR_TRACE_DISP=N).
+int g_current_disp_id = -1;
+
+// True if the current dispatch matches SINGULAR_TRACE_DISP.  Cached
+// at bba_parallel_loop entry (checked inside hot paths by plain int
+// load).  Updated by bpl_trace_enabled_for_current_disp() below.
+static bool g_trace_this_dispatch = false;
+// Set true at the moment main decides to break out of the parallel
+// loop (AFTER the enterpairs_active == 0 check passes); reset false
+// at each BPL entry.  Used to flag any drainer that pushes pairs to
+// L after main has terminated — those pairs are lost.
+static std::atomic<bool> g_main_has_broken{false};
+// Dedicated trace log for a single dispatch, opened on demand.
+static FILE *g_disp_trace_fp = NULL;
+static pthread_mutex_t g_disp_trace_lock = PTHREAD_MUTEX_INITIALIZER;
+
+static void bpl_trace_refresh() {
+  g_main_has_broken.store(false, std::memory_order_release);
+  const char *s = getenv("SINGULAR_TRACE_DISP");
+  if (s == NULL) { g_trace_this_dispatch = false; return; }
+  int want = atoi(s);
+  g_trace_this_dispatch = (g_current_disp_id == want);
+  if (g_trace_this_dispatch && g_disp_trace_fp == NULL) {
+    char path[128];
+    snprintf(path, sizeof(path), "/tmp/audit-run/disp-trace-%d.log",
+             g_current_disp_id);
+    g_disp_trace_fp = fopen(path, "w");
+    if (g_disp_trace_fp != NULL) setvbuf(g_disp_trace_fp, NULL, _IONBF, 0);
+  }
+}
+
+// Thread-safe event logger for the current dispatch.  Callers should
+// gate on g_trace_this_dispatch to avoid string-formatting in the
+// hot path.
+void kt_disp_tracef(const char *fmt, ...) {
+  if (!g_trace_this_dispatch || g_disp_trace_fp == NULL) return;
+  pthread_mutex_lock(&g_disp_trace_lock);
+  va_list ap;
+  va_start(ap, fmt);
+  vfprintf(g_disp_trace_fp, fmt, ap);
+  va_end(ap);
+  fflush(g_disp_trace_fp);
+  pthread_mutex_unlock(&g_disp_trace_lock);
+}
+
 // Public breadcrumb entry point.  Thin wrapper around tag_log.
 void kt_debug_tag(const char *op, void *poly, int slot, int arg)
 {
@@ -1089,6 +1135,15 @@ static BOOLEAN pop_and_prepare(SweepContext *ctx, ActivePoly *ap,
     ap->P = strat->L.top();
     strat->L.pop();
 
+    if (g_trace_this_dispatch) {
+      // Only log pointers + slots; pString on shared T is racy.
+      kt_disp_tracef("[tid=%d] POP pair i_r1=%d i_r2=%d  "
+                     "p1=%p p2=%p p=%p |L|_after=%d\n",
+                     kt_debug_tid, ap->P.i_r1, ap->P.i_r2,
+                     (void*)ap->P.p1, (void*)ap->P.p2, (void*)ap->P.p,
+                     (int)strat->L.size());
+    }
+
     // pop-time sanity check.  pair.i_r{1,2} is an R-SLOT INDEX (stable
     // across T shifts — enterT updates R via the persistent .i_r
     // field).  The authoritative comparison is R[ir]->p.  T[ir].p
@@ -1098,31 +1153,34 @@ static BOOLEAN pop_and_prepare(SweepContext *ctx, ActivePoly *ap,
       if (ir < 0 || ir >= strat->T.size()) return false;
       TObject *r_entry = (ir < (int)strat->T.size()) ? strat->R[ir] : NULL;
       poly exp_r = (r_entry != NULL) ? r_entry->p : NULL;
-      poly exp_t = strat->T[ir].p;
       bool r_mismatch = (pp != NULL && exp_r != NULL && pp != exp_r);
-      bool t_mismatch = (pp != NULL && pp != exp_t);
-      if (r_mismatch || t_mismatch)
+      if (g_debug_ring_enabled.load(std::memory_order_relaxed))
       {
-        poly snap = (poly)kt_debug_lookup_T_head(ir);
-        FILE *log = g_audit_log ? g_audit_log : stderr;
-        fprintf(log,
-                "\n=== POP CHECK (%s): pp=%p i_r=%d  "
-                "R[ir]->p=%p (mismatch=%d, REAL BUG if 1)  "
-                "T[ir].p=%p (mismatch=%d, cosmetic from T-shift)  "
-                "snap[ir]=%p  T[ir-1].p=%p T[ir+1].p=%p  "
-                "match_prev=%d match_next=%d  snap_eq_pp=%d "
-                "snap_eq_tp=%d ===\n",
-                which, (void*)pp, ir,
-                (void*)exp_r, r_mismatch ? 1 : 0,
-                (void*)exp_t, t_mismatch ? 1 : 0,
-                (void*)snap,
-                ir > 0 ? (void*)strat->T[ir-1].p : NULL,
-                ir+1 < (int)strat->T.size() ? (void*)strat->T[ir+1].p : NULL,
-                (ir > 0 && pp == strat->T[ir-1].p) ? 1 : 0,
-                (ir+1 < (int)strat->T.size() && pp == strat->T[ir+1].p) ? 1 : 0,
-                snap == pp ? 1 : 0,
-                snap == exp_t ? 1 : 0);
-        fflush(log);
+        poly exp_t = strat->T[ir].p;
+        bool t_mismatch = (pp != NULL && pp != exp_t);
+        if (r_mismatch || t_mismatch)
+        {
+          poly snap = (poly)kt_debug_lookup_T_head(ir);
+          FILE *log = g_audit_log ? g_audit_log : stderr;
+          fprintf(log,
+                  "\n=== POP CHECK (%s): pp=%p i_r=%d  "
+                  "R[ir]->p=%p (mismatch=%d, REAL BUG if 1)  "
+                  "T[ir].p=%p (mismatch=%d, cosmetic from T-shift)  "
+                  "snap[ir]=%p  T[ir-1].p=%p T[ir+1].p=%p  "
+                  "match_prev=%d match_next=%d  snap_eq_pp=%d "
+                  "snap_eq_tp=%d ===\n",
+                  which, (void*)pp, ir,
+                  (void*)exp_r, r_mismatch ? 1 : 0,
+                  (void*)exp_t, t_mismatch ? 1 : 0,
+                  (void*)snap,
+                  ir > 0 ? (void*)strat->T[ir-1].p : NULL,
+                  ir+1 < (int)strat->T.size() ? (void*)strat->T[ir+1].p : NULL,
+                  (ir > 0 && pp == strat->T[ir-1].p) ? 1 : 0,
+                  (ir+1 < (int)strat->T.size() && pp == strat->T[ir+1].p) ? 1 : 0,
+                  snap == pp ? 1 : 0,
+                  snap == exp_t ? 1 : 0);
+          fflush(log);
+        }
       }
       // Only R-mismatch is treated as a real bug for gating
       // downstream tags.
@@ -1434,6 +1492,11 @@ static void close_slot(SweepContext *ctx, int s, int thread_id)
 {
   OpTag _close_tag(thread_id, "close_slot", NULL, s);
   ActivePoly *ap = &ctx->active[s];
+  if (g_trace_this_dispatch) {
+    kt_disp_tracef("[tid=%d] close_slot s=%d occ=%d surv=%d\n",
+                   thread_id, s, ap->occupied ? 1 : 0,
+                   ap->is_survivor ? 1 : 0);
+  }
 
   // Unoccupied or already-survivor: should not happen in the continuous
   // design (batches only fire for FILLED slots) but keep as a safety.
@@ -1463,6 +1526,14 @@ static void close_slot(SweepContext *ctx, int s, int thread_id)
   //   (1) poly reduced to zero / overflow / syzComp-out → ap->occupied = false
   //   (2) survivor               → ap->is_survivor = true, still occupied
   //   (3) still occupied & not survivor → needs another sweep pass
+  if (g_trace_this_dispatch) {
+    const char *outcome = (!ap->occupied) ? "ZERO"
+      : (ap->is_survivor ? "SURV" : "CONT");
+    // Just log the outcome + poly pointer; string-formatting a
+    // potentially-concurrently-mutated poly racily segfaults.
+    kt_disp_tracef("[tid=%d] REDUCE slot=%d outcome=%s p=%p\n",
+                   thread_id, s, outcome, (void*)ap->P.p);
+  }
   if (ap->occupied && ap->is_survivor)
   {
     // Queue survivor for main to drain; transfer ownership out of slot.
@@ -2062,6 +2133,14 @@ static void process_survivor_lobject(SweepContext *ctx, LObject *P, int thread_i
       // it — that's the atT for appendEnd).  Lets us correlate pair
       // construction with the T slot it will occupy.
       OpTag _r(thread_id, "enterT", P->p, strat->T.size(), 0);
+      if (g_trace_this_dispatch) {
+        // Full poly is safe here: P->p is thread-local (just reduced)
+        // and we hold S-exclusive.
+        char *s = pString(P->p);
+        kt_disp_tracef("[tid=%d] enterT atT=%d  poly=%s\n",
+                       thread_id, (int)strat->T.size(), s ? s : "0");
+        if (s) omFree(s);
+      }
       enterT(*P, strat);
     }
     audit_T_pLength(ctx, "ps-phase0-post-enterT", thread_id);
@@ -2144,6 +2223,13 @@ static void process_survivor_lobject(SweepContext *ctx, LObject *P, int thread_i
     long es0 = KT_STATS(ctx) ? kt_now_ns() : 0;
 #endif
     my_arrival = strat->arrival_counter.load(std::memory_order_relaxed);
+    if (g_trace_this_dispatch) {
+      char *s = pString(P->p);
+      kt_disp_tracef("[tid=%d] enterS arrival=%lu S.size_pre=%d  poly=%s\n",
+                     thread_id, (unsigned long)my_arrival,
+                     (int)strat->S.size(), s ? s : "0");
+      if (s) omFree(s);
+    }
     strat->enterS(*P, strat, strat->T.size()-1, strat->S.end());
     did_enterS = true;
 #ifdef KTHREAD_INSTRUMENT
@@ -2193,6 +2279,28 @@ static void process_survivor_lobject(SweepContext *ctx, LObject *P, int thread_i
     t_local_pairtest_hits = &local_pairtest_hits;
 
     kt_S_lock_shared(ctx, thread_id);
+
+    // Recompute pos_it after acquiring S-shared.  Between the phase-0
+    // unlock_exclusive() above and this lock_shared(), peer drainers'
+    // phase-0 enterS (SORDER_STANDARD sorted insert, kutil.h:850-854
+    // via BlockArray::insert) may have inserted before our h and
+    // shifted all positions >= the insert point up by one.  pos_it's
+    // integer index would then refer to a different entry than our h.
+    // Find our entry by its unique arrival_id (stamped by enterS under
+    // our exclusive lock in phase 0; no other S entry has this id).
+    // Safe under shared: no concurrent sort-insert (needs exclusive)
+    // and no compact (needs exclusive).  Linear scan is cheap at the
+    // drain cadence.
+    // Gated on SINGULAR_FIX_POS_IT=1 during bring-up for A/B testing.
+    if (getenv("SINGULAR_FIX_POS_IT") != NULL)
+    {
+      sBasisSet::iterator found = strat->S.end();
+      for (auto it = strat->S.begin(); it != strat->S.end(); ++it) {
+        if (it->arrival_id == my_arrival) { found = it; break; }
+      }
+      pos_it = found;
+    }
+
     kt_L_lock_phase2(ctx, thread_id);
 
 #ifdef KTHREAD_INSTRUMENT
@@ -2249,10 +2357,26 @@ static void process_survivor_lobject(SweepContext *ctx, LObject *P, int thread_i
       kt_debug_tag("enterpairs:T[atR]!=P->p (cosmetic)",
                    (void*)P->p, atR_for_pairs, P->i_r);
     }
+    int L_before_ep = (int)strat->L.size();
     if (rField_is_Ring(currRing))
       superenterpairs(P->p, strat->S.size()-1, P->ecart, pos_it, strat, atR_for_pairs);
     else
       enterpairs(P->p, strat->S.size()-1, P->ecart, pos_it, strat, atR_for_pairs);
+    int L_after_ep = (int)strat->L.size();
+    if (g_trace_this_dispatch) {
+      kt_disp_tracef("[tid=%d] enterpairs delta=%d (L %d -> %d)  "
+                     "S.size=%d atR=%d P.i_r=%d\n",
+                     thread_id, L_after_ep - L_before_ep,
+                     L_before_ep, L_after_ep,
+                     (int)strat->S.size(), atR_for_pairs, P->i_r);
+    }
+    // If main already decided to terminate but a drainer is here adding
+    // pairs to L, those pairs will be LOST.  Flag it loudly.
+    if (g_trace_this_dispatch && g_main_has_broken.load(std::memory_order_acquire)
+        && L_after_ep > L_before_ep) {
+      kt_disp_tracef("[tid=%d] *** LOST PAIRS: +%d after main broke ***\n",
+                     thread_id, L_after_ep - L_before_ep);
+    }
 
 #ifdef KTHREAD_INSTRUMENT
     if (KT_STATS(ctx))
@@ -2322,6 +2446,10 @@ static void process_survivor_lobject(SweepContext *ctx, LObject *P, int thread_i
 
 static void queue_survivor(SweepContext *ctx, ActivePoly *ap)
 {
+  if (g_trace_this_dispatch) {
+    kt_disp_tracef("[tid=%d] QUEUE_SURV slot=%ld\n",
+                   kt_debug_tid, (long)(ap - ctx->active));
+  }
   kt_surv_q_lock(ctx, 0);
   ctx->survivor_queue->push_back(ap->P);
   long depth = (long)ctx->survivor_queue->size();
@@ -2464,6 +2592,8 @@ void bba_parallel_loop(SweepContext *ctx)
   kt_debug_tid = 0;  // main thread
   kStrategy strat = ctx->strat;
   int nthreads = ctx->num_threads;
+
+  bpl_trace_refresh();
 
   // Two layers of debug enablement:
   //   SINGULAR_AUDIT_T=1     -> audit-walks on top of the ring
@@ -2770,8 +2900,16 @@ void bba_parallel_loop(SweepContext *ctx)
       // at THREADS=4 gave 1 instead of 3 ~40% of runs; with this
       // check, 0 wrong in initial tests.
       int drainers_active = ctx->enterpairs_active.load(std::memory_order_acquire);
-      if (queue_empty && L_empty && drainers_active == 0)
+      kt_disp_tracef("TERM-CHK q_empty=%d L_empty=%d drainers=%d T=%d S=%d\n",
+                     queue_empty ? 1 : 0, L_empty ? 1 : 0,
+                     drainers_active, (int)strat->T.size(),
+                     (int)strat->S.size());
+      if (queue_empty && L_empty && drainers_active == 0) {
+        kt_disp_tracef("MAIN BREAK  T.size=%d S.size=%d\n",
+                       (int)strat->T.size(), (int)strat->S.size());
+        g_main_has_broken.store(true, std::memory_order_release);
         break;
+      }
       // Else there is still work (drain produced survivors, or L has
       // new entries, or a worker drainer hasn't finished adding
       // pairs) — loop back immediately.
@@ -2982,4 +3120,12 @@ parallel_shutdown:
     fflush(stderr);
   }
 #endif
+  // Close per-dispatch trace log if open.
+  if (g_disp_trace_fp != NULL) {
+    kt_disp_tracef("[END] bba_parallel_loop exit  |T|=%d |S|=%d |L|=%d\n",
+                   (int)strat->T.size(), (int)strat->S.size(),
+                   (int)strat->L.size());
+    fclose(g_disp_trace_fp);
+    g_disp_trace_fp = NULL;
+  }
 }

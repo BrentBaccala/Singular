@@ -179,6 +179,7 @@ static inline int kSevScanSSE4(const unsigned long* sevT, unsigned long not_sev,
 #include "kernel/ideals.h"
 #include "kernel/GBEngine/kstd1.h"
 #include "kernel/GBEngine/khstd.h"
+#include "kernel/combinatorics/stairc.h"
 #include "polys/kbuckets.h"
 #include "polys/prCopy.h"
 #include "polys/weight.h"
@@ -2809,6 +2810,78 @@ ideal bba (ideal F, ideal Q,intvec *w,bigintmat *hilb,kStrategy strat)
   BITSET save;
   SI_SAVE_OPT1(save);
 
+  // Dispatch-dump: write F (and Q) for each bba() call to
+  // /tmp/audit-run/F-dispatch-N.txt.  Lets us minimise a reproducer
+  // by identifying which specific dispatch produces wrong output.
+  // Gated on SINGULAR_DUMP_DISPATCH_F; no-op otherwise.
+  int __disp_id = -1;
+  thread_local static int __in_check_outer = 0;  // declared before __in_check
+  {
+    // Always bump the counter (top-level dispatches only, not the
+    // recursive check's internal bba calls) so disp_id is stable.
+    extern int g_current_disp_id;
+    static int __disp_counter = 0;
+    if (__in_check_outer == 0) {
+      __disp_id = __disp_counter++;
+      g_current_disp_id = __disp_id;
+    }
+  }
+
+  // Save a copy of the input ideal for optional ideal-membership
+  // verification at bba() exit (SINGULAR_CHECK_IDEAL_MEMBERSHIP=1).
+  // Every polynomial produced by a correct Buchberger run must lie
+  // in ideal(F).  If any S[i] reduces non-zero modulo std(F,serial),
+  // that's proof of wrong math.
+  // Thread-local guard prevents infinite recursion: the check itself
+  // calls kStd_internal which re-enters bba.
+  ideal __savedF = NULL;
+  if (getenv("SINGULAR_CHECK_IDEAL_MEMBERSHIP") != NULL && F != NULL
+      && __in_check_outer == 0)
+  {
+    // Skip module cases (rank > 0) — ideal-membership via kNF is
+    // only correct for polynomial ideals, not modules/vectors.
+    if (id_RankFreeModule(F, currRing) == 0)
+      __savedF = idCopy(F);
+  }
+  if (getenv("SINGULAR_DUMP_DISPATCH_F") != NULL)
+  {
+    char path[256];
+    snprintf(path, sizeof(path),
+             "/tmp/audit-run/F-dispatch-%d.txt", __disp_id);
+    FILE *fp = fopen(path, "w");
+    if (fp != NULL)
+    {
+      fprintf(fp, "disp_id=%d  nvars=%d  pCompIndex=%d  "
+                  "|F|=%d  |Q|=%d  threads=%d\n",
+              __disp_id, currRing ? currRing->N : -1,
+              currRing ? currRing->pCompIndex : -1,
+              F ? IDELEMS(F) : 0, Q ? IDELEMS(Q) : 0,
+              get_singular_threads());
+      fprintf(fp, "ring-order: ");
+      if (currRing != NULL && currRing->order != NULL)
+      {
+        for (int i = 0; currRing->order[i] != 0; i++)
+          fprintf(fp, "%d ", (int)currRing->order[i]);
+      }
+      fprintf(fp, "\n");
+      if (F != NULL) {
+        for (int i = 0; i < IDELEMS(F); i++) {
+          char *s = pString(F->m[i]);
+          fprintf(fp, "F[%d] = %s\n", i, s ? s : "0");
+          if (s) omFree(s);
+        }
+      }
+      if (Q != NULL) {
+        for (int i = 0; i < IDELEMS(Q); i++) {
+          char *s = pString(Q->m[i]);
+          fprintf(fp, "Q[%d] = %s\n", i, s ? s : "0");
+          if (s) omFree(s);
+        }
+      }
+      fclose(fp);
+    }
+  }
+
   initBuchMoraCrit(strat); /*set Gebauer, honey, sugarCrit*/
   if(rField_is_Ring(currRing))
     initBuchMoraPosRing(strat);
@@ -3244,6 +3317,192 @@ bba_post_loop:
     if (_sit->p != NULL && _sit->p->coef == NULL)
     { fprintf(stderr, "bba AFTER updateResult: S[%d].p=%p NULL coef! Q=%p\n", _sit.index(), (void*)_sit->p, (void*)Q); abort(); }
 #endif
+
+  // Ideal-membership check: does every S[i] lie in ideal(savedF)?
+  // Invariant of Buchberger: output GB <-> input ideal.  If any
+  // S[i] reduces non-zero modulo a serial GB of savedF, the bba
+  // produced wrong math.  Check is expensive (one std(F) + |S|
+  // reductions) so gated; forced serial by setting
+  // SINGULAR_THREADS=1 around the recursive call.
+  if (getenv("SINGULAR_CHECK_IDEAL_MEMBERSHIP") != NULL
+      && __in_check_outer == 0 && __disp_id >= 0)
+  {
+    FILE *fp = fopen("/tmp/audit-run/check-trace.log", "a");
+    if (fp != NULL) {
+      fprintf(fp, "disp=%d savedF=%s errorreported=%d rank=%ld\n",
+              __disp_id, __savedF ? "set" : "NULL",
+              (int)errorreported,
+              F ? (long)id_RankFreeModule(F, currRing) : -1L);
+      fclose(fp);
+    }
+  }
+  if (__savedF != NULL && !errorreported)
+  {
+    const char *prev_threads = getenv("SINGULAR_THREADS");
+    char prev_buf[32];
+    if (prev_threads != NULL)
+    { strncpy(prev_buf, prev_threads, sizeof(prev_buf)-1); prev_buf[sizeof(prev_buf)-1] = 0; }
+    setenv("SINGULAR_THREADS", "1", 1);
+
+    // Step 1: compute a serial GB of the OUTPUT (strat->S).  This
+    // tests whether S is actually a complete GB for the ideal it
+    // generates.  An incomplete GB (subset of correct ideal but
+    // not closed under S-polynomials) is what we suspect: each
+    // S[i] is in ideal(F) but ideal(S) ⊊ ideal(F).
+    //
+    // Concretely we check the two directions:
+    //   (a) each S[i] ∈ ideal(F):  reduce(S[i], std(F))==0
+    //   (b) each F[j] ∈ ideal(S):  reduce(F[j], std(S))==0
+    // Either failing is proof of wrong math.  (a) found bugs with
+    // extra junk in S; (b) finds incomplete GBs.
+    __in_check_outer = 1;
+    intvec *mw = NULL;
+    ideal trusted_gb = kStd_internal(__savedF, NULL, testHomog, &mw);
+    if (mw != NULL) { delete mw; mw = NULL; }
+
+    // Also compute std(S), a re-standardization of the output.
+    ideal Shdl = strat->getShdl();
+    ideal S_as_ideal = NULL;
+    ideal S_std = NULL;
+    if (Shdl != NULL) {
+      S_as_ideal = idCopy(Shdl);
+      idSkipZeroes(S_as_ideal);
+      S_std = kStd_internal(S_as_ideal, NULL, testHomog, &mw);
+      if (mw != NULL) { delete mw; mw = NULL; }
+    }
+    __in_check_outer = 0;
+
+    // (a) S[i] ∈ ideal(F)?
+    int nviol_a = 0, first_a = -1;
+    if (Shdl != NULL && trusted_gb != NULL)
+    {
+      for (int i = 0; i < IDELEMS(Shdl); i++)
+      {
+        if (Shdl->m[i] == NULL) continue;
+        poly r = kNF(trusted_gb, NULL, Shdl->m[i], 0, 0);
+        if (r != NULL) { nviol_a++; if (first_a < 0) first_a = i; pDelete(&r); }
+      }
+    }
+
+    // (b) F[j] ∈ ideal(S)?   This catches incomplete GBs.
+    int nviol_b = 0, first_b = -1;
+    if (__savedF != NULL && S_std != NULL)
+    {
+      for (int j = 0; j < IDELEMS(__savedF); j++)
+      {
+        if (__savedF->m[j] == NULL) continue;
+        poly r = kNF(S_std, NULL, __savedF->m[j], 0, 0);
+        if (r != NULL) { nviol_b++; if (first_b < 0) first_b = j; pDelete(&r); }
+      }
+    }
+
+    // Dim check (only meaningful for ideals).  If bad GB reduces
+    // dim vs trusted GB's dim, that's a symptom too.
+    int dim_trusted = -42, dim_S = -42;
+    if (trusted_gb != NULL) dim_trusted = scDimIntRing(trusted_gb, NULL);
+    if (S_std != NULL) dim_S = scDimIntRing(S_std, NULL);
+
+    if (nviol_a > 0 || nviol_b > 0 || (dim_trusted != dim_S))
+    {
+      FILE *fp = fopen("/tmp/audit-run/ideal-violations.log", "a");
+      if (fp == NULL) fp = stderr;
+      fprintf(fp,
+              "=== VIOLATION disp_id=%d threads=%d |F|=%d |S|=%d "
+              "|trust|=%d |S_std|=%d  dim(trust)=%d dim(S)=%d  "
+              "S_out_of_F=%d first=S[%d]  F_out_of_S=%d first=F[%d] ===\n",
+              __disp_id, get_singular_threads(),
+              IDELEMS(__savedF), Shdl ? IDELEMS(Shdl) : 0,
+              trusted_gb ? IDELEMS(trusted_gb) : 0,
+              S_std ? IDELEMS(S_std) : 0,
+              dim_trusted, dim_S,
+              nviol_a, first_a, nviol_b, first_b);
+      if (nviol_b > 0 && __savedF != NULL && S_std != NULL)
+      {
+        for (int j = 0; j < IDELEMS(__savedF); j++) {
+          if (__savedF->m[j] == NULL) continue;
+          poly r = kNF(S_std, NULL, __savedF->m[j], 0, 0);
+          char *sf = pString(__savedF->m[j]);
+          char *sr = (r != NULL) ? pString(r) : NULL;
+          fprintf(fp, "  F[%d] %s  F=%s  reduce=%s\n", j,
+                  (r == NULL) ? "IN span(S)" : "NOT IN span(S)",
+                  sf ? sf : "0", sr ? sr : "0");
+          if (sf) omFree(sf);
+          if (sr) omFree(sr);
+          if (r != NULL) pDelete(&r);
+        }
+      }
+      // Highly diagnostic: show which trusted-GB generators are
+      // MISSING from strat->S.  An incomplete GB shape means some
+      // trusted generator's lm has no divisor among S's lms — the
+      // parallel computation failed to produce that polynomial.
+      if (trusted_gb != NULL && S_std != NULL)
+      {
+        fprintf(fp, "  MISSING GENERATORS (trusted reduced by S):\n");
+        for (int t = 0; t < IDELEMS(trusted_gb); t++) {
+          if (trusted_gb->m[t] == NULL) continue;
+          poly r = kNF(S_std, NULL, trusted_gb->m[t], 0, 0);
+          char *lm = p_String(trusted_gb->m[t], currRing);
+          // Just the LM for brevity
+          poly head = pHead(trusted_gb->m[t]);
+          char *lm_only = p_String(head, currRing);
+          fprintf(fp, "    trust[%d] lm=%s  %s\n", t,
+                  lm_only ? lm_only : "?",
+                  (r == NULL) ? "covered" : "MISSING");
+          if (head != NULL) pDelete(&head);
+          if (lm) omFree(lm);
+          if (lm_only) omFree(lm_only);
+          if (r != NULL) pDelete(&r);
+        }
+        fprintf(fp, "  STRAT->S leading monomials:\n");
+        for (int i = 0; i < IDELEMS(Shdl); i++) {
+          if (Shdl->m[i] == NULL) continue;
+          poly head = pHead(Shdl->m[i]);
+          char *lm_only = p_String(head, currRing);
+          fprintf(fp, "    S[%d] lm=%s\n", i, lm_only ? lm_only : "?");
+          if (head != NULL) pDelete(&head);
+          if (lm_only) omFree(lm_only);
+        }
+      }
+      fflush(fp);
+      if (fp != stderr) fclose(fp);
+      fprintf(stderr,
+              "*** VIOLATION disp=%d a=%d[S%d] b=%d[F%d] dim=%d/%d ***\n",
+              __disp_id, nviol_a, first_a, nviol_b, first_b,
+              dim_trusted, dim_S);
+      fflush(stderr);
+    }
+
+    if (trusted_gb != NULL) idDelete(&trusted_gb);
+    if (S_as_ideal != NULL) idDelete(&S_as_ideal);
+    if (S_std != NULL) idDelete(&S_std);
+    if (prev_threads != NULL) setenv("SINGULAR_THREADS", prev_buf, 1);
+    else unsetenv("SINGULAR_THREADS");
+    idDelete(&__savedF);
+  }
+
+  // Result-dump: write the output GB to /tmp/audit-run/G-dispatch-N.txt.
+  if (__disp_id >= 0 && getenv("SINGULAR_DUMP_DISPATCH_F") != NULL)
+  {
+    char path[256];
+    snprintf(path, sizeof(path),
+             "/tmp/audit-run/G-dispatch-%d.txt", __disp_id);
+    FILE *fp = fopen(path, "w");
+    if (fp != NULL)
+    {
+      ideal Shdl = strat->getShdl();
+      fprintf(fp, "disp_id=%d  |G|=%d  threads=%d\n",
+              __disp_id, Shdl ? IDELEMS(Shdl) : 0,
+              get_singular_threads());
+      if (Shdl != NULL) {
+        for (int i = 0; i < IDELEMS(Shdl); i++) {
+          char *s = pString(Shdl->m[i]);
+          fprintf(fp, "G[%d] = %s\n", i, s ? s : "0");
+          if (s) omFree(s);
+        }
+      }
+      fclose(fp);
+    }
+  }
 
   return strat->getShdl();
 }
