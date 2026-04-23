@@ -73,13 +73,8 @@
 #include "kernel/GBEngine/ratgring.h"
 #endif
 
-/* Task 325 parallel-bba-event-log: defer-frees wrapper for pLmFree /
- * pDelete / p_LmFree / p_Delete.  MUST be included AFTER all poly
- * headers so the real inline functions / macros are declared first;
- * this header then #define's them to the kt_* wrappers.  Untraced
- * runs: wrappers are zero-cost (a single load of g_defer_frees). */
+/* Task 325 parallel-bba-event-log: global event log. */
 #include "kernel/GBEngine/kevlog.h"
-#include "kernel/GBEngine/kevlog_wrap.h"
 
 #ifdef DEBUGF5
 #undef DEBUGF5
@@ -2265,12 +2260,14 @@ void enterOnePairNormal (const SElement &si,poly p,int ecart, int isFromQ,kStrat
     if (s_lm) omFree(s_lm);
   }
   // Task 325 event log: ENTERPAIR.  arg_a = si.arrival_id, arg_c =
-  // ecart, pointers = (h_poly, si.p).
+  // ecart, pointers = (h_poly, si.p) captured via p_Copy.
   if (g_event_log_enabled) {
+    const void *p_cap = kevlog_capture(p, currRing);
+    const void *s_cap = kevlog_capture(si.p, currRing);
     kevlog_emit(EVT_ENTERPAIR, (uint16_t)kt_debug_tid,
                 (uint16_t)strat->S.size(), 0,
                 (uint32_t)si.arrival_id, 0, (uint32_t)ecart, 0,
-                (const void *)p, (const void *)si.p);
+                p_cap, s_cap);
   }
 
   /*- check product criterion and ecart BEFORE computing the lcm -*/
@@ -2320,10 +2317,12 @@ void enterOnePairNormal (const SElement &si,poly p,int ecart, int isFromQ,kStrat
         if (s_lm) omFree(s_lm);
       }
       if (g_event_log_enabled) {
+        const void *p_cap = kevlog_capture(p, currRing);
+        const void *s_cap = kevlog_capture(si.p, currRing);
         kevlog_emit(EVT_KILL, (uint16_t)kt_debug_tid,
                     (uint16_t)strat->S.size(), 0,
                     (uint32_t)si.arrival_id, (uint32_t)KR_PROD_CRIT, 0, 0,
-                    (const void *)p, (const void *)si.p);
+                    p_cap, s_cap);
       }
       return;
     }
@@ -2376,10 +2375,12 @@ void enterOnePairNormal (const SElement &si,poly p,int ecart, int isFromQ,kStrat
             if (s_lm) omFree(s_lm);
           }
           if (g_event_log_enabled) {
+            const void *p_cap = kevlog_capture(p, currRing);
+            const void *s_cap = kevlog_capture(si.p, currRing);
             kevlog_emit(EVT_KILL, (uint16_t)kt_debug_tid,
                         (uint16_t)strat->S.size(), 0,
                         (uint32_t)si.arrival_id, (uint32_t)KR_PROD_CRIT, 0, 0,
-                        (const void *)p, (const void *)si.p);
+                        p_cap, s_cap);
           }
           return;
       }
@@ -2707,13 +2708,15 @@ void enterOnePairNormal (const SElement &si,poly p,int ecart, int isFromQ,kStrat
     }
     // Task 325 event log: KEEP.  Pair survived all pre-insert kills
     // and is about to enter B.  arg_a = si.arrival_id, arg_c = ecart.
-    // poly_ptr_2 = si.p (second base), poly_ptr_1 = h.
+    // poly_ptr_2 = si.p (second base), poly_ptr_1 = h; both captured
+    // via p_Copy.
     if (g_event_log_enabled) {
+      const void *p_cap = kevlog_capture(p, currRing);
+      const void *s_cap = kevlog_capture(si.p, currRing);
       kevlog_emit(EVT_KEEP, (uint16_t)kt_debug_tid,
                   (uint16_t)strat->S.size(), 0,
                   (uint32_t)si.arrival_id, 0, (uint32_t)Lp.ecart, 0,
-                  (const void *)p, (const void *)si.p);
-      kevlog_register_poly(Lp.lcm);
+                  p_cap, s_cap);
     }
     strat_B(strat).push(Lp);
   }
@@ -3784,15 +3787,16 @@ void kMergeBintoL(kStrategy strat)
       if (lcm_lm) omFree(lcm_lm);
       if (p_lm) omFree(p_lm);
     }
-    // Task 325 event log: LINSERT.  pointers are the two bases; lcm
-    // ends up as a registered poly via kevlog_register_poly.
+    // Task 325 event log: LINSERT.  pointers are the two bases (both
+    // captured via p_Copy).
     if (g_event_log_enabled) {
+      const void *p1_cap = kevlog_capture(Lobj.p1, currRing);
+      const void *p2_cap = kevlog_capture(Lobj.p2, currRing);
       kevlog_emit(EVT_LINSERT, (uint16_t)kt_debug_tid,
                   (uint16_t)strat->T.size(), 0,
                   (uint32_t)Lobj.i_r1, (uint32_t)Lobj.i_r2,
                   (uint32_t)Lobj.ecart, 0,
-                  (const void *)Lobj.p1, (const void *)Lobj.p2);
-      kevlog_register_poly(Lobj.lcm);
+                  p1_cap, p2_cap);
     }
     strat->L.push(Lobj);
   }
@@ -3828,12 +3832,13 @@ std::vector<LSet::iterator> kMergeBintoL_and_return_iterators(kStrategy strat)
       if (p_lm) omFree(p_lm);
     }
     if (g_event_log_enabled) {
+      const void *p1_cap = kevlog_capture(Lobj.p1, currRing);
+      const void *p2_cap = kevlog_capture(Lobj.p2, currRing);
       kevlog_emit(EVT_LINSERT, (uint16_t)kt_debug_tid,
                   (uint16_t)strat->T.size(), 1, // flags=1 => _ret variant
                   (uint32_t)Lobj.i_r1, (uint32_t)Lobj.i_r2,
                   (uint32_t)Lobj.ecart, 0,
-                  (const void *)Lobj.p1, (const void *)Lobj.p2);
-      kevlog_register_poly(Lobj.lcm);
+                  p1_cap, p2_cap);
     }
     iterators.push_back(strat->L.push(Lobj));
   }

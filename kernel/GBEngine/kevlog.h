@@ -1,13 +1,13 @@
 /**
  * @file kevlog.h
  * @brief Global event log for parallel bba correctness auditing
- *        (task 325 parallel-bba-event-log).
+ *        (task 325 parallel-bba-event-log, refactored by task
+ *        parallel-bba-event-log-pcopy).
  *
  * Records every algorithmic decision (pop, reduce, enterT, enterS,
- * enterpairs start/end, LINSERT, KILL, LKILL, etc.) with full pointers
- * + a global seq number into a preallocated, lock-free append-only
- * buffer.  A post-hoc Python checker replays the log and identifies
- * the first illegal decision.
+ * enterpairs start/end, LINSERT, KILL, LKILL, etc.) with poly
+ * identity + a global seq number into a preallocated, lock-free
+ * append-only buffer.
  *
  * Gate: SINGULAR_EVENT_LOG=1.  Without it, allocation and hot-path
  * cost are zero.  Combined with SINGULAR_CHECK_IDEAL_MEMBERSHIP=1,
@@ -18,8 +18,29 @@
  * On overflow: abort().  Do NOT silently drop or wrap — the checker
  * relies on a complete log.
  *
- * Aux arena: 256 MiB bump allocator for variadic payloads (LM
- * strings, T snapshots, etc.).  Records reference it by offset.
+ * Aux arena: 256 MiB bump allocator for variadic payloads (T
+ * snapshots, etc.).  Records reference it by offset.
+ *
+ * --- Poly capture semantics (post-refactor) --------------------
+ *
+ * Instead of storing raw in-flight poly pointers, every captured
+ * poly is `p_Copy`d at emit time and the *copy's* pointer is stored
+ * in the event.  To preserve pointer identity across events (so
+ * "same source poly" still compares equal), a thread-safe map from
+ * source-pointer -> copy-pointer is consulted: the first sight of
+ * a source yields a fresh copy, subsequent sights return the same
+ * copy pointer.
+ *
+ * At shutdown, every captured (copy) pointer is `p_Delete`d and the
+ * map is cleared.  The dump's `polys.txt` renders LMs from the
+ * copies — they were not mutated after creation, so the LMs are
+ * authoritative.
+ *
+ * This works in this build because omalloc is configured to be a
+ * thin wrapper over glibc malloc/free (see `build/omalloc/_config.h`
+ * OMALLOC_USES_MALLOC=1 and `omalloc/xalloc.h` with XALLOC_BIN
+ * commented out for thread safety).  All p_Copy / p_Delete calls
+ * therefore bottom out in `malloc` / `free`, which are thread-safe.
  */
 
 #ifndef KEVLOG_H
@@ -28,6 +49,11 @@
 #include <cstdint>
 #include <cstddef>
 #include <atomic>
+
+/* Forward-declare the poly/ring C structs used by the capture API
+ * without dragging in the large polys.h header. */
+struct spolyrec;
+struct ip_sring;
 
 #ifdef __cplusplus
 extern "C" {
@@ -106,8 +132,8 @@ struct KEvtRecord {
   uint32_t arg_b;        // 20 : event-specific (i_r2, killer_idx, ...)
   uint32_t arg_c;        // 24 : event-specific (|L|, ecart, ...)
   uint32_t aux_off;      // 28 : offset into aux bump buffer (0 if none)
-  uint64_t poly_ptr_1;   // 32 : raw poly pointer (identity across events)
-  uint64_t poly_ptr_2;   // 40 : raw poly pointer
+  uint64_t poly_ptr_1;   // 32 : captured (p_Copy'd) poly pointer
+  uint64_t poly_ptr_2;   // 40 : captured (p_Copy'd) poly pointer
 };
 #pragma pack(pop)
 
@@ -121,7 +147,8 @@ static_assert(sizeof(KEvtRecord) == 48, "KEvtRecord must be 48 bytes");
 void kevlog_init(int disp_id);
 
 /** Called by bba() at exit (whether the run was good or bad).
- *  Frees the buffer and aux arena.  Safe to call if init failed. */
+ *  Frees the buffer and aux arena AND deletes every captured (copied)
+ *  poly.  Safe to call if init failed. */
 void kevlog_shutdown();
 
 /** Dump the buffer to disk.  Called on bad runs from the
@@ -130,6 +157,9 @@ void kevlog_shutdown();
  *    /tmp/audit-run/event-log-<disp>-<pid>-<ts>.bin
  *    /tmp/audit-run/event-log-<disp>-<pid>-<ts>-aux.bin
  *    /tmp/audit-run/event-log-<disp>-<pid>-<ts>-polys.txt
+ *
+ *  Must be called BEFORE kevlog_shutdown (the dump needs the copies
+ *  alive to format LMs).
  */
 void kevlog_dump_on_failure(int disp_id);
 
@@ -140,6 +170,11 @@ void kevlog_dump_on_failure(int disp_id);
  *  record.  On overflow: abort with a clear stderr message.  Callers
  *  should gate on g_event_log_enabled to avoid argument evaluation
  *  cost when disabled.
+ *
+ *  poly_ptr_1 / poly_ptr_2 are the *captured* pointers (usually
+ *  obtained via kevlog_capture / kevlog_capture_with_tail).  Passing
+ *  an uncaptured raw pointer is legal but its LM won't be rendered
+ *  in the dump (nothing to p_Delete either).
  *
  *  Thread-safety: lock-free; safe from any worker thread.
  */
@@ -152,21 +187,26 @@ void kevlog_emit(uint16_t type, uint16_t tid, uint16_t atT, uint16_t flags,
  *  overflow: abort.  Thread-safe (atomic bump). */
 uint32_t kevlog_aux_alloc(size_t n, void **out_ptr);
 
-/** Register a poly pointer so that it ends up in the polys.txt dump
- *  at dump time.  Thread-safe.  Idempotent per pointer (deduped by
- *  a mutex-protected set).  It's fine to register pointers that are
- *  later freed — we only attempt p_String on pointers that survive
- *  (see defer-frees in kevlog.cc). */
-void kevlog_register_poly(const void *p);
+/** Capture `src` by p_Copy'ing it into the log's poly registry.
+ *  First sight of a source pointer triggers `p_Copy(src, r)`; later
+ *  sights of the same source return the cached copy.  The returned
+ *  pointer is stable for the duration of the traced bba run and is
+ *  p_Delete'd at shutdown.
+ *
+ *  Returns NULL if `src` is NULL, if the log is disabled, or if
+ *  p_Copy fails (shouldn't happen, but defensive).
+ *
+ *  Thread-safe: uses an internal mutex.  Low contention — only the
+ *  first sight of each source allocates, subsequent sights are a
+ *  lookup.
+ */
+const void *kevlog_capture(const void *src, struct ip_sring *r);
 
-/* ------------------------------------------------------------------ */
-/*  Leak-on-trace — simplest possible scheme for keeping poly pointers */
-/*  captured in events valid at dump time.  The kt_pLmFree / kt_pDelete */
-/*  / kt_p_LmFree / kt_p_Delete wrappers turn into no-ops when         */
-/*  g_defer_frees is true (set by kevlog_init).  Process exit reclaims */
-/*  leaked memory — fine for the 0.2s reproducer this is scoped to.    */
-/* ------------------------------------------------------------------ */
-extern bool g_defer_frees;
+/** Same, but for polys that carry a separate tailRing (LObjects).
+ *  Uses the `p_Copy(poly, lmRing, tailRing)` overload. */
+const void *kevlog_capture_with_tail(const void *src,
+                                     struct ip_sring *lmRing,
+                                     struct ip_sring *tailRing);
 
 #ifdef __cplusplus
 }

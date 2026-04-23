@@ -1,6 +1,7 @@
 /**
  * @file kevlog.cc
- * @brief Global event log implementation (task 325).
+ * @brief Global event log implementation (task 325, refactored by
+ *        task parallel-bba-event-log-pcopy).
  *
  * See kevlog.h for the record schema + semantics.  Summary:
  *   - Preallocate 1 GiB buffer at bba entry (when gated).
@@ -8,16 +9,17 @@
  *   - Global atomic seq; each event reserves its slot via fetch_add.
  *   - Overflow => abort.
  *   - Dump to disk only on SINGULAR_CHECK_IDEAL_MEMBERSHIP violation.
- *   - "Leak-on-trace" keeps poly pointers live: the kt_pLmFree /
- *     kt_pDelete / kt_p_LmFree / kt_p_Delete wrappers (see
- *     kevlog_wrap.h) are no-ops when g_defer_frees is true.  Process
- *     exit reclaims memory — acceptable for the 0.2s reproducer.
+ *   - Poly capture: every event-captured poly is `p_Copy`d into a
+ *     source->copy map at emit time.  Dumps render LMs from the
+ *     copies (guaranteed-stable content).  Shutdown p_Delete's every
+ *     copy.
  */
 
 #include "kernel/GBEngine/kevlog.h"
 #include "kernel/GBEngine/kthread.h"  // kt_lm_str (used at dump time only)
 #include "kernel/polys.h"
 #include "polys/monomials/p_polys.h"
+#include "polys/monomials/ring.h"
 #include "omalloc/omalloc.h"
 
 #include <cstdio>
@@ -27,7 +29,7 @@
 #include <ctime>
 #include <atomic>
 #include <mutex>
-#include <unordered_set>
+#include <unordered_map>
 #include <vector>
 #include <pthread.h>
 #include <unistd.h>
@@ -38,7 +40,6 @@
 /*  Gate + allocation                                                  */
 /* ------------------------------------------------------------------ */
 bool g_event_log_enabled = false;
-bool g_defer_frees = false;
 
 static constexpr size_t EVLOG_CAP_BYTES  = (size_t)1 << 30;   // 1 GiB
 static constexpr size_t EVLOG_CAP_RECS   = EVLOG_CAP_BYTES / sizeof(KEvtRecord);
@@ -50,9 +51,16 @@ static std::atomic<uint64_t> g_seq{0};
 static std::atomic<uint64_t> g_aux_off{1};  // reserve offset 0 for "no aux"
 static int                g_dispatch_id = -1;
 
-/* Registry of distinct poly pointers for the polys.txt dump. */
-static std::mutex               g_poly_reg_lock;
-static std::unordered_set<const void *> *g_poly_reg = nullptr;
+/* Source-poly -> copy-poly map.  Lookup-first semantics: first sight
+ * of a source allocates via p_Copy, subsequent sights return the
+ * cached copy.  Deleted at shutdown. */
+struct PolyCopyEntry {
+  poly copy;        // fresh pointer from p_Copy (or p_Head)
+  ring lmRing;      // ring used by p_Delete
+  ring tailRing;    // separate tailRing, or same as lmRing
+};
+static std::mutex g_poly_map_lock;
+static std::unordered_map<const void *, PolyCopyEntry> *g_poly_map = nullptr;
 
 /* ------------------------------------------------------------------ */
 /*  Abort helper                                                       */
@@ -100,37 +108,50 @@ void kevlog_init(int disp_id)
   g_aux_off.store(1, std::memory_order_release);
 
   {
-    std::lock_guard<std::mutex> lk(g_poly_reg_lock);
-    if (g_poly_reg == nullptr)
-      g_poly_reg = new std::unordered_set<const void *>();
+    std::lock_guard<std::mutex> lk(g_poly_map_lock);
+    if (g_poly_map == nullptr)
+      g_poly_map = new std::unordered_map<const void *, PolyCopyEntry>();
     else
-      g_poly_reg->clear();
+      g_poly_map->clear();
   }
-
-  // "Leak-on-trace" mode: the free wrappers become no-ops so all
-  // poly pointers captured in events survive until dump.
-  g_defer_frees = true;
 
   fprintf(stderr, "[kevlog] init disp=%d seq_cap=%zu aux_cap=%zu\n",
           disp_id, EVLOG_CAP_RECS, EVLOG_AUX_BYTES);
   fflush(stderr);
 }
 
+/* Delete every captured poly-copy.  Called from shutdown; dump must
+ * have already run (it needs the copies live to format LMs). */
+static void kevlog_delete_captured_polys()
+{
+  std::unordered_map<const void *, PolyCopyEntry> *m = nullptr;
+  {
+    std::lock_guard<std::mutex> lk(g_poly_map_lock);
+    m = g_poly_map;
+    g_poly_map = nullptr;  // detach so concurrent captures can't use it
+  }
+  if (m == nullptr) return;
+  for (auto &kv : *m)
+  {
+    poly p = kv.second.copy;
+    if (p == nullptr) continue;
+    if (kv.second.tailRing != nullptr && kv.second.tailRing != kv.second.lmRing)
+      p_Delete(&p, kv.second.lmRing, kv.second.tailRing);
+    else if (kv.second.lmRing != nullptr)
+      p_Delete(&p, kv.second.lmRing);
+  }
+  delete m;
+}
+
 void kevlog_shutdown()
 {
   if (!g_event_log_enabled) return;
 
-  // Leak-on-trace: we deliberately do NOT reclaim the poly memory
-  // that the free wrappers skipped.  Process exit handles it.
-  g_defer_frees = false;
+  // Delete every captured poly-copy before freeing the buffer.
+  kevlog_delete_captured_polys();
 
   if (g_buf) { free(g_buf); g_buf = nullptr; }
   if (g_aux) { free(g_aux); g_aux = nullptr; }
-
-  {
-    std::lock_guard<std::mutex> lk(g_poly_reg_lock);
-    if (g_poly_reg != nullptr) { delete g_poly_reg; g_poly_reg = nullptr; }
-  }
 
   g_seq.store(0, std::memory_order_release);
   g_aux_off.store(1, std::memory_order_release);
@@ -162,10 +183,6 @@ void kevlog_emit(uint16_t type, uint16_t tid, uint16_t atT, uint16_t flags,
   r.poly_ptr_1  = (uint64_t)poly_ptr_1;
   r.poly_ptr_2  = (uint64_t)poly_ptr_2;
   memcpy(&g_buf[my], &r, sizeof(r));
-
-  // Register the pointers for the polys.txt dump.
-  if (poly_ptr_1 != nullptr) kevlog_register_poly(poly_ptr_1);
-  if (poly_ptr_2 != nullptr) kevlog_register_poly(poly_ptr_2);
 }
 
 uint32_t kevlog_aux_alloc(size_t n, void **out_ptr)
@@ -187,11 +204,51 @@ uint32_t kevlog_aux_alloc(size_t n, void **out_ptr)
   return (uint32_t)off;
 }
 
-void kevlog_register_poly(const void *p)
+/* ------------------------------------------------------------------ */
+/*  Poly capture (p_Copy under mutex, source->copy identity map)       */
+/* ------------------------------------------------------------------ */
+const void *kevlog_capture(const void *src, struct ip_sring *r)
 {
-  if (!g_event_log_enabled || p == nullptr) return;
-  std::lock_guard<std::mutex> lk(g_poly_reg_lock);
-  if (g_poly_reg != nullptr) g_poly_reg->insert(p);
+  if (!g_event_log_enabled || src == nullptr || r == nullptr) return nullptr;
+  std::lock_guard<std::mutex> lk(g_poly_map_lock);
+  if (g_poly_map == nullptr) return nullptr;
+  auto it = g_poly_map->find(src);
+  if (it != g_poly_map->end()) return (const void *)it->second.copy;
+  // First sight: copy under the lock.  p_Copy bottoms out in malloc
+  // (OMALLOC_USES_MALLOC=1 in this build), so it's thread-safe.  The
+  // source's tail chain may be mid-mutation on another thread; this
+  // is the same hazard the existing tracers face and is observed to
+  // be benign for the 0.2s reproducer (see task writeup).
+  poly copy = p_Copy((poly)src, (ring)r);
+  if (copy == nullptr) return nullptr;
+  PolyCopyEntry e;
+  e.copy     = copy;
+  e.lmRing   = (ring)r;
+  e.tailRing = (ring)r;
+  (*g_poly_map)[src] = e;
+  return (const void *)copy;
+}
+
+const void *kevlog_capture_with_tail(const void *src,
+                                     struct ip_sring *lmRing,
+                                     struct ip_sring *tailRing)
+{
+  if (!g_event_log_enabled || src == nullptr || lmRing == nullptr) return nullptr;
+  // Fall back to single-ring copy when the tailRing is identical.
+  if (tailRing == nullptr || tailRing == lmRing)
+    return kevlog_capture(src, lmRing);
+  std::lock_guard<std::mutex> lk(g_poly_map_lock);
+  if (g_poly_map == nullptr) return nullptr;
+  auto it = g_poly_map->find(src);
+  if (it != g_poly_map->end()) return (const void *)it->second.copy;
+  poly copy = p_Copy((poly)src, (ring)lmRing, (ring)tailRing);
+  if (copy == nullptr) return nullptr;
+  PolyCopyEntry e;
+  e.copy     = copy;
+  e.lmRing   = (ring)lmRing;
+  e.tailRing = (ring)tailRing;
+  (*g_poly_map)[src] = e;
+  return (const void *)copy;
 }
 
 /* ------------------------------------------------------------------ */
@@ -247,31 +304,34 @@ void kevlog_dump_on_failure(int disp_id)
     fclose(fa);
   }
 
-  // 3) Polys text dump.  For every pointer we registered, try
-  //    p_String.  Because defer-frees is ON throughout bba, these
-  //    pointers are still live.
+  // 3) Polys text dump.  Walk the source->copy map and render each
+  //    COPY's LM — it's guaranteed-stable content because no one
+  //    mutates the copy after we create it.  Keys of the map are
+  //    the source pointers (historical identity), values are the
+  //    copies (safe to render).  The records in *.bin reference
+  //    the COPY pointer, so we emit copy addresses here for join.
   char ppoly[320];
   snprintf(ppoly, sizeof(ppoly), "%s-polys.txt", base);
   FILE *fp = fopen(ppoly, "w");
   if (fp != nullptr) {
-    std::vector<const void *> ptrs;
+    std::vector<std::pair<const void *, PolyCopyEntry>> entries;
     {
-      std::lock_guard<std::mutex> lk(g_poly_reg_lock);
-      if (g_poly_reg != nullptr)
-        for (const void *p : *g_poly_reg) ptrs.push_back(p);
+      std::lock_guard<std::mutex> lk(g_poly_map_lock);
+      if (g_poly_map != nullptr) {
+        entries.reserve(g_poly_map->size());
+        for (auto &kv : *g_poly_map) entries.push_back(kv);
+      }
     }
-    fprintf(fp, "# addr <TAB> lm\n");
-    fprintf(fp, "# %zu unique poly pointers\n", ptrs.size());
-    // We only write the LM (via kt_lm_str which uses direct exponent
-    // iteration, no ring-bin allocations) — it's safe even if the
-    // pointer's tail chain is gone.  p_String would walk pNext and
-    // risk a SEGV on partially-freed polys, so we avoid it.
+    fprintf(fp, "# log-owned copies, safe to render\n");
+    fprintf(fp, "# addr <TAB> lm  (addr is the COPY pointer, stored in *.bin records)\n");
+    fprintf(fp, "# %zu unique poly pointers\n", entries.size());
     // Flush after every line so a SEGV partway through still leaves
     // a partial file.
-    for (const void *p : ptrs) {
-      char *lm = p ? kt_lm_str((poly)p) : NULL;
+    for (auto &e : entries) {
+      poly copy = e.second.copy;
+      char *lm = copy ? kt_lm_str(copy) : NULL;
       fprintf(fp, "0x%lx\t%s\n",
-              (unsigned long)(uintptr_t)p,
+              (unsigned long)(uintptr_t)copy,
               lm ? lm : "");
       fflush(fp);
       if (lm) omFree(lm);

@@ -52,12 +52,10 @@
 #include <cstdarg>
 #include <cstring>
 
-/* Task 325 parallel-bba-event-log: defer-frees wrapper for pLmFree /
- * pDelete / p_LmFree / p_Delete.  MUST be included AFTER all poly
- * headers so the real inline functions / macros are declared first;
- * this header then #define's them to the kt_* wrappers. */
+/* Task 325 parallel-bba-event-log: global event log.  Poly capture
+ * is via p_Copy into a source->copy map; no pLmFree/pDelete wrappers
+ * needed since captured polys are owned by the log until shutdown. */
 #include "kernel/GBEngine/kevlog.h"
-#include "kernel/GBEngine/kevlog_wrap.h"
 
 /* ------------------------------------------------------------------ */
 /*  Instrumentation helpers (task 482)                                 */
@@ -1373,18 +1371,21 @@ static BOOLEAN pop_and_prepare(SweepContext *ctx, ActivePoly *ap,
       if (lcm_lm) omFree(lcm_lm);
     }
 
-    // Task 325 event log: POP.
+    // Task 325 event log: POP.  Capture via p_Copy (identity-stable
+    // across events, content-stable even if the source gets mutated
+    // by a later ksReducePoly).
     if (g_event_log_enabled) {
       int ir1 = ap->P.i_r1;
       int ir2 = ap->P.i_r2;
       int Tsz = (int)strat->T.size();
       poly p1_src = (ir1 >= 0 && ir1 < Tsz) ? strat->T[ir1].p : NULL;
       poly p2_src = (ir2 >= 0 && ir2 < Tsz) ? strat->T[ir2].p : NULL;
+      const void *p1_cap = kevlog_capture(p1_src, currRing);
+      const void *p2_cap = kevlog_capture(p2_src, currRing);
       kevlog_emit(EVT_POP, (uint16_t)kt_debug_tid, (uint16_t)Tsz, 0,
                   (uint32_t)ir1, (uint32_t)ir2,
                   (uint32_t)((int)strat->L.size() + 1),
-                  0, (const void *)p1_src, (const void *)p2_src);
-      kevlog_register_poly(ap->P.lcm);
+                  0, p1_cap, p2_cap);
     }
 
     // pop-time sanity check.  pair.i_r{1,2} is an R-SLOT INDEX (stable
@@ -2056,8 +2057,9 @@ static void reduce_slot_from_sweep(SweepContext *ctx, int slot, int thread_id)
   }
 
   // Task 325 event log: REDUCE_START.  T snapshot goes into aux arena
-  // as (count, [poly_ptr]*) — we only record the pointers; the
-  // checker reads the polys.txt side file to format them.
+  // as (count, [poly_ptr]*) — the captured (p_Copy'd) pointers for
+  // each T entry are stored so the checker can render their LMs
+  // from the polys.txt side file.
   if (g_event_log_enabled) {
     int Tsz = (int)strat->T.size();
     void *aux_buf = NULL;
@@ -2069,14 +2071,14 @@ static void reduce_slot_from_sweep(SweepContext *ctx, int slot, int thread_id)
       hdr[0] = (uint32_t)Tsz;
       uint64_t *ptrs = (uint64_t *)((char *)aux_buf + sizeof(uint32_t));
       for (int j = 0; j < Tsz; j++) {
-        ptrs[j] = (uint64_t)(uintptr_t)strat->T[j].p;
-        kevlog_register_poly(strat->T[j].p);
+        const void *cap = kevlog_capture(strat->T[j].p, currRing);
+        ptrs[j] = (uint64_t)(uintptr_t)cap;
       }
     }
+    const void *p_cap = kevlog_capture(ap->P.p, currRing);
     kevlog_emit(EVT_REDUCE_START, (uint16_t)thread_id, (uint16_t)Tsz, 0,
                 (uint32_t)slot, (uint32_t)best, (uint32_t)Tsz,
-                aux_off, (const void *)ap->P.p, NULL);
-    kevlog_register_poly(ap->P.lcm);
+                aux_off, p_cap, NULL);
   }
 
   if (best < 0)
@@ -2091,10 +2093,11 @@ static void reduce_slot_from_sweep(SweepContext *ctx, int slot, int thread_id)
       if (lm) omFree(lm);
     }
     if (g_event_log_enabled) {
+      const void *p_cap = kevlog_capture(ap->P.p, currRing);
       kevlog_emit(EVT_REDUCE_END, (uint16_t)thread_id,
                   (uint16_t)strat->T.size(), 0,
                   (uint32_t)slot, (uint32_t)RO_SURVIVOR, 0, 0,
-                  (const void *)ap->P.p, NULL);
+                  p_cap, NULL);
     }
     ap->is_survivor = true;
     return;
@@ -2162,14 +2165,18 @@ static void reduce_slot_from_sweep(SweepContext *ctx, int slot, int thread_id)
   }
 
   // Task 325 event log: REDUCE_STEP (pre-call).  Capture the input
-  // poly identity and the reducer (T[best]) pointer.
+  // poly identity and the reducer (T[best]) pointer via p_Copy so
+  // the ksReducePoly mutation below doesn't overwrite our captured
+  // record.
   if (g_event_log_enabled) {
     poly reducer = (best >= 0 && best < (int)strat->T.size())
                    ? strat->T[best].p : NULL;
+    const void *in_cap  = kevlog_capture(input_lm_before, currRing);
+    const void *red_cap = kevlog_capture(reducer, currRing);
     kevlog_emit(EVT_REDUCE_STEP, (uint16_t)thread_id,
                 (uint16_t)strat->T.size(), 0,
                 (uint32_t)slot, (uint32_t)best, 0, 0,
-                (const void *)input_lm_before, (const void *)reducer);
+                in_cap, red_cap);
   }
 
   {
@@ -2311,10 +2318,11 @@ static void reduce_slot_from_sweep(SweepContext *ctx, int slot, int thread_id)
     if (lm) omFree(lm);
   }
   if (g_event_log_enabled) {
+    const void *p_cap = kevlog_capture(ap->P.p, currRing);
     kevlog_emit(EVT_REDUCE_END, (uint16_t)thread_id,
                 (uint16_t)strat->T.size(), 0,
                 (uint32_t)slot, (uint32_t)RO_CONTINUE, 0, 0,
-                (const void *)ap->P.p, NULL);
+                p_cap, NULL);
   }
   // Slot stays occupied — will be swept again on the next round
 }
@@ -2516,11 +2524,13 @@ static void process_survivor_lobject(SweepContext *ctx, LObject *P, int thread_i
           if (rt_in_lm) omFree(rt_in_lm);
         }
         if (g_event_log_enabled) {
+          const void *in_cap  = kevlog_capture(rt_in, currRing);
+          const void *out_cap = kevlog_capture(P->p, currRing);
           kevlog_emit(EVT_REDTAIL, (uint16_t)thread_id,
                       (uint16_t)strat->T.size(),
                       (uint16_t)(strat->redTailChange ? 1 : 0),
                       0, 0, 0, 0,
-                      (const void *)rt_in, (const void *)P->p);
+                      in_cap, out_cap);
         }
       }
 #ifdef KTHREAD_INSTRUMENT
@@ -2556,11 +2566,13 @@ static void process_survivor_lobject(SweepContext *ctx, LObject *P, int thread_i
           if (rt_in_lm) omFree(rt_in_lm);
         }
         if (g_event_log_enabled) {
+          const void *in_cap  = kevlog_capture(rt_in, currRing);
+          const void *out_cap = kevlog_capture(P->p, currRing);
           kevlog_emit(EVT_REDTAIL, (uint16_t)thread_id,
                       (uint16_t)strat->T.size(),
                       (uint16_t)(strat->redTailChange ? 1 : 0),
                       1, 0, 0, 0,  // arg_a=1 => mode=std
-                      (const void *)rt_in, (const void *)P->p);
+                      in_cap, out_cap);
         }
       }
 #ifdef KTHREAD_INSTRUMENT
@@ -2605,11 +2617,12 @@ static void process_survivor_lobject(SweepContext *ctx, LObject *P, int thread_i
         if (lm) omFree(lm);
       }
       if (g_event_log_enabled) {
+        const void *p_cap = kevlog_capture(P->p, currRing);
         kevlog_emit(EVT_ENTERT, (uint16_t)thread_id,
                     (uint16_t)strat->T.size(), 0,
                     (uint32_t)strat->T.size(),
                     (uint32_t)(int)P->ecart, 0, 0,
-                    (const void *)P->p, NULL);
+                    p_cap, NULL);
       }
       enterT(*P, strat);
     }
@@ -2710,12 +2723,13 @@ static void process_survivor_lobject(SweepContext *ctx, LObject *P, int thread_i
       if (lm) omFree(lm);
     }
     if (g_event_log_enabled) {
+      const void *p_cap = kevlog_capture(P->p, currRing);
       kevlog_emit(EVT_ENTERS, (uint16_t)thread_id,
                   (uint16_t)strat->T.size(), 0,
                   (uint32_t)my_arrival,
                   (uint32_t)strat->S.size(),
                   (uint32_t)P->ecart, 0,
-                  (const void *)P->p, NULL);
+                  p_cap, NULL);
     }
     strat->enterS(*P, strat, strat->T.size()-1, strat->S.end());
     did_enterS = true;
@@ -2849,11 +2863,12 @@ static void process_survivor_lobject(SweepContext *ctx, LObject *P, int thread_i
     // the enterpairs call.  arg_a carries my_arrival; arg_b the S size
     // at entry.
     if (g_event_log_enabled) {
+      const void *p_cap = kevlog_capture(P->p, currRing);
       kevlog_emit(EVT_ENTERPAIRS_START, (uint16_t)thread_id,
                   (uint16_t)strat->T.size(), 0,
                   (uint32_t)my_arrival,
                   (uint32_t)strat->S.size(), 0, 0,
-                  (const void *)P->p, NULL);
+                  p_cap, NULL);
     }
     if (rField_is_Ring(currRing))
       superenterpairs(P->p, strat->S.size()-1, P->ecart, pos_it, strat, atR_for_pairs);
@@ -2861,12 +2876,13 @@ static void process_survivor_lobject(SweepContext *ctx, LObject *P, int thread_i
       enterpairs(P->p, strat->S.size()-1, P->ecart, pos_it, strat, atR_for_pairs);
     int L_after_ep = (int)strat->L.size();
     if (g_event_log_enabled) {
+      const void *p_cap = kevlog_capture(P->p, currRing);
       kevlog_emit(EVT_ENTERPAIRS_END, (uint16_t)thread_id,
                   (uint16_t)strat->T.size(), 0,
                   (uint32_t)my_arrival,
                   (uint32_t)(L_after_ep - L_before_ep),
                   (uint32_t)strat->S.size(), 0,
-                  (const void *)P->p, NULL);
+                  p_cap, NULL);
     }
     if (g_trace_this_dispatch) {
       kt_disp_tracef("[tid=%d] enterpairs delta=%d (L %d -> %d)  "

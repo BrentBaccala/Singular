@@ -193,12 +193,8 @@ static inline int kSevScanSSE4(const unsigned long* sevT, unsigned long not_sev,
 #include "polys/shiftop.h"
 #endif
 
-/* Event log (task 325 parallel-bba-event-log).  Must come AFTER
- * kernel/polys.h so the originals are visible; kevlog_wrap.h then
- * redefines pLmFree / pDelete / p_LmFree / p_Delete to go through
- * the defer-frees keepalive when g_defer_frees is true. */
+/* Event log (task 325 parallel-bba-event-log). */
 #include "kernel/GBEngine/kevlog.h"
-#include "kernel/GBEngine/kevlog_wrap.h"
 
 #ifdef STDZ_EXCHANGE_DURING_REDUCTION
 int kFindSameLMInT_Z(const kStrategy strat, const LObject* L, const int start)
@@ -3374,13 +3370,11 @@ bba_post_loop:
     // Either failing is proof of wrong math.  (a) found bugs with
     // extra junk in S; (b) finds incomplete GBs.
     __in_check_outer = 1;
-    // Suspend event log + defer-frees for the duration of the check.
-    // The recursive kStd_internal re-enters bba and would otherwise
-    // pollute our buffer (and risk exhausting it).
+    // Suspend event log for the duration of the check.  The recursive
+    // kStd_internal re-enters bba and would otherwise pollute our
+    // buffer (and risk exhausting it).
     bool __saved_evt_enabled   = g_event_log_enabled;
-    bool __saved_defer_frees   = g_defer_frees;
     g_event_log_enabled = false;
-    g_defer_frees       = false;
 
     intvec *mw = NULL;
     ideal trusted_gb = kStd_internal(__savedF, NULL, testHomog, &mw);
@@ -3398,7 +3392,6 @@ bba_post_loop:
     }
     __in_check_outer = 0;
     g_event_log_enabled = __saved_evt_enabled;
-    g_defer_frees       = __saved_defer_frees;
 
     // (a) S[i] ∈ ideal(F)?
     int nviol_a = 0, first_a = -1;
@@ -3540,8 +3533,10 @@ bba_post_loop:
     }
   }
 
-  // Task 325: shutdown event log (frees buffer + drains keepalive).
-  // Safe even if never inited (no-op when disabled).
+  // Task 325: shutdown event log.  Frees the record buffer, the aux
+  // arena, and p_Delete's every captured poly-copy.  Safe even if
+  // never inited (no-op when disabled).  The dump above (on
+  // violation) has already run, so the copies are free to release.
   if (__in_check_outer == 0) {
     if (g_event_log_enabled) {
       kevlog_emit(EVT_BPL_END, 0, (uint16_t)strat->T.size(),
