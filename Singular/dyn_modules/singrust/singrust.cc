@@ -251,21 +251,34 @@ static BOOLEAN rustgb_std(leftv result, leftv arg)
 
   for (size_t pi = 0; pi < n_poly; ++pi)
   {
-    const size_t nt = rustgb_basis_term_count(rb, pi);
     poly head = NULL;
     poly tail = NULL;
-    for (size_t ti = 0; ti < nt; ++ti)
+
+    // Open an opaque iterator over this poly's terms. The random-
+    // access rustgb_basis_term was removed in favour of a cursor
+    // so the rustgb side can later move to a linked-list poly
+    // without reshaping the C surface.
+    rustgb_term_iter* it = rustgb_term_iter_open(rb, pi);
+    if (it == NULL)
+    {
+      Werror("rustgb_std: term_iter_open failed: %s", rustgb_last_error());
+      idDelete(&out);
+      rustgb_basis_destroy(rb);
+      rustgb_ring_destroy(rring);
+      return TRUE;
+    }
+
+    for (;;)
     {
       uint32_t coeff_out = 0;
-      if (rustgb_basis_term(rb, pi, ti, exps.data(), &coeff_out) != 0)
+      const int rc = rustgb_term_iter_next(it, exps.data(), &coeff_out);
+      if (rc == 1) break;          // exhausted
+      if (rc != 0)                  // error (rc == 2)
       {
-        Werror("rustgb_std: basis_term read failed: %s", rustgb_last_error());
+        Werror("rustgb_std: term_iter_next failed: %s", rustgb_last_error());
         // Best-effort cleanup: drop partial polys, ideal.
         if (head != NULL) p_Delete(&head, r);
-        for (size_t k = 0; k < pi; ++k)
-        {
-          // out->m[k] already set; idDelete handles it.
-        }
+        rustgb_term_iter_close(it);
         idDelete(&out);
         rustgb_basis_destroy(rb);
         rustgb_ring_destroy(rring);
@@ -294,6 +307,8 @@ static BOOLEAN rustgb_std(leftv result, leftv arg)
         tail = t;
       }
     }
+
+    rustgb_term_iter_close(it);
     out->m[pi] = head;
   }
 
