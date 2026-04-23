@@ -107,6 +107,20 @@ enum kt_evt_type : uint16_t {
                             // sev_computed) vs H1b (!=) sub-
                             // classification of stale-sev misses.
                             // Task parallel-bba-enterT-sev-guard.
+  EVT_SWEEP_RESULT_V4 = 26, // Same V3 40-byte aux rows, but the aux
+                            // payload now starts with a 32-byte
+                            // header carrying the active-slot P-side
+                            // state captured at sweep time:
+                            //   u32 n_examined; u32 pad;
+                            //   u64 apP_sev_stored;
+                            //   u64 apP_sev_computed;
+                            //   u64 apP_not_sev_stored;
+                            // followed by n_examined * 40-byte V3
+                            // rows.  Lets the checker classify H1a
+                            // misses into H1a.1 (P.sev stale vs P.p),
+                            // H1a.2 (not_sev stale vs P.sev), or
+                            // H1a.3 (both consistent — MYSTERY).
+                            // Task parallel-bba-apP-sev-probe.
 };
 
 /* ------------------------------------------------------------------ */

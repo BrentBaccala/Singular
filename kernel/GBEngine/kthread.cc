@@ -246,6 +246,18 @@ static const uint32_t SWEEP_CAP_ROWS = 256;
 struct SweepCaptureBuf {
   std::atomic<uint32_t> count;  // 0..capacity; wraps at capacity (rare)
   SweepCaptureEntry rows[SWEEP_CAP_ROWS];
+  // Task parallel-bba-apP-sev-probe: sweep-time snapshot of the
+  // active-slot P-side state that the sev test reads.  Written on
+  // every sweep_one_tile entry for this (thread, slot); all K tiles
+  // for a slot should see the same values (nobody writes apP during
+  // sweep), but we keep it per-thread so workers don't race on a
+  // single cell.  `apP_present` is the atomic publication flag — it
+  // goes up on first write and stays up until reset_one.
+  std::atomic<uint32_t> apP_present;
+  uint64_t apP_sev_stored;
+  uint64_t apP_sev_computed;
+  uint64_t apP_not_sev_stored;
+  uint64_t apP_p_addr;
 };
 
 // [num_threads * max_active] flat array.  Allocated alongside
@@ -290,6 +302,11 @@ static inline void sweep_capture_reset_one(SweepContext *ctx, int slot)
   for (int t = 0; t < total_threads; t++) {
     SweepCaptureBuf &buf = sweep_capture_buf(ctx, t, slot);
     buf.count.store(0, std::memory_order_relaxed);
+    buf.apP_present.store(0, std::memory_order_relaxed);
+    buf.apP_sev_stored = 0;
+    buf.apP_sev_computed = 0;
+    buf.apP_not_sev_stored = 0;
+    buf.apP_p_addr = 0;
   }
 }
 
@@ -700,6 +717,76 @@ void kt_entert_sev_guard_hit(int atT,
     fflush(g_entert_sev_guard_log);
   }
   pthread_mutex_unlock(&g_entert_sev_guard_lock);
+}
+
+// ====================================================================
+// Task parallel-bba-apP-sev-probe.
+// ====================================================================
+// Diagnostic guard that fires from publish_slot_tiles_locked right
+// after the release-store that publishes the slot to workers, when
+// either of these holds:
+//   (1) ap->P.sev (the stored value) != pGetShortExpVector(ap->P.p)
+//       fresh recompute => H1a.1 (P.sev stale vs P.p at publish).
+//   (2) ap->not_sev != ~ap->P.sev => H1a.2 (not_sev cache stale vs
+//       P.sev).
+// Both should be impossible if the publish path correctly refreshes
+// the three fields together — see pop_and_prepare lines 1717-1719
+// and reduce_slot_from_sweep lines 2768-2770.  If the guard is
+// silent and the sweep-time apP capture still flags an
+// inconsistency, the drift happens post-publish.
+//
+// Env var SINGULAR_APP_SEV_GUARD: "0" disables, anything else (or
+// unset) enables.  Cached at first call.
+static std::atomic<int> g_app_sev_guard_gate{-1};  // -1 = unparsed
+static std::atomic<unsigned long long> g_app_sev_guard_hits{0};
+static FILE *g_app_sev_guard_log = NULL;
+static pthread_mutex_t g_app_sev_guard_lock = PTHREAD_MUTEX_INITIALIZER;
+
+bool kt_app_sev_guard_enabled()
+{
+  int g = g_app_sev_guard_gate.load(std::memory_order_relaxed);
+  if (g >= 0) return g != 0;
+  const char *s = getenv("SINGULAR_APP_SEV_GUARD");
+  int want = 1;  // default on
+  if (s != NULL && s[0] == '0' && s[1] == '\0') want = 0;
+  g_app_sev_guard_gate.store(want, std::memory_order_relaxed);
+  return want != 0;
+}
+
+unsigned long long kt_app_sev_guard_count()
+{
+  return g_app_sev_guard_hits.load(std::memory_order_relaxed);
+}
+
+void kt_app_sev_guard_hit(int slot_idx,
+                          unsigned long apP_sev_stored,
+                          unsigned long apP_sev_computed,
+                          unsigned long apP_not_sev_stored,
+                          unsigned long long p_addr)
+{
+  g_app_sev_guard_hits.fetch_add(1, std::memory_order_relaxed);
+  pthread_mutex_lock(&g_app_sev_guard_lock);
+  if (g_app_sev_guard_log == NULL) {
+    g_app_sev_guard_log = fopen("/tmp/audit-run/app-sev-guard.log", "a");
+    if (g_app_sev_guard_log != NULL) {
+      setvbuf(g_app_sev_guard_log, NULL, _IONBF, 0);
+    }
+  }
+  if (g_app_sev_guard_log != NULL) {
+    unsigned long not_sev_expected = ~apP_sev_stored;
+    int p_sev_ok    = (apP_sev_stored == apP_sev_computed) ? 1 : 0;
+    int not_sev_ok  = (apP_not_sev_stored == not_sev_expected) ? 1 : 0;
+    fprintf(g_app_sev_guard_log,
+            "pid=%d tid=%d slot=%d p_sev_ok=%d not_sev_ok=%d "
+            "P_sev_stored=0x%lx P_sev_computed=0x%lx "
+            "not_sev_stored=0x%lx not_sev_expected=0x%lx p_addr=0x%llx\n",
+            (int)getpid(), kt_debug_tid, slot_idx,
+            p_sev_ok, not_sev_ok,
+            apP_sev_stored, apP_sev_computed,
+            apP_not_sev_stored, not_sev_expected, p_addr);
+    fflush(g_app_sev_guard_log);
+  }
+  pthread_mutex_unlock(&g_app_sev_guard_lock);
 }
 
 // Scan strat->L and count pairs whose R[i_r2]->p doesn't match
@@ -1897,10 +1984,27 @@ static void emit_sweep_result_event(SweepContext *ctx, int s, int thread_id)
   if (n_examined > 0) {
     cap_idx = (SweepCapLookup *)calloc(n_examined, sizeof(SweepCapLookup));
   }
+  // Collect the apP sweep-time snapshot (first-present wins across
+  // threads).  Task parallel-bba-apP-sev-probe.
+  uint64_t apP_sev_stored_cap = 0;
+  uint64_t apP_sev_computed_cap = 0;
+  uint64_t apP_not_sev_stored_cap = 0;
+  bool apP_cap_present = false;
   if (cap_idx != NULL && g_sweep_captures != NULL) {
     int total_threads = ctx->num_workers + 1;
     for (int t = 0; t < total_threads; t++) {
       SweepCaptureBuf &buf = sweep_capture_buf(ctx, t, s);
+      // apP snapshot: take the first thread that recorded it.  All
+      // threads that swept this slot should have seen the same
+      // values.  If none recorded it (buf.apP_present==0 everywhere),
+      // fall back to a fresh read below.
+      if (!apP_cap_present
+          && buf.apP_present.load(std::memory_order_acquire) != 0) {
+        apP_sev_stored_cap     = buf.apP_sev_stored;
+        apP_sev_computed_cap   = buf.apP_sev_computed;
+        apP_not_sev_stored_cap = buf.apP_not_sev_stored;
+        apP_cap_present        = true;
+      }
       uint32_t cnt = buf.count.load(std::memory_order_relaxed);
       if (cnt > SWEEP_CAP_ROWS) cnt = SWEEP_CAP_ROWS;
       for (uint32_t k = 0; k < cnt; k++) {
@@ -1918,20 +2022,30 @@ static void emit_sweep_result_event(SweepContext *ctx, int s, int thread_id)
       }
     }
   }
+  // Fallback: no worker recorded an apP snapshot (tile_pull_loop
+  // bailed out early, or all K tiles were empty).  Read the current
+  // apP state at emit time — same thread that's about to reduce, so
+  // no synchronization concerns.
+  if (!apP_cap_present) {
+    apP_sev_stored_cap     = (uint64_t)ap->P.sev;
+    apP_not_sev_stored_cap = (uint64_t)ap->not_sev;
+    if (ap->P.p != NULL) {
+      apP_sev_computed_cap = (uint64_t)pGetShortExpVector(ap->P.p);
+    }
+  }
 
-  // V3 aux layout: u32 n_examined, then n_examined rows of
-  //   { u32 T_idx, u32 reason, u64 entry_poly_ptr,
-  //     u64 sweep_ptr, u64 sev_sweep_u64,
-  //     u64 sev_computed_at_sweep_u64 }.
-  // Row size = 40 bytes.  The "reason" field here is the rescan-time
-  // classification; the sweep-time outcome is implicit in the
-  // combination of (sev_sweep & not_sev_s) and sweep_ptr — the
-  // checker reconstructs it.  We also record the sweep-time outcome
-  // in the top 16 bits of "reason" so the inspector can print it
-  // without re-running the sev test.  (Low 16 bits = rescan reason.)
-  // Task parallel-bba-enterT-sev-guard adds the 8-byte sev_computed
-  // tail column for H1a/H1b sub-classification.
-  size_t n_bytes = sizeof(uint32_t) + (size_t)n_examined * 40;
+  // V4 aux layout: 32-byte slot-block prelude then V3-style rows.
+  //   offset  0: u32 n_examined
+  //   offset  4: u32 pad (reserved)
+  //   offset  8: u64 apP_sev_stored
+  //   offset 16: u64 apP_sev_computed
+  //   offset 24: u64 apP_not_sev_stored
+  //   offset 32: n_examined * 40-byte V3 rows (unchanged layout)
+  // The slot-block captures the active-slot P-side state the sweep
+  // predicate was evaluated against (per slot, not per T[j]).
+  // Task parallel-bba-apP-sev-probe.
+  size_t header_bytes = 32;  // n_examined + pad + 3 * u64
+  size_t n_bytes = header_bytes + (size_t)n_examined * 40;
   void *aux_buf = NULL;
   uint32_t aux_off = kevlog_aux_alloc(n_bytes, &aux_buf);
   if (aux_buf == NULL && n_bytes > 0) {
@@ -1940,9 +2054,14 @@ static void emit_sweep_result_event(SweepContext *ctx, int s, int thread_id)
     return;
   }
   if (aux_buf != NULL) {
-    uint32_t *hdr = (uint32_t *)aux_buf;
-    hdr[0] = (uint32_t)n_examined;
-    unsigned char *rows = (unsigned char *)aux_buf + sizeof(uint32_t);
+    uint32_t *hdr32 = (uint32_t *)aux_buf;
+    hdr32[0] = (uint32_t)n_examined;
+    hdr32[1] = 0;  // pad
+    uint64_t *hdr64 = (uint64_t *)((char *)aux_buf + 8);
+    hdr64[0] = apP_sev_stored_cap;
+    hdr64[1] = apP_sev_computed_cap;
+    hdr64[2] = apP_not_sev_stored_cap;
+    unsigned char *rows = (unsigned char *)aux_buf + header_bytes;
 
     // Re-run the sweep predicates sequentially, classify each T[j].
     // Track a running "have we already recorded a good_p with pLen <
@@ -2045,7 +2164,7 @@ static void emit_sweep_result_event(SweepContext *ctx, int s, int thread_id)
     best_cap = kevlog_capture(strat->T[best].p, currRing);
   }
   const void *p_cap = kevlog_capture(ap->P.p, currRing);
-  kevlog_emit(EVT_SWEEP_RESULT_V3,
+  kevlog_emit(EVT_SWEEP_RESULT_V4,
               (uint16_t)thread_id,
               (uint16_t)strat->T.size(),
               0,
@@ -2116,6 +2235,32 @@ static void publish_slot_tiles_locked(SweepContext *ctx, int s)
   // Release: readers acquiring tile_end see batch fields initialised,
   // slot data (ap->P, not_sev, sl_snapshot), tiles_remaining, state.
   ctx->tile_end.store((b + 1) * (uint64_t)K, std::memory_order_release);
+
+  // Task parallel-bba-apP-sev-probe: at the moment we just published
+  // the slot to workers, the three apP fields the sweep predicate
+  // depends on (P.sev / not_sev / P.p) MUST be self-consistent:
+  //   - ap->P.sev == pGetShortExpVector(ap->P.p)
+  //   - ap->not_sev == ~ap->P.sev
+  // The two write sites that maintain this invariant are
+  // pop_and_prepare (lines 1717-1719) and reduce_slot_from_sweep
+  // (lines 2768-2770).  If either field is wrong here, a worker
+  // reading ap->not_sev / ap->P.sev for the sev-filter test will
+  // reject divisor entries that actually divide P.  Discriminates
+  // H1a.1 (P.sev stale) from H1a.2 (not_sev stale).
+  if (kt_app_sev_guard_enabled() && ap->P.p != NULL)
+  {
+    unsigned long P_sev_stored     = ap->P.sev;
+    unsigned long P_sev_computed   = pGetShortExpVector(ap->P.p);
+    unsigned long not_sev_stored   = ap->not_sev;
+    unsigned long not_sev_expected = ~P_sev_stored;
+    if (P_sev_stored != P_sev_computed
+        || not_sev_stored != not_sev_expected)
+    {
+      kt_app_sev_guard_hit(s, P_sev_stored, P_sev_computed,
+                           not_sev_stored,
+                           (unsigned long long)(uintptr_t)ap->P.p);
+    }
+  }
 }
 
 /*
@@ -2262,6 +2407,37 @@ static void sweep_one_tile(SweepContext *ctx, int thread_id,
   unsigned long not_sev_s = ap->not_sev;
   SweepResult &sr = sweep_result(ctx, thread_id, s);
   bool capture_enabled = g_event_log_enabled && (g_sweep_captures != nullptr);
+
+  // Task parallel-bba-apP-sev-probe: snapshot the active-slot P-side
+  // state at the moment this worker starts sweeping the slot.  Three
+  // fields the sev test depends on:
+  //   apP_sev_stored = ap->P.sev (stored value used as ~not_sev_s)
+  //   apP_sev_computed = pGetShortExpVector(ap->P.p) (fresh, what
+  //     P.sev should be right now)
+  //   apP_not_sev_stored = ap->not_sev (the value not_sev_s above
+  //     was loaded from)
+  // All K tiles for a slot should see the same values (nobody writes
+  // apP during sweep); we capture per-thread regardless so multiple
+  // workers don't race on a single cell.  Emit-time logic picks the
+  // first present capture across threads.
+  if (capture_enabled) {
+    SweepCaptureBuf &buf = sweep_capture_buf(ctx, thread_id, s);
+    if (buf.apP_present.load(std::memory_order_relaxed) == 0) {
+      // Read once; the order doesn't matter — we want the values the
+      // sweep predicate has been computing against.
+      uint64_t sev_stored = (uint64_t)ap->P.sev;
+      uint64_t not_sev_st = (uint64_t)ap->not_sev;
+      uint64_t p_addr     = (uint64_t)(uintptr_t)ap->P.p;
+      uint64_t sev_comp   = (p_addr != 0)
+        ? (uint64_t)pGetShortExpVector(ap->P.p)
+        : 0;
+      buf.apP_sev_stored      = sev_stored;
+      buf.apP_sev_computed    = sev_comp;
+      buf.apP_not_sev_stored  = not_sev_st;
+      buf.apP_p_addr          = p_addr;
+      buf.apP_present.store(1, std::memory_order_release);
+    }
+  }
 
   for (int j = slice; j <= tl_snapshot; j += K)
   {

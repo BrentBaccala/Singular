@@ -458,6 +458,27 @@ unsigned long long kt_entert_sev_guard_count();
 // pGetShortExpVector recompute when the guard is disabled.
 bool kt_entert_sev_guard_enabled();
 
+// Task parallel-bba-apP-sev-probe.
+// Called from publish_slot_tiles_locked immediately after the
+// release-store that publishes the slot to workers, when either
+//   - apP_sev_stored != pGetShortExpVector(ap->P.p)            (H1a.1)
+//   - apP_not_sev_stored != ~apP_sev_stored                    (H1a.2)
+// Logs to /tmp/audit-run/app-sev-guard.log.  Mirrors the enterT
+// guard (atomic counter + mutex-guarded fflush-per-write log).
+// Does not abort.  Env var SINGULAR_APP_SEV_GUARD (default on; set
+// to "0" to disable).
+void kt_app_sev_guard_hit(int slot_idx,
+                          unsigned long apP_sev_stored,
+                          unsigned long apP_sev_computed,
+                          unsigned long apP_not_sev_stored,
+                          unsigned long long p_addr);
+// Returns the current cumulative hit count (atomic load).
+unsigned long long kt_app_sev_guard_count();
+// Returns true if the guard should fire this call — cheap check on
+// the cached env gate.  Callers use this to avoid the
+// pGetShortExpVector recompute when the guard is disabled.
+bool kt_app_sev_guard_enabled();
+
 // SINGULAR_TRACE_PAIRCRIT=<disp_id> — per-thread pair-criterion
 // decision log.  When enabled, enterOnePairNormal and chainCritNormal
 // emit one line per kill/keep decision to
