@@ -193,6 +193,13 @@ static inline int kSevScanSSE4(const unsigned long* sevT, unsigned long not_sev,
 #include "polys/shiftop.h"
 #endif
 
+/* Event log (task 325 parallel-bba-event-log).  Must come AFTER
+ * kernel/polys.h so the originals are visible; kevlog_wrap.h then
+ * redefines pLmFree / pDelete / p_LmFree / p_Delete to go through
+ * the defer-frees keepalive when g_defer_frees is true. */
+#include "kernel/GBEngine/kevlog.h"
+#include "kernel/GBEngine/kevlog_wrap.h"
+
 #ifdef STDZ_EXCHANGE_DURING_REDUCTION
 int kFindSameLMInT_Z(const kStrategy strat, const LObject* L, const int start)
 {
@@ -2827,6 +2834,17 @@ ideal bba (ideal F, ideal Q,intvec *w,bigintmat *hilb,kStrategy strat)
     }
   }
 
+  // Event log (task 325): allocate 1 GiB buffer + 256 MiB aux arena
+  // at bba entry.  Only outer dispatches (__in_check_outer == 0).
+  // When the env var is unset this is a cheap no-op.
+  if (__in_check_outer == 0) {
+    kevlog_init(__disp_id);
+    if (g_event_log_enabled) {
+      kevlog_emit(EVT_BPL_START, 0, 0, 0,
+                  (uint32_t)get_singular_threads(), 0, 0, 0, NULL, NULL);
+    }
+  }
+
   // Save a copy of the input ideal for optional ideal-membership
   // verification at bba() exit (SINGULAR_CHECK_IDEAL_MEMBERSHIP=1).
   // Every polynomial produced by a correct Buchberger run must lie
@@ -3356,6 +3374,14 @@ bba_post_loop:
     // Either failing is proof of wrong math.  (a) found bugs with
     // extra junk in S; (b) finds incomplete GBs.
     __in_check_outer = 1;
+    // Suspend event log + defer-frees for the duration of the check.
+    // The recursive kStd_internal re-enters bba and would otherwise
+    // pollute our buffer (and risk exhausting it).
+    bool __saved_evt_enabled   = g_event_log_enabled;
+    bool __saved_defer_frees   = g_defer_frees;
+    g_event_log_enabled = false;
+    g_defer_frees       = false;
+
     intvec *mw = NULL;
     ideal trusted_gb = kStd_internal(__savedF, NULL, testHomog, &mw);
     if (mw != NULL) { delete mw; mw = NULL; }
@@ -3371,6 +3397,8 @@ bba_post_loop:
       if (mw != NULL) { delete mw; mw = NULL; }
     }
     __in_check_outer = 0;
+    g_event_log_enabled = __saved_evt_enabled;
+    g_defer_frees       = __saved_defer_frees;
 
     // (a) S[i] ∈ ideal(F)?
     int nviol_a = 0, first_a = -1;
@@ -3470,6 +3498,14 @@ bba_post_loop:
               __disp_id, nviol_a, first_a, nviol_b, first_b,
               dim_trusted, dim_S);
       fflush(stderr);
+
+      // Task 325 event-log dump on violation.  No-op when
+      // SINGULAR_EVENT_LOG is unset.
+      if (g_event_log_enabled) {
+        kevlog_emit(EVT_BPL_END, 0, (uint16_t)strat->T.size(),
+                    0, 0, 0, 0, 0, NULL, NULL);
+        kevlog_dump_on_failure(__disp_id);
+      }
     }
 
     if (trusted_gb != NULL) idDelete(&trusted_gb);
@@ -3502,6 +3538,16 @@ bba_post_loop:
       }
       fclose(fp);
     }
+  }
+
+  // Task 325: shutdown event log (frees buffer + drains keepalive).
+  // Safe even if never inited (no-op when disabled).
+  if (__in_check_outer == 0) {
+    if (g_event_log_enabled) {
+      kevlog_emit(EVT_BPL_END, 0, (uint16_t)strat->T.size(),
+                  0, 1, 0, 0, 0, NULL, NULL);  // arg_a=1: normal exit
+    }
+    kevlog_shutdown();
   }
 
   return strat->getShdl();
