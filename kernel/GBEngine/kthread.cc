@@ -52,6 +52,7 @@
 #include <cstdarg>
 #include <cstring>
 #include <climits>
+#include <unistd.h>
 
 /* Task 325 parallel-bba-event-log: global event log.  Poly capture
  * is via p_Copy into a source->copy map; no pLmFree/pDelete wrappers
@@ -231,6 +232,14 @@ struct SweepCaptureEntry {
                                // time); 0xffffffff => unused slot
   uint64_t T_p_at_sweep;       // raw T[j].p at sweep time (NOT p_Copy'd)
   uint64_t sev_at_sweep;       // sevT[j] at sweep time (as read)
+  uint64_t sev_computed;       // pGetShortExpVector(T_p_at_sweep)
+                               // computed at sweep time against the
+                               // snapshotted T[j].p.  Task
+                               // parallel-bba-enterT-sev-guard.
+                               // H1a (sev_at_sweep == sev_computed)
+                               // => sev self-consistent with poly at
+                               // sweep time; H1b (!=) => sev and poly
+                               // disagree at sweep time.
 };
 static const uint32_t SWEEP_CAP_ROWS = 256;
 
@@ -259,7 +268,8 @@ static inline SweepCaptureBuf& sweep_capture_buf(SweepContext *ctx,
 static inline void sweep_capture_push(SweepContext *ctx,
                                       int thread_id, int slot,
                                       int T_idx, uint32_t outcome,
-                                      void *T_p, unsigned long sev)
+                                      void *T_p, unsigned long sev,
+                                      unsigned long sev_computed)
 {
   if (g_sweep_captures == nullptr) return;
   SweepCaptureBuf &buf = sweep_capture_buf(ctx, thread_id, slot);
@@ -270,6 +280,7 @@ static inline void sweep_capture_push(SweepContext *ctx,
   e.outcome       = outcome;
   e.T_p_at_sweep  = (uint64_t)T_p;
   e.sev_at_sweep  = (uint64_t)sev;
+  e.sev_computed  = (uint64_t)sev_computed;
 }
 
 static inline void sweep_capture_reset_one(SweepContext *ctx, int slot)
@@ -623,6 +634,72 @@ void kt_debug_audit_printf(const char *fmt, ...)
   vfprintf(log, fmt, ap);
   va_end(ap);
   fflush(log);
+}
+
+// ====================================================================
+// Task parallel-bba-enterT-sev-guard.
+// ====================================================================
+// Diagnostic guard that fires from enterT right after tobject_publish
+// when sevT[atT] doesn't match pGetShortExpVector(T[atT].p).  The
+// three goals:
+//   (1) does the guard ever hit at all?  (Any hit => mechanism (b) is
+//       real — the sev write at enterT is wrong.)
+//   (2) correlate per-iteration hit counts with the bad-run outcome.
+//   (3) capture the branch (p.sev != 0 vs recomputed) to pin down
+//       which code path stores the bad sev.
+//
+// Env var SINGULAR_ENTERT_SEV_GUARD: "0" disables, anything else (or
+// unset) enables.  Cached at first call; callers can skip the
+// pGetShortExpVector recompute when kt_entert_sev_guard_enabled()
+// returns false.
+static std::atomic<int> g_entert_sev_guard_gate{-1};  // -1 = unparsed
+static std::atomic<unsigned long long> g_entert_sev_guard_hits{0};
+static FILE *g_entert_sev_guard_log = NULL;
+static pthread_mutex_t g_entert_sev_guard_lock = PTHREAD_MUTEX_INITIALIZER;
+
+bool kt_entert_sev_guard_enabled()
+{
+  int g = g_entert_sev_guard_gate.load(std::memory_order_relaxed);
+  if (g >= 0) return g != 0;
+  const char *s = getenv("SINGULAR_ENTERT_SEV_GUARD");
+  int want = 1;  // default on
+  if (s != NULL && s[0] == '0' && s[1] == '\0') want = 0;
+  g_entert_sev_guard_gate.store(want, std::memory_order_relaxed);
+  return want != 0;
+}
+
+unsigned long long kt_entert_sev_guard_count()
+{
+  return g_entert_sev_guard_hits.load(std::memory_order_relaxed);
+}
+
+void kt_entert_sev_guard_hit(int atT,
+                             unsigned long sev_stored,
+                             unsigned long sev_computed,
+                             unsigned long long p_addr,
+                             int branch)
+{
+  g_entert_sev_guard_hits.fetch_add(1, std::memory_order_relaxed);
+  pthread_mutex_lock(&g_entert_sev_guard_lock);
+  if (g_entert_sev_guard_log == NULL) {
+    // Lazy open; unbuffered so each line survives a crash.
+    g_entert_sev_guard_log = fopen("/tmp/audit-run/entert-sev-guard.log",
+                                   "a");
+    if (g_entert_sev_guard_log != NULL) {
+      setvbuf(g_entert_sev_guard_log, NULL, _IONBF, 0);
+    }
+  }
+  if (g_entert_sev_guard_log != NULL) {
+    fprintf(g_entert_sev_guard_log,
+            "pid=%d tid=%d atT=%d branch=%s sev_stored=0x%lx "
+            "sev_computed=0x%lx p_addr=0x%llx xor=0x%lx\n",
+            (int)getpid(), kt_debug_tid, atT,
+            branch == 0 ? "p.sev" : "recomputed",
+            sev_stored, sev_computed, p_addr,
+            sev_stored ^ sev_computed);
+    fflush(g_entert_sev_guard_log);
+  }
+  pthread_mutex_unlock(&g_entert_sev_guard_lock);
 }
 
 // Scan strat->L and count pairs whose R[i_r2]->p doesn't match
@@ -1814,6 +1891,7 @@ static void emit_sweep_result_event(SweepContext *ctx, int s, int thread_id)
   // resize the index array per event: it's allocated on stack bounded
   // by tl+1, which is small (|T| <= few hundred in practice).
   struct SweepCapLookup { uint64_t sweep_ptr; uint64_t sev_sweep;
+                          uint64_t sev_computed;
                           uint32_t outcome; bool present; };
   SweepCapLookup *cap_idx = NULL;
   if (n_examined > 0) {
@@ -1832,24 +1910,28 @@ static void emit_sweep_result_event(SweepContext *ctx, int s, int thread_id)
         // K-strided: each j visited by exactly one thread.  If we see
         // a duplicate, keep the last (rare — e.g. a re-published slot
         // that wasn't reset, which would be a bug).
-        L.sweep_ptr = e.T_p_at_sweep;
-        L.sev_sweep = e.sev_at_sweep;
-        L.outcome   = e.outcome;
-        L.present   = true;
+        L.sweep_ptr    = e.T_p_at_sweep;
+        L.sev_sweep    = e.sev_at_sweep;
+        L.sev_computed = e.sev_computed;
+        L.outcome      = e.outcome;
+        L.present      = true;
       }
     }
   }
 
-  // V2 aux layout: u32 n_examined, then n_examined rows of
+  // V3 aux layout: u32 n_examined, then n_examined rows of
   //   { u32 T_idx, u32 reason, u64 entry_poly_ptr,
-  //     u64 sweep_ptr, u64 sev_sweep_u64 }.
-  // Row size = 32 bytes.  The "reason" field here is the rescan-time
+  //     u64 sweep_ptr, u64 sev_sweep_u64,
+  //     u64 sev_computed_at_sweep_u64 }.
+  // Row size = 40 bytes.  The "reason" field here is the rescan-time
   // classification; the sweep-time outcome is implicit in the
   // combination of (sev_sweep & not_sev_s) and sweep_ptr — the
   // checker reconstructs it.  We also record the sweep-time outcome
   // in the top 16 bits of "reason" so the inspector can print it
   // without re-running the sev test.  (Low 16 bits = rescan reason.)
-  size_t n_bytes = sizeof(uint32_t) + (size_t)n_examined * 32;
+  // Task parallel-bba-enterT-sev-guard adds the 8-byte sev_computed
+  // tail column for H1a/H1b sub-classification.
+  size_t n_bytes = sizeof(uint32_t) + (size_t)n_examined * 40;
   void *aux_buf = NULL;
   uint32_t aux_off = kevlog_aux_alloc(n_bytes, &aux_buf);
   if (aux_buf == NULL && n_bytes > 0) {
@@ -1929,20 +2011,23 @@ static void emit_sweep_result_event(SweepContext *ctx, int s, int thread_id)
       uint32_t sweep_outcome = 0xffffu;
       uint64_t sweep_ptr = 0;
       uint64_t sev_sweep = 0;
+      uint64_t sev_computed_sw = 0;
       if (cap_idx != NULL && cap_idx[j].present) {
-        sweep_outcome = cap_idx[j].outcome & 0xffffu;
-        sweep_ptr     = cap_idx[j].sweep_ptr;
-        sev_sweep     = cap_idx[j].sev_sweep;
+        sweep_outcome   = cap_idx[j].outcome & 0xffffu;
+        sweep_ptr       = cap_idx[j].sweep_ptr;
+        sev_sweep       = cap_idx[j].sev_sweep;
+        sev_computed_sw = cap_idx[j].sev_computed;
       }
       uint32_t reason_packed = (sweep_outcome << 16) | (reason & 0xffffu);
 
-      uint32_t *row_u32 = (uint32_t *)(rows + (size_t)j * 32);
-      uint64_t *row_u64 = (uint64_t *)(rows + (size_t)j * 32 + 8);
+      uint32_t *row_u32 = (uint32_t *)(rows + (size_t)j * 40);
+      uint64_t *row_u64 = (uint64_t *)(rows + (size_t)j * 40 + 8);
       row_u32[0] = (uint32_t)j;
       row_u32[1] = reason_packed;
       row_u64[0] = (uint64_t)(uintptr_t)cap;  // entry_ptr (p_Copy'd)
       row_u64[1] = sweep_ptr;                 // T_p at sweep time (raw)
       row_u64[2] = sev_sweep;                 // sevT[j] at sweep time
+      row_u64[3] = sev_computed_sw;           // pGetShortExpVector(sweep_ptr)
     }
   }
   if (cap_idx != NULL) free(cap_idx);
@@ -1960,7 +2045,7 @@ static void emit_sweep_result_event(SweepContext *ctx, int s, int thread_id)
     best_cap = kevlog_capture(strat->T[best].p, currRing);
   }
   const void *p_cap = kevlog_capture(ap->P.p, currRing);
-  kevlog_emit(EVT_SWEEP_RESULT_V2,
+  kevlog_emit(EVT_SWEEP_RESULT_V3,
               (uint16_t)thread_id,
               (uint16_t)strat->T.size(),
               0,
@@ -2192,11 +2277,22 @@ static void sweep_one_tile(SweepContext *ctx, int thread_id,
     // sev_j and the T[j].p pointer — the outcome is derived from both
     // plus the published load.
     void *tp_snap = (void *)strat->T[j].p;
+    // Compute sev against the same tp_snap we're going to record.
+    // Task parallel-bba-enterT-sev-guard: the checker will compare
+    // sev_j (read) against this value; equal = H1a (sev consistent
+    // with poly at sweep time; implies a genuine logic contradiction
+    // in the stale-sev story), differ = H1b (sev and poly disagree
+    // at sweep time).  Guarded on tp_snap != NULL because
+    // pGetShortExpVector dereferences.
+    unsigned long sev_computed_j = 0;
+    if (capture_enabled && tp_snap != NULL)
+      sev_computed_j = pGetShortExpVector((poly)tp_snap);
 
     if (sev_j & not_sev_s) {
       if (capture_enabled)
         sweep_capture_push(ctx, thread_id, s, j,
-                           SWEEP_ATOMIC_REJECT_SEV, tp_snap, sev_j);
+                           SWEEP_ATOMIC_REJECT_SEV, tp_snap, sev_j,
+                           sev_computed_j);
       continue;
     }
     // Acquire-load gate: only after observing published=true are the
@@ -2206,14 +2302,14 @@ static void sweep_one_tile(SweepContext *ctx, int thread_id,
       if (capture_enabled)
         sweep_capture_push(ctx, thread_id, s, j,
                            SWEEP_ATOMIC_REJECT_NOT_PUBLISHED,
-                           tp_snap, sev_j);
+                           tp_snap, sev_j, sev_computed_j);
       continue;
     }
     if (!p_LmDivisibleBy(strat->T[j].p, ap->P.p, currRing)) {
       if (capture_enabled)
         sweep_capture_push(ctx, thread_id, s, j,
                            SWEEP_ATOMIC_REJECT_NOT_DIVISIBLE,
-                           tp_snap, sev_j);
+                           tp_snap, sev_j, sev_computed_j);
       continue;
     }
 
@@ -2236,12 +2332,14 @@ static void sweep_one_tile(SweepContext *ctx, int thread_id,
       }
       if (capture_enabled)
         sweep_capture_push(ctx, thread_id, s, j,
-                           SWEEP_ACCEPTED_ATOMIC, tp_snap, sev_j);
+                           SWEEP_ACCEPTED_ATOMIC, tp_snap, sev_j,
+                           sev_computed_j);
     }
     else {
       if (capture_enabled)
         sweep_capture_push(ctx, thread_id, s, j,
-                           SWEEP_ATOMIC_REJECT_ECART, tp_snap, sev_j);
+                           SWEEP_ATOMIC_REJECT_ECART, tp_snap, sev_j,
+                           sev_computed_j);
     }
   }
 }

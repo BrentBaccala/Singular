@@ -9854,6 +9854,26 @@ void enterT(LObject &p, kStrategy strat, int atT)
   // reader path.
   tobject_publish(strat->T[atT]);
 
+  // Task parallel-bba-enterT-sev-guard: immediately after publishing,
+  // verify strat->sevT[atT] matches pGetShortExpVector(T[atT].p).
+  // If it doesn't, this is mechanism (b) — the sev write itself is
+  // wrong at enterT time.  `branch` records which arm of the ternary
+  // at sevT[atT] = (p.sev == 0 ? pGetShortExpVector(p.p) : p.sev)
+  // was taken: 0 = incoming p.sev was non-zero (a stale p.sev passed
+  // in by the caller would be a bug we detect here); 1 = recomputed.
+  // No abort — we want the distribution across many iterations.
+  if (kt_entert_sev_guard_enabled())
+  {
+    unsigned long sev_stored   = strat->sevT[atT];
+    unsigned long sev_computed = pGetShortExpVector(strat->T[atT].p);
+    if (sev_stored != sev_computed) {
+      int branch = (p.sev != 0) ? 0 : 1;
+      kt_entert_sev_guard_hit(atT, sev_stored, sev_computed,
+                              (unsigned long long)(uintptr_t)strat->T[atT].p,
+                              branch);
+    }
+  }
+
   // Register every chain node of this new T entry into the T-node
   // registry so later pNext-writes that target these addresses fire
   // a "TNODE:mutation" tag, revealing the permanent-corruption

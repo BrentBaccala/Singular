@@ -434,6 +434,30 @@ void kt_debug_R_write_probe(const char *site, int k,
 void kt_debug_audit_printf(const char *fmt, ...)
   __attribute__((format(printf, 1, 2)));
 
+// Task parallel-bba-enterT-sev-guard.
+// Called from enterT immediately after tobject_publish(T[atT]) when
+// the stored sevT[atT] disagrees with pGetShortExpVector(T[atT].p).
+// Increments a global counter AND appends one line to
+// /tmp/audit-run/entert-sev-guard.log (tid, atT, sev_stored,
+// sev_computed, p_addr, pid, branch, reason).  `branch` is 0 when the
+// stored sev came from `p.sev` (non-zero incoming) and 1 when it was
+// recomputed via pGetShortExpVector(p.p) at enterT time.  Does not
+// abort — we want the full distribution.  The log is opened once per
+// process under a mutex and fflush'd after every write so data
+// survives a crash.  Controlled by env var SINGULAR_ENTERT_SEV_GUARD
+// (default on; set to "0" to disable).
+void kt_entert_sev_guard_hit(int atT,
+                             unsigned long sev_stored,
+                             unsigned long sev_computed,
+                             unsigned long long p_addr,
+                             int branch);
+// Returns the current cumulative hit count (atomic load).
+unsigned long long kt_entert_sev_guard_count();
+// Returns true if the guard should fire this call — cheap check on
+// the cached env gate.  Callers use this to avoid the cost of the
+// pGetShortExpVector recompute when the guard is disabled.
+bool kt_entert_sev_guard_enabled();
+
 // SINGULAR_TRACE_PAIRCRIT=<disp_id> — per-thread pair-criterion
 // decision log.  When enabled, enterOnePairNormal and chainCritNormal
 // emit one line per kill/keep decision to

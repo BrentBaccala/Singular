@@ -99,6 +99,14 @@ enum kt_evt_type : uint16_t {
                             // captured T[j].p pointer (raw, no
                             // p_Copy) and sevT[j] value.  Task
                             // parallel-bba-sweep-atomic-capture.
+  EVT_SWEEP_RESULT_V3 = 25, // Same shape as V2, but 40-byte aux rows
+                            // with an extra 8-byte tail column
+                            // sev_computed_at_sweep =
+                            // pGetShortExpVector(T[j].p) computed at
+                            // sweep time.  Enables H1a (sev_sweep ==
+                            // sev_computed) vs H1b (!=) sub-
+                            // classification of stale-sev misses.
+                            // Task parallel-bba-enterT-sev-guard.
 };
 
 /* ------------------------------------------------------------------ */
