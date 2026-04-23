@@ -205,6 +205,84 @@ static inline SweepResult& sweep_result(SweepContext *ctx, int thread_id, int sl
 }
 
 /* ------------------------------------------------------------------ */
+/*  Sweep-time atomic capture (task parallel-bba-sweep-atomic-capture) */
+/* ------------------------------------------------------------------ */
+/*  For every T[j] the sweep examines, we record, AT THE TIME of the   */
+/*  sev test, the raw T[j].p pointer and the sevT[j] value the test    */
+/*  was evaluated against, plus the outcome.  This is a per-thread x   */
+/*  per-slot append buffer.  It's distinct from SweepResult (which     */
+/*  summarises the best pick).                                         */
+/*                                                                     */
+/*  Lifetime: reset by reset_sweep_results_one (called from            */
+/*  publish_slot_tiles_locked) alongside SweepResult.  Drained by      */
+/*  emit_sweep_result_event inside close_slot.                         */
+/*                                                                     */
+/*  Sized at 256 rows per thread per slot — generous for the 30-50     */
+/*  |T| range of the repro case, and small enough that the total       */
+/*  footprint is bounded (num_threads * max_active * 256 * 24 B).      */
+/*                                                                     */
+/*  We emit the capture only when g_event_log_enabled is true; the     */
+/*  sweep still pays the append cost in that case.  The parallel bug   */
+/*  rate from task 329 (1.67%) held with that overhead, so we don't    */
+/*  gate the append further.                                           */
+struct SweepCaptureEntry {
+  uint32_t T_idx;              // j
+  uint32_t outcome;            // kt_sweep_reject_reason (ATOMIC_* for sweep
+                               // time); 0xffffffff => unused slot
+  uint64_t T_p_at_sweep;       // raw T[j].p at sweep time (NOT p_Copy'd)
+  uint64_t sev_at_sweep;       // sevT[j] at sweep time (as read)
+};
+static const uint32_t SWEEP_CAP_ROWS = 256;
+
+struct SweepCaptureBuf {
+  std::atomic<uint32_t> count;  // 0..capacity; wraps at capacity (rare)
+  SweepCaptureEntry rows[SWEEP_CAP_ROWS];
+};
+
+// [num_threads * max_active] flat array.  Allocated alongside
+// sweep_results in sweep_context_create; freed in _destroy.
+static SweepCaptureBuf *g_sweep_captures = nullptr;
+static int g_sweep_captures_ntot = 0;  // tracked for bounds/free
+
+static inline SweepCaptureBuf& sweep_capture_buf(SweepContext *ctx,
+                                                 int thread_id, int slot)
+{
+  return g_sweep_captures[thread_id * ctx->max_active + slot];
+}
+
+/* Append one capture row for (slot, thread_id).  Silently drops if
+ * the buffer is full (we emit a single warning aux-wide in that case
+ * via the n_overflow counter at drain time — unused for now).  No
+ * memory barrier: the drain happens inside close_slot, which runs
+ * only after fetch_sub(tiles_remaining)==1, which synchronises with
+ * every tile's earlier fetch_sub on the same counter (acq_rel). */
+static inline void sweep_capture_push(SweepContext *ctx,
+                                      int thread_id, int slot,
+                                      int T_idx, uint32_t outcome,
+                                      void *T_p, unsigned long sev)
+{
+  if (g_sweep_captures == nullptr) return;
+  SweepCaptureBuf &buf = sweep_capture_buf(ctx, thread_id, slot);
+  uint32_t c = buf.count.fetch_add(1, std::memory_order_relaxed);
+  if (c >= SWEEP_CAP_ROWS) return;  // full
+  SweepCaptureEntry &e = buf.rows[c];
+  e.T_idx         = (uint32_t)T_idx;
+  e.outcome       = outcome;
+  e.T_p_at_sweep  = (uint64_t)T_p;
+  e.sev_at_sweep  = (uint64_t)sev;
+}
+
+static inline void sweep_capture_reset_one(SweepContext *ctx, int slot)
+{
+  if (g_sweep_captures == nullptr) return;
+  int total_threads = ctx->num_workers + 1;
+  for (int t = 0; t < total_threads; t++) {
+    SweepCaptureBuf &buf = sweep_capture_buf(ctx, t, slot);
+    buf.count.store(0, std::memory_order_relaxed);
+  }
+}
+
+/* ------------------------------------------------------------------ */
 /*  Task 512: T-integrity audit (debug).                               */
 /*                                                                     */
 /*  Walks strat->T and checks that each entry's stored pLength matches */
@@ -1232,6 +1310,13 @@ SweepContext *sweep_context_init(kStrategy strat, int nthreads)
   ctx->sweep_results = (SweepResult *)calloc(
       total_threads * ctx->max_active, sizeof(SweepResult));
 
+  // Atomic-capture buffers: one per (thread, slot).  Sized at compile
+  // time (SWEEP_CAP_ROWS=256 rows per buf).  Allocated with calloc so
+  // count starts at 0.  Task parallel-bba-sweep-atomic-capture.
+  g_sweep_captures_ntot = total_threads * ctx->max_active;
+  g_sweep_captures = (SweepCaptureBuf *)calloc(
+      g_sweep_captures_ntot, sizeof(SweepCaptureBuf));
+
   ctx->sweep_cursor.store(0, std::memory_order_relaxed);
   ctx->slot_counter.store(0, std::memory_order_relaxed);
   ctx->tile_cursor.store(0, std::memory_order_relaxed);
@@ -1300,6 +1385,11 @@ void sweep_context_destroy(SweepContext *ctx)
   delete ctx->survivor_queue;
   free(ctx->active);
   free(ctx->sweep_results);
+  if (g_sweep_captures != nullptr) {
+    free(g_sweep_captures);
+    g_sweep_captures = nullptr;
+    g_sweep_captures_ntot = 0;
+  }
   free(ctx->threads);
   free(ctx->thread_ids);
   free(ctx->batches);
@@ -1700,6 +1790,7 @@ static void emit_sweep_result_event(SweepContext *ctx, int s, int thread_id)
   bool want_aux = (best_tmp < 0);
   if (!want_aux) {
     // Lightweight emit: slot, best, n_examined, P poly, best_T poly.
+    // Keep this as EVT_SWEEP_RESULT (V1) — no aux, no version needed.
     const void *best_cap_lw = NULL;
     if (best_tmp >= 0 && best_tmp <= tl)
       best_cap_lw = kevlog_capture(strat->T[best_tmp].p, currRing);
@@ -1716,10 +1807,49 @@ static void emit_sweep_result_event(SweepContext *ctx, int s, int thread_id)
     return;
   }
 
-  // Aux layout: u32 n_examined, then n_examined rows of
-  //   { u32 T_idx, u32 reject_reason_enum, u64 entry_poly_ptr }.
-  // Row size = 16 bytes.
-  size_t n_bytes = sizeof(uint32_t) + (size_t)n_examined * 16;
+  // --- Aggregate sweep-time captures across all threads into a
+  // j-indexed lookup.  Each j in [0, tl] is visited by exactly ONE
+  // thread (K-strided loop), so there is at most one capture per j.
+  // A missing capture (j not covered) yields (0, 0, OTHER).  We never
+  // resize the index array per event: it's allocated on stack bounded
+  // by tl+1, which is small (|T| <= few hundred in practice).
+  struct SweepCapLookup { uint64_t sweep_ptr; uint64_t sev_sweep;
+                          uint32_t outcome; bool present; };
+  SweepCapLookup *cap_idx = NULL;
+  if (n_examined > 0) {
+    cap_idx = (SweepCapLookup *)calloc(n_examined, sizeof(SweepCapLookup));
+  }
+  if (cap_idx != NULL && g_sweep_captures != NULL) {
+    int total_threads = ctx->num_workers + 1;
+    for (int t = 0; t < total_threads; t++) {
+      SweepCaptureBuf &buf = sweep_capture_buf(ctx, t, s);
+      uint32_t cnt = buf.count.load(std::memory_order_relaxed);
+      if (cnt > SWEEP_CAP_ROWS) cnt = SWEEP_CAP_ROWS;
+      for (uint32_t k = 0; k < cnt; k++) {
+        const SweepCaptureEntry &e = buf.rows[k];
+        if ((int)e.T_idx < 0 || (int)e.T_idx > tl) continue;
+        SweepCapLookup &L = cap_idx[e.T_idx];
+        // K-strided: each j visited by exactly one thread.  If we see
+        // a duplicate, keep the last (rare — e.g. a re-published slot
+        // that wasn't reset, which would be a bug).
+        L.sweep_ptr = e.T_p_at_sweep;
+        L.sev_sweep = e.sev_at_sweep;
+        L.outcome   = e.outcome;
+        L.present   = true;
+      }
+    }
+  }
+
+  // V2 aux layout: u32 n_examined, then n_examined rows of
+  //   { u32 T_idx, u32 reason, u64 entry_poly_ptr,
+  //     u64 sweep_ptr, u64 sev_sweep_u64 }.
+  // Row size = 32 bytes.  The "reason" field here is the rescan-time
+  // classification; the sweep-time outcome is implicit in the
+  // combination of (sev_sweep & not_sev_s) and sweep_ptr — the
+  // checker reconstructs it.  We also record the sweep-time outcome
+  // in the top 16 bits of "reason" so the inspector can print it
+  // without re-running the sev test.  (Low 16 bits = rescan reason.)
+  size_t n_bytes = sizeof(uint32_t) + (size_t)n_examined * 32;
   void *aux_buf = NULL;
   uint32_t aux_off = kevlog_aux_alloc(n_bytes, &aux_buf);
   if (aux_buf == NULL && n_bytes > 0) {
@@ -1792,13 +1922,30 @@ static void emit_sweep_result_event(SweepContext *ctx, int s, int thread_id)
         }
       }
 
-      uint32_t *row_u32 = (uint32_t *)(rows + (size_t)j * 16);
-      uint64_t *row_u64 = (uint64_t *)(rows + (size_t)j * 16 + 8);
+      // Fold the sweep-time outcome into the high 16 bits of reason
+      // (low 16 bits remain the rescan-time reason).  If no capture
+      // exists for this j (thread never visited it — rare, indicates
+      // a tile that bailed out early), sweep_outcome is 0xffff.
+      uint32_t sweep_outcome = 0xffffu;
+      uint64_t sweep_ptr = 0;
+      uint64_t sev_sweep = 0;
+      if (cap_idx != NULL && cap_idx[j].present) {
+        sweep_outcome = cap_idx[j].outcome & 0xffffu;
+        sweep_ptr     = cap_idx[j].sweep_ptr;
+        sev_sweep     = cap_idx[j].sev_sweep;
+      }
+      uint32_t reason_packed = (sweep_outcome << 16) | (reason & 0xffffu);
+
+      uint32_t *row_u32 = (uint32_t *)(rows + (size_t)j * 32);
+      uint64_t *row_u64 = (uint64_t *)(rows + (size_t)j * 32 + 8);
       row_u32[0] = (uint32_t)j;
-      row_u32[1] = reason;
-      row_u64[0] = (uint64_t)(uintptr_t)cap;
+      row_u32[1] = reason_packed;
+      row_u64[0] = (uint64_t)(uintptr_t)cap;  // entry_ptr (p_Copy'd)
+      row_u64[1] = sweep_ptr;                 // T_p at sweep time (raw)
+      row_u64[2] = sev_sweep;                 // sevT[j] at sweep time
     }
   }
+  if (cap_idx != NULL) free(cap_idx);
 
   // Event payload:
   //   arg_a = slot index
@@ -1813,7 +1960,7 @@ static void emit_sweep_result_event(SweepContext *ctx, int s, int thread_id)
     best_cap = kevlog_capture(strat->T[best].p, currRing);
   }
   const void *p_cap = kevlog_capture(ap->P.p, currRing);
-  kevlog_emit(EVT_SWEEP_RESULT,
+  kevlog_emit(EVT_SWEEP_RESULT_V2,
               (uint16_t)thread_id,
               (uint16_t)strat->T.size(),
               0,
@@ -1840,6 +1987,9 @@ static void reset_sweep_results_one(SweepContext *ctx, int slot)
     sr.best_reducer_p = NULL;
     sr.best_good_p = NULL;
   }
+  // Reset the sweep-time atomic-capture buffers for this slot.
+  // Task parallel-bba-sweep-atomic-capture.
+  sweep_capture_reset_one(ctx, slot);
 }
 
 /*
@@ -2026,17 +2176,46 @@ static void sweep_one_tile(SweepContext *ctx, int thread_id,
 
   unsigned long not_sev_s = ap->not_sev;
   SweepResult &sr = sweep_result(ctx, thread_id, s);
+  bool capture_enabled = g_event_log_enabled && (g_sweep_captures != nullptr);
 
   for (int j = slice; j <= tl_snapshot; j += K)
   {
+    // --- Atomic capture: read sev_j and T[j].p ONCE, record the
+    // exact values the test was evaluated against.  The rest of the
+    // loop uses these snapshotted values so the capture reflects what
+    // the sweep actually saw (rather than what a concurrent enterT
+    // might have written a nanosecond later).
     unsigned long sev_j = strat->sevT[j];
-    if (sev_j & not_sev_s) continue;
+    // Read T[j].p once; other field reads below use strat->T[j] which
+    // is the same slot but the gates / ecart / pLength fields may be
+    // published at different times.  For capture purposes we only need
+    // sev_j and the T[j].p pointer — the outcome is derived from both
+    // plus the published load.
+    void *tp_snap = (void *)strat->T[j].p;
+
+    if (sev_j & not_sev_s) {
+      if (capture_enabled)
+        sweep_capture_push(ctx, thread_id, s, j,
+                           SWEEP_ATOMIC_REJECT_SEV, tp_snap, sev_j);
+      continue;
+    }
     // Acquire-load gate: only after observing published=true are the
     // T[j] field reads below guaranteed to synchronise-with the
     // release-store in enterT.
-    if (!tobject_published_load(strat->T[j])) continue;
-    if (!p_LmDivisibleBy(strat->T[j].p, ap->P.p, currRing))
+    if (!tobject_published_load(strat->T[j])) {
+      if (capture_enabled)
+        sweep_capture_push(ctx, thread_id, s, j,
+                           SWEEP_ATOMIC_REJECT_NOT_PUBLISHED,
+                           tp_snap, sev_j);
       continue;
+    }
+    if (!p_LmDivisibleBy(strat->T[j].p, ap->P.p, currRing)) {
+      if (capture_enabled)
+        sweep_capture_push(ctx, thread_id, s, j,
+                           SWEEP_ATOMIC_REJECT_NOT_DIVISIBLE,
+                           tp_snap, sev_j);
+      continue;
+    }
 
     if (sr.best_reducer < 0)
     {
@@ -2055,6 +2234,14 @@ static void sweep_one_tile(SweepContext *ctx, int thread_id,
         sr.best_good_p = (void*)strat->T[j].p;
         sr.best_pLength = pLen;
       }
+      if (capture_enabled)
+        sweep_capture_push(ctx, thread_id, s, j,
+                           SWEEP_ACCEPTED_ATOMIC, tp_snap, sev_j);
+    }
+    else {
+      if (capture_enabled)
+        sweep_capture_push(ctx, thread_id, s, j,
+                           SWEEP_ATOMIC_REJECT_ECART, tp_snap, sev_j);
     }
   }
 }

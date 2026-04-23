@@ -93,6 +93,12 @@ enum kt_evt_type : uint16_t {
   EVT_GMKILL         = 22,  // Gebauer-Moller dedup kill
   EVT_SWEEP_RESULT   = 23,  // per-slot cooperative-sweep merged result +
                             // per-T-entry accept/reject reasons in aux
+                            // (V1: 16-byte aux rows).
+  EVT_SWEEP_RESULT_V2 = 24, // Same shape, but 32-byte aux rows that
+                            // additionally carry the sweep-time
+                            // captured T[j].p pointer (raw, no
+                            // p_Copy) and sevT[j] value.  Task
+                            // parallel-bba-sweep-atomic-capture.
 };
 
 /* ------------------------------------------------------------------ */
@@ -187,6 +193,18 @@ enum kt_sweep_reject_reason : uint32_t {
                                 // (current sweep doesn't special-case
                                 // this; left for future use)
   SWEEP_REJECT_FROM_T_RULE = 8, // reserved — fromT path rejection
+  // Atomic-capture distinct outcomes (observed at sweep time, before
+  // merge; written by sweep_one_tile into the per-thread capture
+  // buffer; drained at close_slot into V2 aux rows).  Used to
+  // distinguish sweep-time outcome from rescan-time outcome in the
+  // check-event-log.py H1/H2 classifier.
+  SWEEP_ACCEPTED_ATOMIC   = 10, // Passed sev + published + divides
+                                // + ecart <= P.ecart at sweep time
+                                // (before merge picked a winner)
+  SWEEP_ATOMIC_REJECT_SEV = 11, // sev_j & not_sev_s != 0
+  SWEEP_ATOMIC_REJECT_NOT_PUBLISHED = 12,
+  SWEEP_ATOMIC_REJECT_NOT_DIVISIBLE = 13,
+  SWEEP_ATOMIC_REJECT_ECART = 14,
   SWEEP_REJECT_OTHER      = 99, // catch-all
 };
 

@@ -356,16 +356,22 @@ void kevlog_dump_on_failure(int disp_id)
       }
     }
     fprintf(fp, "# log-owned copies, safe to render\n");
-    fprintf(fp, "# addr <TAB> lm  (addr is the COPY pointer, stored in *.bin records)\n");
+    fprintf(fp, "# FORMAT: copy_addr <TAB> lm [ <TAB> source_addr ]\n");
+    fprintf(fp, "# copy_addr is stored in *.bin records (EVT_*.poly_ptr_1/2,\n");
+    fprintf(fp, "# SWEEP_RESULT aux.entry_ptr); source_addr is the raw\n");
+    fprintf(fp, "# (non-p_Copy'd) T[j].p pointer — used to match\n");
+    fprintf(fp, "# SWEEP_RESULT_V2 aux.sweep_ptr (which is raw too).\n");
     fprintf(fp, "# %zu unique poly pointers\n", entries.size());
     // Flush after every line so a SEGV partway through still leaves
     // a partial file.
     for (auto &e : entries) {
+      const void *src_ptr = e.first;
       poly copy = e.second.copy;
       char *lm = copy ? kt_lm_str(copy) : NULL;
-      fprintf(fp, "0x%lx\t%s\n",
+      fprintf(fp, "0x%lx\t%s\t0x%lx\n",
               (unsigned long)(uintptr_t)copy,
-              lm ? lm : "");
+              lm ? lm : "",
+              (unsigned long)(uintptr_t)src_ptr);
       fflush(fp);
       if (lm) omFree(lm);
     }
