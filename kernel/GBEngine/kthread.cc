@@ -51,6 +51,7 @@
 #include <cstdio>
 #include <cstdarg>
 #include <cstring>
+#include <climits>
 
 /* Task 325 parallel-bba-event-log: global event log.  Poly capture
  * is via p_Copy into a source->copy map; no pLmFree/pDelete wrappers
@@ -1652,6 +1653,177 @@ static void merge_slot_results(SweepContext *ctx, int s)
   ctx->active[s].best_good_p = best_good_p;
 }
 
+/* ------------------------------------------------------------------ */
+/*  Emit EVT_SWEEP_RESULT for slot `s`, consolidating every T[j]       */
+/*  the cooperative sweep examined (j in [0, sl_snapshot]) with its    */
+/*  accept/reject reason.  Called from close_slot after merge but      */
+/*  before reduce_slot_from_sweep so the event orders before the       */
+/*  downstream REDUCE_START for this slot.                             */
+/*                                                                     */
+/*  This is a single-threaded re-scan of T[0..sl_snapshot] using the   */
+/*  same predicates sweep_one_tile uses.  Because sl_snapshot is       */
+/*  frozen at batch-publish time and T grows monotonically, the rescan */
+/*  sees exactly the same T prefix the sweep saw.  The reject-reason   */
+/*  attribution is thus faithful even though it's computed post-merge. */
+/*                                                                     */
+/*  Cost: one O(sl_snapshot) pass per slot-sweep, vs the K-strided     */
+/*  sum across workers (also O(sl_snapshot) aggregate) — comparable,   */
+/*  and only when g_event_log_enabled is true.                         */
+/*                                                                     */
+/*  Task: parallel-bba-event-log-sweep.                                */
+/* ------------------------------------------------------------------ */
+static void emit_sweep_result_event(SweepContext *ctx, int s, int thread_id)
+{
+  if (!g_event_log_enabled) return;
+  kStrategy strat = ctx->strat;
+  ActivePoly *ap = &ctx->active[s];
+  int tl = ap->sl_snapshot;
+  if (tl < 0) tl = -1;
+  int n_examined = tl + 1;  // T indices 0..tl inclusive, or 0 if tl<0
+  if (n_examined < 0) n_examined = 0;
+
+  int merged_best_good = ap->best_good;
+  int merged_best_reducer = ap->best_reducer;
+  unsigned long not_sev_s = ap->not_sev;
+  int best_tmp = (merged_best_good >= 0) ? merged_best_good : merged_best_reducer;
+
+  // Heisenberg mitigation: the interesting case for the sweep-visibility
+  // bug is best=-1 (sweep reports "no reducer" and the slot becomes a
+  // survivor).  Emit the full per-T aux payload only in that case.  When
+  // best>=0, emit a summary event with no aux — this keeps the
+  // instrumentation cheap enough to preserve the parallel bug rate.
+  //
+  // A full record can still be recovered: REDUCE_START already captures
+  // the T-snapshot pointers (task 325), and the merged best is in the
+  // event's arg_b.  The missing signal we're adding is the per-T reject
+  // reason attribution, which is diagnostic only when best=-1.
+  bool want_aux = (best_tmp < 0);
+  if (!want_aux) {
+    // Lightweight emit: slot, best, n_examined, P poly, best_T poly.
+    const void *best_cap_lw = NULL;
+    if (best_tmp >= 0 && best_tmp <= tl)
+      best_cap_lw = kevlog_capture(strat->T[best_tmp].p, currRing);
+    const void *p_cap_lw = kevlog_capture(ap->P.p, currRing);
+    kevlog_emit(EVT_SWEEP_RESULT,
+                (uint16_t)thread_id,
+                (uint16_t)strat->T.size(),
+                0,
+                (uint32_t)s,
+                (uint32_t)best_tmp,
+                (uint32_t)n_examined,
+                0,  // no aux
+                p_cap_lw, best_cap_lw);
+    return;
+  }
+
+  // Aux layout: u32 n_examined, then n_examined rows of
+  //   { u32 T_idx, u32 reject_reason_enum, u64 entry_poly_ptr }.
+  // Row size = 16 bytes.
+  size_t n_bytes = sizeof(uint32_t) + (size_t)n_examined * 16;
+  void *aux_buf = NULL;
+  uint32_t aux_off = kevlog_aux_alloc(n_bytes, &aux_buf);
+  if (aux_buf == NULL && n_bytes > 0) {
+    // aux arena overflow is fatal inside kevlog_aux_alloc, but guard
+    // anyway.
+    return;
+  }
+  if (aux_buf != NULL) {
+    uint32_t *hdr = (uint32_t *)aux_buf;
+    hdr[0] = (uint32_t)n_examined;
+    unsigned char *rows = (unsigned char *)aux_buf + sizeof(uint32_t);
+
+    // Re-run the sweep predicates sequentially, classify each T[j].
+    // Track a running "have we already recorded a good_p with pLen <
+    // current?" to distinguish WORSE_PLEN from ACCEPTED among divisors
+    // with acceptable ecart.
+    int current_best_pLen = INT_MAX;  // smallest pLen seen so far
+    for (int j = 0; j <= tl; j++) {
+      uint32_t reason = SWEEP_REJECT_OTHER;
+      const void *cap = NULL;
+
+      unsigned long sev_j = strat->sevT[j];
+      // Always capture the T entry's poly (cheap — source-pointer map
+      // de-dupes with earlier REDUCE_START / _STEP captures).  This
+      // lets the checker verify whether a sev-rejected entry actually
+      // did or did not divide the input LM.
+      if (tobject_published_load(strat->T[j])) {
+        cap = kevlog_capture(strat->T[j].p, currRing);
+      }
+      if (sev_j & not_sev_s) {
+        reason = SWEEP_REJECT_SEV_FILTER;
+      } else if (!tobject_published_load(strat->T[j])) {
+        reason = SWEEP_REJECT_NOT_PUBLISHED;
+      } else {
+        poly tp = strat->T[j].p;
+        if (!p_LmDivisibleBy(tp, ap->P.p, currRing)) {
+          reason = SWEEP_REJECT_NOT_DIVISIBLE;
+        } else {
+          int ecart_j = strat->T[j].ecart;
+          if (ecart_j > ap->P.ecart) {
+            // Divides but ecart too big — contributed to best_reducer
+            // (the first divisor of any ecart becomes best_reducer if
+            // no earlier divisor did).  Was this the merged
+            // best_reducer?  If merged_best_good is valid the
+            // merged_best_reducer is irrelevant to reduce (reduce
+            // prefers best_good); still ACCEPTED if it's the one
+            // chosen.
+            if (j == merged_best_reducer && merged_best_good < 0)
+              reason = SWEEP_REJECT_ECART; // still rejected for "good",
+                                           // but note: will be used
+                                           // as reducer fallback.
+            else
+              reason = SWEEP_REJECT_ECART;
+          } else {
+            int pLen = strat->T[j].pLength;
+            if (pLen <= 0) pLen = 3;
+            if (j == merged_best_good) {
+              reason = SWEEP_ACCEPTED;
+              current_best_pLen = pLen;
+            } else if (pLen >= current_best_pLen) {
+              reason = SWEEP_REJECT_WORSE_PLEN;
+            } else {
+              // pLen < current_best_pLen but wasn't picked as merged
+              // best_good — that means another worker observed an
+              // even shorter candidate further on that became the
+              // merged pick, and this j lost the race at merge.
+              reason = SWEEP_REJECT_WORSE_PLEN;
+            }
+          }
+        }
+      }
+
+      uint32_t *row_u32 = (uint32_t *)(rows + (size_t)j * 16);
+      uint64_t *row_u64 = (uint64_t *)(rows + (size_t)j * 16 + 8);
+      row_u32[0] = (uint32_t)j;
+      row_u32[1] = reason;
+      row_u64[0] = (uint64_t)(uintptr_t)cap;
+    }
+  }
+
+  // Event payload:
+  //   arg_a = slot index
+  //   arg_b = merged best (best_good if valid, else best_reducer; -1 => u32(-1))
+  //   arg_c = n_examined
+  //   poly_ptr_1 = slot's P (already captured by REDUCE_START but re-capture
+  //                is a map lookup — cheap)
+  //   poly_ptr_2 = best T entry's captured ptr, or NULL if -1
+  int best = (merged_best_good >= 0) ? merged_best_good : merged_best_reducer;
+  const void *best_cap = NULL;
+  if (best >= 0 && best <= tl) {
+    best_cap = kevlog_capture(strat->T[best].p, currRing);
+  }
+  const void *p_cap = kevlog_capture(ap->P.p, currRing);
+  kevlog_emit(EVT_SWEEP_RESULT,
+              (uint16_t)thread_id,
+              (uint16_t)strat->T.size(),
+              0,
+              (uint32_t)s,
+              (uint32_t)best,
+              (uint32_t)n_examined,
+              aux_off,
+              p_cap, best_cap);
+}
+
 /*
  * Reset per-thread sweep results for ONE slot across all threads.
  * Called immediately before publishing a fresh batch for a slot.
@@ -1750,6 +1922,12 @@ static void close_slot(SweepContext *ctx, int s, int thread_id)
   kt_debug_R_scan_L(ctx->strat, "close_slot:entry");
 
   merge_slot_results(ctx, s);
+
+  // Task parallel-bba-event-log-sweep: emit EVT_SWEEP_RESULT with per-T
+  // accept/reject reasons.  This must come BEFORE reduce_slot_from_sweep
+  // (which emits EVT_REDUCE_START) so the dump reads them in the natural
+  // order sweep → reduce.
+  emit_sweep_result_event(ctx, s, thread_id);
 
 #ifdef KTHREAD_INSTRUMENT
   long rstart = KT_STATS(ctx) ? kt_now_ns() : 0;
@@ -2730,6 +2908,11 @@ static void process_survivor_lobject(SweepContext *ctx, LObject *P, int thread_i
                   (uint32_t)strat->S.size(),
                   (uint32_t)P->ecart, 0,
                   p_cap, NULL);
+      // Task parallel-bba-event-log-sweep: mark this captured copy as a
+      // final-S candidate so kevlog_dump_on_failure writes its full
+      // p_String into -full-polys.txt (needed for the Buchberger-closure
+      // checker on dumps where LM-level invariants pass).
+      kevlog_mark_enters_poly(p_cap);
     }
     strat->enterS(*P, strat, strat->T.size()-1, strat->S.end());
     did_enterS = true;

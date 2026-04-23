@@ -30,6 +30,7 @@
 #include <atomic>
 #include <mutex>
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
 #include <pthread.h>
 #include <unistd.h>
@@ -61,6 +62,12 @@ struct PolyCopyEntry {
 };
 static std::mutex g_poly_map_lock;
 static std::unordered_map<const void *, PolyCopyEntry> *g_poly_map = nullptr;
+
+/* Set of captured COPY pointers marked as final-S candidates (poly_ptr_1
+ * of an EVT_ENTERS event).  Full p_String(p) is dumped into
+ * -full-polys.txt at failure time for each entry. */
+static std::mutex g_enters_set_lock;
+static std::unordered_set<const void *> *g_enters_set = nullptr;
 
 /* ------------------------------------------------------------------ */
 /*  Abort helper                                                       */
@@ -114,6 +121,13 @@ void kevlog_init(int disp_id)
     else
       g_poly_map->clear();
   }
+  {
+    std::lock_guard<std::mutex> lk(g_enters_set_lock);
+    if (g_enters_set == nullptr)
+      g_enters_set = new std::unordered_set<const void *>();
+    else
+      g_enters_set->clear();
+  }
 
   fprintf(stderr, "[kevlog] init disp=%d seq_cap=%zu aux_cap=%zu\n",
           disp_id, EVLOG_CAP_RECS, EVLOG_AUX_BYTES);
@@ -149,6 +163,14 @@ void kevlog_shutdown()
 
   // Delete every captured poly-copy before freeing the buffer.
   kevlog_delete_captured_polys();
+
+  // Drop the enters-set.  The pointers in it are copies already freed
+  // by kevlog_delete_captured_polys above, so we just delete the set
+  // itself without dereferencing.
+  {
+    std::lock_guard<std::mutex> lk(g_enters_set_lock);
+    if (g_enters_set != nullptr) { delete g_enters_set; g_enters_set = nullptr; }
+  }
 
   if (g_buf) { free(g_buf); g_buf = nullptr; }
   if (g_aux) { free(g_aux); g_aux = nullptr; }
@@ -252,6 +274,17 @@ const void *kevlog_capture_with_tail(const void *src,
 }
 
 /* ------------------------------------------------------------------ */
+/*  Mark a captured copy as final-S candidate (ENTERS poly_ptr_1)      */
+/* ------------------------------------------------------------------ */
+void kevlog_mark_enters_poly(const void *copy_ptr)
+{
+  if (!g_event_log_enabled || copy_ptr == nullptr) return;
+  std::lock_guard<std::mutex> lk(g_enters_set_lock);
+  if (g_enters_set == nullptr) return;
+  g_enters_set->insert(copy_ptr);
+}
+
+/* ------------------------------------------------------------------ */
 /*  Dump on failure                                                    */
 /* ------------------------------------------------------------------ */
 void kevlog_dump_on_failure(int disp_id)
@@ -339,7 +372,65 @@ void kevlog_dump_on_failure(int disp_id)
     fclose(fp);
   }
 
-  fprintf(stderr, "[kevlog] DUMPED: disp=%d nrec=%lu aux=%lu -> %s.{bin,aux.bin,polys.txt}\n",
+  // 4) Full-polys text dump: p_String for every ENTERS-marked copy.
+  //    Only candidate final-S members (poly_ptr_1 of EVT_ENTERS).
+  //    These are what the Buchberger-closure checker needs to verify
+  //    the final S is a correct Groebner basis.  Skipping all the
+  //    mid-reduction intermediates keeps the file small.
+  char pfull[320];
+  snprintf(pfull, sizeof(pfull), "%s-full-polys.txt", base);
+  FILE *ff = fopen(pfull, "w");
+  if (ff != nullptr) {
+    // Snapshot the enters set + resolve copy->ring via the poly map.
+    std::vector<const void *> enters_copies;
+    {
+      std::lock_guard<std::mutex> lk(g_enters_set_lock);
+      if (g_enters_set != nullptr) {
+        enters_copies.reserve(g_enters_set->size());
+        for (const void *p : *g_enters_set) enters_copies.push_back(p);
+      }
+    }
+    // Build copy->PolyCopyEntry lookup from g_poly_map values.  The
+    // map keys are source pointers, values are PolyCopyEntry with
+    // .copy + lmRing/tailRing — what we need to call p_String.
+    std::unordered_map<const void *, PolyCopyEntry> copy_to_entry;
+    {
+      std::lock_guard<std::mutex> lk(g_poly_map_lock);
+      if (g_poly_map != nullptr) {
+        for (auto &kv : *g_poly_map)
+          copy_to_entry[(const void *)kv.second.copy] = kv.second;
+      }
+    }
+    fprintf(ff, "# full polynomials for ENTERS arrival_id events\n");
+    fprintf(ff, "# addr<TAB>full_poly_string\n");
+    fprintf(ff, "# %zu enters polys marked\n", enters_copies.size());
+    for (const void *cp : enters_copies) {
+      auto it = copy_to_entry.find(cp);
+      if (it == copy_to_entry.end()) {
+        fprintf(ff, "0x%lx\t?no-entry\n", (unsigned long)(uintptr_t)cp);
+        fflush(ff);
+        continue;
+      }
+      poly p = it->second.copy;
+      ring lmR = it->second.lmRing;
+      ring tailR = it->second.tailRing;
+      char *s = NULL;
+      if (p != NULL && lmR != NULL) {
+        if (tailR != NULL && tailR != lmR)
+          s = p_String(p, lmR, tailR);
+        else
+          s = p_String(p, lmR, lmR);
+      }
+      fprintf(ff, "0x%lx\t%s\n",
+              (unsigned long)(uintptr_t)cp,
+              s ? s : "");
+      fflush(ff);
+      if (s) omFree(s);
+    }
+    fclose(ff);
+  }
+
+  fprintf(stderr, "[kevlog] DUMPED: disp=%d nrec=%lu aux=%lu -> %s.{bin,aux.bin,polys.txt,full-polys.txt}\n",
           disp_id, (unsigned long)nrec, (unsigned long)nauxb, base);
   fflush(stderr);
 }

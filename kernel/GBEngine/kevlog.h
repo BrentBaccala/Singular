@@ -91,6 +91,8 @@ enum kt_evt_type : uint16_t {
   EVT_CLEARS_TOMBSTONE = 20,
   EVT_ZERO_REDUCE    = 21,  // pair reduced to 0, not a survivor
   EVT_GMKILL         = 22,  // Gebauer-Moller dedup kill
+  EVT_SWEEP_RESULT   = 23,  // per-slot cooperative-sweep merged result +
+                            // per-T-entry accept/reject reasons in aux
 };
 
 /* ------------------------------------------------------------------ */
@@ -154,6 +156,38 @@ enum kt_reduce_outcome : uint32_t {
   RO_SURVIVOR = 1,
   RO_ZERO     = 2,
   RO_CONTINUE = 3,   // re-swept for another reduce step
+};
+
+/* ------------------------------------------------------------------ */
+/*  sweep_reject_reason enum for EVT_SWEEP_RESULT aux payload          */
+/*  (task parallel-bba-event-log-sweep).                               */
+/*  ------------------------------------------------------------------ */
+/*  For every T[j] entry the cooperative sweep LOOKED AT (via the      */
+/*  K-strided per-tile loop in sweep_one_tile), the aux payload        */
+/*  records one row { T_idx, reject_reason, entry_poly_ptr }.          */
+/*  SWEEP_ACCEPTED marks the row(s) that contributed to best_reducer   */
+/*  or best_good for this slot (after merge).                          */
+/*                                                                     */
+/*  Keep values stable — checker reads them.                            */
+enum kt_sweep_reject_reason : uint32_t {
+  SWEEP_ACCEPTED          = 0,
+  SWEEP_REJECT_SEV_FILTER = 1,  // sevT[j] & not_sev_s != 0
+  SWEEP_REJECT_NOT_PUBLISHED = 2, // tobject_published_load was false
+  SWEEP_REJECT_NOT_DIVISIBLE = 3, // p_LmDivisibleBy returned false
+  SWEEP_REJECT_ECART      = 4,  // divided, but ecart > P.ecart (not a
+                                // "good" reducer — still makes it a
+                                // best_reducer fallback)
+  SWEEP_REJECT_WORSE_PLEN = 5,  // divided with acceptable ecart but a
+                                // better (shorter) best_good already
+                                // recorded
+  SWEEP_REJECT_TOMBSTONED = 6,  // reserved — T entry marked dead
+                                // (current sweep has no explicit
+                                // tombstone gate; left for future use)
+  SWEEP_REJECT_SELF       = 7,  // reserved — T[j] is the slot's own P
+                                // (current sweep doesn't special-case
+                                // this; left for future use)
+  SWEEP_REJECT_FROM_T_RULE = 8, // reserved — fromT path rejection
+  SWEEP_REJECT_OTHER      = 99, // catch-all
 };
 
 /* ------------------------------------------------------------------ */
@@ -245,6 +279,12 @@ const void *kevlog_capture(const void *src, struct ip_sring *r);
 const void *kevlog_capture_with_tail(const void *src,
                                      struct ip_sring *lmRing,
                                      struct ip_sring *tailRing);
+
+/** Mark a (captured) poly as a final-S candidate — i.e. the poly_ptr_1
+ *  of an EVT_ENTERS event.  The dump writes full `p_String(p)` for
+ *  every poly so marked into the companion `-full-polys.txt` file.
+ *  Thread-safe.  Idempotent (marking the same copy twice is cheap). */
+void kevlog_mark_enters_poly(const void *copy_ptr);
 
 #ifdef __cplusplus
 }
