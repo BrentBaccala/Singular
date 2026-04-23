@@ -90,25 +90,63 @@ enum kt_evt_type : uint16_t {
   EVT_MAIN_BREAK     = 19,
   EVT_CLEARS_TOMBSTONE = 20,
   EVT_ZERO_REDUCE    = 21,  // pair reduced to 0, not a survivor
+  EVT_GMKILL         = 22,  // Gebauer-Moller dedup kill
 };
 
-/* kill_reason / kill_src enums.  Small ints for the arg_b field of
- * KILL / LKILL / BKILL events.  Keep values stable — checker reads
- * them. */
+/* ------------------------------------------------------------------ */
+/*  kill_reason enum for EVT_KILL (arg_b).                             */
+/*  ------------------------------------------------------------------ */
+/*  The KILL event is emitted inside enterOnePairNormal on the three
+ *  pair-entry-kill paths.  The KR_* names are the historical spelling
+ *  (task 325).  The KILL_* aliases are the task-prompt spelling — same
+ *  values; either name is accepted.  Keep values stable — checker
+ *  reads them.
+ */
 enum kt_kill_reason : uint32_t {
   KR_NONE          = 0,
+  KILL_UNKNOWN     = 0,
   KR_PROD_CRIT     = 1,   // lm(p)*lm(q) == lcm => product criterion
-  KR_DOM_BY_B      = 2,   // LCM dominated by existing B entry
-  KR_FROM_T_ECART  = 3,   // fromT + ecart rule
-  KR_PCMP_CHAIN_EQ = 4,   // pCompareChain equal ecart/idx kill
+  KILL_PROD_CRIT   = 1,
+  KR_DOM_BY_B      = 2,   // c3++ path (L-or-B dominated by existing B)
+  KILL_DOM_BY_B    = 2,
+  KR_FROM_T_ECART  = 3,   // fromT + ecart-too-big
+  KILL_FROM_T_ECART= 3,
+  KR_PCMP_CHAIN_EQ = 4,   // legacy (unused)
   KR_PCMP_CHAIN_LT = 5,
   KR_PCMP_CHAIN_GT = 6,
-  KR_BVEC_TRI_BVEC = 7,   // bvec_triangle B-side erase
-  KR_BVEC_TRI_L    = 8,   // bvec_triangle L-side erase
-  KR_LOCAL_HITS    = 9,   // chainCrit via local_hits
-  KR_S_PAIRTEST    = 10,  // chainCrit via S_pairtest
-  KR_GM            = 11,  // Gebauer-Moller
+  KR_BVEC_TRI_BVEC = 7,
+  KR_BVEC_TRI_L    = 8,
+  KR_LOCAL_HITS    = 9,
+  KR_S_PAIRTEST    = 10,
+  KR_GM            = 11,
   KR_OTHER         = 99,
+};
+
+/* ------------------------------------------------------------------ */
+/*  kill_src enum for EVT_LKILL / EVT_BKILL / EVT_CHAINKILL /          */
+/*  EVT_GMKILL (arg_a).                                                */
+/* ------------------------------------------------------------------ */
+/*  Mirrors the textual `src=...` field the SINGULAR_TRACE_PAIRCRIT
+ *  text log writes for each kill path.  Keep values stable — checker
+ *  reads them.  Checker / inspector decodes arg_a through this enum.
+ */
+enum kt_kill_src : uint32_t {
+  LKILL_UNKNOWN                 = 0,
+  LKILL_BVEC_TRIANGLE_BVEC_ERASE= 1, // bvec dedup: erase bvec[ii]
+  LKILL_BVEC_TRIANGLE_L_ERASE   = 2, // bvec dedup: erase lt in L
+  LKILL_PCOMPARE_CHAIN_SUGAR_GM = 3, // Gebauer+sugarCrit pCompareChain
+  LKILL_PCOMPARE_CHAIN_GM       = 4, // Gebauer !sugarCrit pCompareChain
+  LKILL_PCOMPARE_CHAIN_NONGEBAUER = 5, // non-Gebauer pCompareChain
+  BKILL_PAIRTEST                = 10, // BKILL: dom-by-B L-side (sugar + nonsugar)
+  BKILL_DOMBYB                  = 11, // BKILL: dom-by-B sugar, lp_lcm<it
+  CHAINKILL_LOCAL_HITS          = 20, // local_hits chain-crit path
+  CHAINKILL_S_PAIRTEST          = 21, // legacy S_pairtest chain-crit path
+  CHAINKILL_LOCAL_HITS_LP       = 22,
+  CHAINKILL_S_PAIRTEST_LP       = 23,
+  GMKILL_B_GEBAUER              = 30, // the Gebauer-classic branch (if any)
+  GMKILL_LFIRSTGM_SUGAR         = 31, // sugar_GM in chainCritNormal
+  GMKILL_LFIRSTGM_NONSUGAR      = 32, // GM_tiebreak in chainCritNormal
+  GMKILL_SUGAR_GM_ECART         = 33, // ecart-tiebreak in sugarCrit GM
 };
 
 enum kt_reduce_outcome : uint32_t {

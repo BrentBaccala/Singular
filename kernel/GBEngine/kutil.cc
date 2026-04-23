@@ -1244,6 +1244,24 @@ void sBasisSet::clear_if_divisible(poly p, unsigned long p_sev,
     if (!pLmShortDivisibleBy(p, p_sev, elem(i).p, ~ elem(i).sev))
       return;
   }
+  // Task parallel-bba-event-log-gaps: CLEARS_TOMBSTONE event.
+  // The entry at index i is about to be tombstoned because p's LM
+  // divides it.  Capture victim + killer polys (p_Copy'd).  Fields:
+  //   arg_a = i (S_idx / flat array position at time of clear)
+  //   arg_b = victim.arrival_id
+  //   poly_ptr_1 = victim poly (tombstoned S entry)
+  //   poly_ptr_2 = killer poly (p)
+  // We emit BEFORE erase() so the victim's SElement is still valid.
+  if (g_event_log_enabled) {
+    poly victim = elem(i).p;
+    uint32_t victim_arr = (uint32_t)elem(i).arrival_id;
+    const void *victim_cap = kevlog_capture(victim, currRing);
+    const void *killer_cap = kevlog_capture(p, currRing);
+    kevlog_emit(EVT_CLEARS_TOMBSTONE, (uint16_t)kt_debug_tid,
+                (uint16_t)strat->S.size(), 0,
+                (uint32_t)i, victim_arr, 0, 0,
+                victim_cap, killer_cap);
+  }
   // Erase and back up the iterator (like the old clearS did *at-- and *k--)
   at = erase_and_next(at);
   // erase_and_next returns the next valid iterator, but the old clearS
@@ -2285,6 +2303,15 @@ void enterOnePairNormal (const SElement &si,poly p,int ecart, int isFromQ,kStrat
         if (h_lm) omFree(h_lm);
         if (s_lm) omFree(s_lm);
       }
+      if (g_event_log_enabled) {
+        const void *p_cap = kevlog_capture(p, currRing);
+        const void *s_cap = kevlog_capture(si.p, currRing);
+        kevlog_emit(EVT_KILL, (uint16_t)kt_debug_tid,
+                    (uint16_t)strat->S.size(), 0,
+                    (uint32_t)si.arrival_id, (uint32_t)KR_FROM_T_ECART,
+                    (uint32_t)ecart, 0,
+                    p_cap, s_cap);
+      }
       return;
       /*the pair is (s[i],t[.]), discard it if the ecart is too big*/
     }
@@ -2342,6 +2369,15 @@ void enterOnePairNormal (const SElement &si,poly p,int ecart, int isFromQ,kStrat
             h_lm ? h_lm : "NULL", (int)si.s_2_r, s_lm ? s_lm : "NULL");
           if (h_lm) omFree(h_lm);
           if (s_lm) omFree(s_lm);
+        }
+        if (g_event_log_enabled) {
+          const void *p_cap = kevlog_capture(p, currRing);
+          const void *s_cap = kevlog_capture(si.p, currRing);
+          kevlog_emit(EVT_KILL, (uint16_t)kt_debug_tid,
+                      (uint16_t)strat->S.size(), 0,
+                      (uint32_t)si.arrival_id, (uint32_t)KR_FROM_T_ECART,
+                      (uint32_t)ecart, 0,
+                      p_cap, s_cap);
         }
         return;
         /*the pair is (s[i],t[.]), discard it if the ecart is too big*/
@@ -2449,6 +2485,15 @@ void enterOnePairNormal (const SElement &si,poly p,int ecart, int isFromQ,kStrat
               if (lp_lm) omFree(lp_lm);
               if (it_lm) omFree(it_lm);
             }
+            if (g_event_log_enabled) {
+              const void *p_cap = kevlog_capture(p, currRing);
+              const void *s_cap = kevlog_capture(si.p, currRing);
+              kevlog_emit(EVT_KILL, (uint16_t)kt_debug_tid,
+                          (uint16_t)strat->S.size(), 0,
+                          (uint32_t)si.arrival_id, (uint32_t)KR_DOM_BY_B,
+                          (uint32_t)Lp.ecart, 0,
+                          p_cap, s_cap);
+            }
             pLmFree(Lp.lcm);
             return;
           }
@@ -2467,6 +2512,15 @@ void enterOnePairNormal (const SElement &si,poly p,int ecart, int isFromQ,kStrat
               it_lm ? it_lm : "NULL", lp_lm ? lp_lm : "NULL");
             if (lp_lm) omFree(lp_lm);
             if (it_lm) omFree(it_lm);
+          }
+          if (g_event_log_enabled) {
+            const void *killer_cap = kevlog_capture(Lp.lcm, currRing);
+            const void *victim_cap = kevlog_capture(it->lcm, currRing);
+            kevlog_emit(EVT_BKILL, (uint16_t)kt_debug_tid,
+                        (uint16_t)strat->S.size(), 0,
+                        (uint32_t)BKILL_DOMBYB, (uint32_t)-1,
+                        (uint32_t)Lp.ecart, 0,
+                        killer_cap, victim_cap);
           }
           it = strat_B(strat).erase(it);
           strat->c3++;
@@ -2511,6 +2565,15 @@ void enterOnePairNormal (const SElement &si,poly p,int ecart, int isFromQ,kStrat
               if (lp_lm) omFree(lp_lm);
               if (it_lm) omFree(it_lm);
             }
+            if (g_event_log_enabled) {
+              const void *p_cap = kevlog_capture(p, currRing);
+              const void *s_cap = kevlog_capture(si.p, currRing);
+              kevlog_emit(EVT_KILL, (uint16_t)kt_debug_tid,
+                          (uint16_t)strat->S.size(), 0,
+                          (uint32_t)si.arrival_id, (uint32_t)KR_DOM_BY_B,
+                          0, 0,
+                          p_cap, s_cap);
+            }
             pLmFree(Lp.lcm);
             return;
           }
@@ -2528,6 +2591,15 @@ void enterOnePairNormal (const SElement &si,poly p,int ecart, int isFromQ,kStrat
               it_lm ? it_lm : "NULL", lp_lm ? lp_lm : "NULL");
             if (lp_lm) omFree(lp_lm);
             if (it_lm) omFree(it_lm);
+          }
+          if (g_event_log_enabled) {
+            const void *killer_cap = kevlog_capture(Lp.lcm, currRing);
+            const void *victim_cap = kevlog_capture(it->lcm, currRing);
+            kevlog_emit(EVT_BKILL, (uint16_t)kt_debug_tid,
+                        (uint16_t)strat->S.size(), 0,
+                        (uint32_t)BKILL_DOMBYB, (uint32_t)-1,
+                        0, 0,
+                        killer_cap, victim_cap);
           }
           it = strat_B(strat).erase(it);
           strat->c3++;
@@ -3912,6 +3984,15 @@ void chainCritNormal (poly p,int ecart,kStrategy strat)
               if (k_lm) omFree(k_lm);
               if (v_lm) omFree(v_lm);
             }
+            if (g_event_log_enabled) {
+              const void *k_cap = kevlog_capture(sit->p, currRing);
+              const void *v_cap = kevlog_capture(it->lcm, currRing);
+              kevlog_emit(EVT_CHAINKILL, (uint16_t)kt_debug_tid,
+                          (uint16_t)strat->S.size(), 0,
+                          (uint32_t)CHAINKILL_LOCAL_HITS_LP,
+                          (uint32_t)sit->arrival_id, 0, 0,
+                          k_cap, v_cap);
+            }
             it = strat_B(strat).erase(it);
             strat->c3++;
           }
@@ -3940,6 +4021,15 @@ void chainCritNormal (poly p,int ecart,kStrategy strat)
                 v_lm ? v_lm : "NULL");
               if (k_lm) omFree(k_lm);
               if (v_lm) omFree(v_lm);
+            }
+            if (g_event_log_enabled) {
+              const void *k_cap = kevlog_capture(sit->p, currRing);
+              const void *v_cap = kevlog_capture(it->lcm, currRing);
+              kevlog_emit(EVT_CHAINKILL, (uint16_t)kt_debug_tid,
+                          (uint16_t)strat->S.size(), 0,
+                          (uint32_t)CHAINKILL_LOCAL_HITS,
+                          (uint32_t)sit->arrival_id, 0, 0,
+                          k_cap, v_cap);
             }
             it = strat_B(strat).erase(it);
             strat->c3++;
@@ -3977,6 +4067,15 @@ void chainCritNormal (poly p,int ecart,kStrategy strat)
                 if (k_lm) omFree(k_lm);
                 if (v_lm) omFree(v_lm);
               }
+              if (g_event_log_enabled) {
+                const void *k_cap = kevlog_capture(sit->p, currRing);
+                const void *v_cap = kevlog_capture(it->lcm, currRing);
+                kevlog_emit(EVT_CHAINKILL, (uint16_t)kt_debug_tid,
+                            (uint16_t)strat->S.size(), 0,
+                            (uint32_t)CHAINKILL_S_PAIRTEST_LP,
+                            (uint32_t)sit.index(), 0, 0,
+                            k_cap, v_cap);
+              }
               it = strat_B(strat).erase(it);
               strat->c3++;
             }
@@ -4011,6 +4110,15 @@ void chainCritNormal (poly p,int ecart,kStrategy strat)
                   v_lm ? v_lm : "NULL");
                 if (k_lm) omFree(k_lm);
                 if (v_lm) omFree(v_lm);
+              }
+              if (g_event_log_enabled) {
+                const void *k_cap = kevlog_capture(sit->p, currRing);
+                const void *v_cap = kevlog_capture(it->lcm, currRing);
+                kevlog_emit(EVT_CHAINKILL, (uint16_t)kt_debug_tid,
+                            (uint16_t)strat->S.size(), 0,
+                            (uint32_t)CHAINKILL_S_PAIRTEST,
+                            (uint32_t)sit.index(), 0, 0,
+                            k_cap, v_cap);
               }
               it = strat_B(strat).erase(it);
               strat->c3++;
@@ -4050,6 +4158,15 @@ void chainCritNormal (poly p,int ecart,kStrategy strat)
                 p_lm ? p_lm : "NULL", v_lm ? v_lm : "NULL");
               if (p_lm) omFree(p_lm);
               if (v_lm) omFree(v_lm);
+            }
+            if (g_event_log_enabled) {
+              const void *k_cap = kevlog_capture(p, currRing);
+              const void *v_cap = kevlog_capture(it->lcm, currRing);
+              kevlog_emit(EVT_LKILL, (uint16_t)kt_debug_tid,
+                          (uint16_t)strat->S.size(), 0,
+                          (uint32_t)LKILL_PCOMPARE_CHAIN_SUGAR_GM,
+                          (uint32_t)-1, (uint32_t)ecart, 0,
+                          k_cap, v_cap);
             }
             it = strat->L.erase(it);
             strat->c3++;
@@ -4092,6 +4209,15 @@ void chainCritNormal (poly p,int ecart,kStrategy strat)
                   if (v_lm) omFree(v_lm);
                   if (k_lm) omFree(k_lm);
                 }
+                if (g_event_log_enabled) {
+                  const void *k_cap = kevlog_capture(a->lcm, currRing);
+                  const void *v_cap = kevlog_capture(b->lcm, currRing);
+                  kevlog_emit(EVT_GMKILL, (uint16_t)kt_debug_tid,
+                              (uint16_t)strat->S.size(), 0,
+                              (uint32_t)GMKILL_SUGAR_GM_ECART,
+                              (uint32_t)-1, (uint32_t)b->ecart, 0,
+                              k_cap, v_cap);
+                }
                 strat_B(strat).erase(strat_B(strat).uiter_at(j));
               }
               else if (a->ecart > b->ecart)
@@ -4107,6 +4233,15 @@ void chainCritNormal (poly p,int ecart,kStrategy strat)
                     a->ecart, b->ecart);
                   if (v_lm) omFree(v_lm);
                   if (k_lm) omFree(k_lm);
+                }
+                if (g_event_log_enabled) {
+                  const void *k_cap = kevlog_capture(b->lcm, currRing);
+                  const void *v_cap = kevlog_capture(a->lcm, currRing);
+                  kevlog_emit(EVT_GMKILL, (uint16_t)kt_debug_tid,
+                              (uint16_t)strat->S.size(), 0,
+                              (uint32_t)GMKILL_SUGAR_GM_ECART,
+                              (uint32_t)-1, (uint32_t)a->ecart, 0,
+                              k_cap, v_cap);
                 }
                 strat_B(strat).erase(strat_B(strat).uiter_at(i));
                 break;  // i is gone, move to next i
@@ -4127,6 +4262,15 @@ void chainCritNormal (poly p,int ecart,kStrategy strat)
                     if (v_lm) omFree(v_lm);
                     if (k_lm) omFree(k_lm);
                   }
+                  if (g_event_log_enabled) {
+                    const void *k_cap = kevlog_capture(a->lcm, currRing);
+                    const void *v_cap = kevlog_capture(b->lcm, currRing);
+                    kevlog_emit(EVT_GMKILL, (uint16_t)kt_debug_tid,
+                                (uint16_t)strat->S.size(), 0,
+                                (uint32_t)GMKILL_LFIRSTGM_SUGAR,
+                                (uint32_t)-1, 0, 0,
+                                k_cap, v_cap);
+                  }
                   strat_B(strat).erase(strat_B(strat).uiter_at(j));
                 }
                 else
@@ -4141,6 +4285,15 @@ void chainCritNormal (poly p,int ecart,kStrategy strat)
                       v_lm ? v_lm : "NULL", k_lm ? k_lm : "NULL");
                     if (v_lm) omFree(v_lm);
                     if (k_lm) omFree(k_lm);
+                  }
+                  if (g_event_log_enabled) {
+                    const void *k_cap = kevlog_capture(b->lcm, currRing);
+                    const void *v_cap = kevlog_capture(a->lcm, currRing);
+                    kevlog_emit(EVT_GMKILL, (uint16_t)kt_debug_tid,
+                                (uint16_t)strat->S.size(), 0,
+                                (uint32_t)GMKILL_LFIRSTGM_SUGAR,
+                                (uint32_t)-1, 0, 0,
+                                k_cap, v_cap);
                   }
                   strat_B(strat).erase(strat_B(strat).uiter_at(i));
                   break;
@@ -4174,6 +4327,15 @@ void chainCritNormal (poly p,int ecart,kStrategy strat)
                 p_lm ? p_lm : "NULL", v_lm ? v_lm : "NULL");
               if (p_lm) omFree(p_lm);
               if (v_lm) omFree(v_lm);
+            }
+            if (g_event_log_enabled) {
+              const void *k_cap = kevlog_capture(p, currRing);
+              const void *v_cap = kevlog_capture(it->lcm, currRing);
+              kevlog_emit(EVT_LKILL, (uint16_t)kt_debug_tid,
+                          (uint16_t)strat->S.size(), 0,
+                          (uint32_t)LKILL_PCOMPARE_CHAIN_GM,
+                          (uint32_t)-1, (uint32_t)ecart, 0,
+                          k_cap, v_cap);
             }
             it = strat->L.erase(it);
             strat->c3++;
@@ -4216,6 +4378,15 @@ void chainCritNormal (poly p,int ecart,kStrategy strat)
                   if (v_lm) omFree(v_lm);
                   if (k_lm) omFree(k_lm);
                 }
+                if (g_event_log_enabled) {
+                  const void *k_cap = kevlog_capture(a->lcm, currRing);
+                  const void *v_cap = kevlog_capture(b->lcm, currRing);
+                  kevlog_emit(EVT_GMKILL, (uint16_t)kt_debug_tid,
+                              (uint16_t)strat->S.size(), 0,
+                              (uint32_t)GMKILL_LFIRSTGM_NONSUGAR,
+                              (uint32_t)-1, 0, 0,
+                              k_cap, v_cap);
+                }
                 strat_B(strat).erase(strat_B(strat).uiter_at(j));
               }
               else
@@ -4230,6 +4401,15 @@ void chainCritNormal (poly p,int ecart,kStrategy strat)
                     v_lm ? v_lm : "NULL", k_lm ? k_lm : "NULL");
                   if (v_lm) omFree(v_lm);
                   if (k_lm) omFree(k_lm);
+                }
+                if (g_event_log_enabled) {
+                  const void *k_cap = kevlog_capture(b->lcm, currRing);
+                  const void *v_cap = kevlog_capture(a->lcm, currRing);
+                  kevlog_emit(EVT_GMKILL, (uint16_t)kt_debug_tid,
+                              (uint16_t)strat->S.size(), 0,
+                              (uint32_t)GMKILL_LFIRSTGM_NONSUGAR,
+                              (uint32_t)-1, 0, 0,
+                              k_cap, v_cap);
                 }
                 strat_B(strat).erase(strat_B(strat).uiter_at(i));
                 break;  // i is gone
@@ -4273,6 +4453,15 @@ void chainCritNormal (poly p,int ecart,kStrategy strat)
               if (v_lm) omFree(v_lm);
               if (vp1_lm) omFree(vp1_lm);
               if (vp2_lm) omFree(vp2_lm);
+            }
+            if (g_event_log_enabled) {
+              const void *k_cap = kevlog_capture(p, currRing);
+              const void *v_cap = kevlog_capture(it->lcm, currRing);
+              kevlog_emit(EVT_LKILL, (uint16_t)kt_debug_tid,
+                          (uint16_t)strat->S.size(), 0,
+                          (uint32_t)LKILL_PCOMPARE_CHAIN_NONGEBAUER,
+                          (uint32_t)-1, (uint32_t)ecart, 0,
+                          k_cap, v_cap);
             }
             it = strat->L.erase(it);
             strat->c3++;
@@ -4324,6 +4513,15 @@ void chainCritNormal (poly p,int ecart,kStrategy strat)
               if (v_lm) omFree(v_lm);
               if (bji_lm) omFree(bji_lm);
             }
+            if (g_event_log_enabled) {
+              const void *k_cap = kevlog_capture(p, currRing);
+              const void *v_cap = kevlog_capture(lt->lcm, currRing);
+              kevlog_emit(EVT_LKILL, (uint16_t)kt_debug_tid,
+                          (uint16_t)strat->S.size(), 0,
+                          (uint32_t)LKILL_BVEC_TRIANGLE_L_ERASE,
+                          (uint32_t)-1, (uint32_t)ecart, 0,
+                          k_cap, v_cap);
+            }
             /*
             *"NOT equal(...)" because in case of "equal" the element L[l]
             *is "older" and has to be from theoretical point of view behind
@@ -4351,6 +4549,15 @@ void chainCritNormal (poly p,int ecart,kStrategy strat)
               if (p_lm) omFree(p_lm);
               if (v_lm) omFree(v_lm);
               if (bji_lm) omFree(bji_lm);
+            }
+            if (g_event_log_enabled) {
+              const void *k_cap = kevlog_capture(p, currRing);
+              const void *v_cap = kevlog_capture(bvec[ii]->lcm, currRing);
+              kevlog_emit(EVT_LKILL, (uint16_t)kt_debug_tid,
+                          (uint16_t)strat->S.size(), 0,
+                          (uint32_t)LKILL_BVEC_TRIANGLE_BVEC_ERASE,
+                          (uint32_t)-1, (uint32_t)ecart, 0,
+                          k_cap, v_cap);
             }
             strat->L.erase(bvec[ii]);
             bvec[ii] = endL;
