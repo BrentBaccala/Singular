@@ -21,20 +21,31 @@
  * Aux arena: 256 MiB bump allocator for variadic payloads (T
  * snapshots, etc.).  Records reference it by offset.
  *
- * --- Poly capture semantics (post-refactor) --------------------
+ * --- Poly capture semantics --------------------
  *
  * Instead of storing raw in-flight poly pointers, every captured
  * poly is `p_Copy`d at emit time and the *copy's* pointer is stored
- * in the event.  To preserve pointer identity across events (so
- * "same source poly" still compares equal), a thread-safe map from
- * source-pointer -> copy-pointer is consulted: the first sight of
- * a source yields a fresh copy, subsequent sights return the same
- * copy pointer.
+ * in the event.  Every `kevlog_capture` call produces a fresh copy —
+ * no source-to-copy deduplication — so each event records the
+ * polynomial AS IT WAS at the moment of capture.
+ *
+ * The reason for no dedup: `ksReducePoly` mutates `ap->P.p`'s
+ * exponent vector in place, and the same source pointer survives
+ * across successive reduction rounds carrying progressively-reduced
+ * content.  An earlier first-sight-caching design stored the
+ * pre-mutation snapshot forever; later events referencing the same
+ * source got a stale LM, which misled the checker's LM-divides
+ * invariant-7 logic into phantom sev-filter false-rejects (see
+ * task parallel-bba-raw-exp-probe / 336).
+ *
+ * Cross-event "same source poly" comparisons are still possible via
+ * the source_addr column in the dumped `-polys.txt` file (3-column
+ * `copy_addr <TAB> lm <TAB> source_addr`): multiple rows may share a
+ * source_addr; look up each event's copy_addr's source_addr and
+ * compare.
  *
  * At shutdown, every captured (copy) pointer is `p_Delete`d and the
- * map is cleared.  The dump's `polys.txt` renders LMs from the
- * copies — they were not mutated after creation, so the LMs are
- * authoritative.
+ * vector is cleared.
  *
  * This works in this build because omalloc is configured to be a
  * thin wrapper over glibc malloc/free (see `build/omalloc/_config.h`

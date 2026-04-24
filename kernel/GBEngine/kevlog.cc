@@ -52,16 +52,23 @@ static std::atomic<uint64_t> g_seq{0};
 static std::atomic<uint64_t> g_aux_off{1};  // reserve offset 0 for "no aux"
 static int                g_dispatch_id = -1;
 
-/* Source-poly -> copy-poly map.  Lookup-first semantics: first sight
- * of a source allocates via p_Copy, subsequent sights return the
- * cached copy.  Deleted at shutdown. */
-struct PolyCopyEntry {
-  poly copy;        // fresh pointer from p_Copy (or p_Head)
-  ring lmRing;      // ring used by p_Delete
-  ring tailRing;    // separate tailRing, or same as lmRing
+/* Every kevlog_capture call p_Copy's a fresh snapshot of the source
+ * poly AT THE MOMENT of capture and appends one entry to this vector.
+ * Rationale: ksReducePoly mutates ap->P's exponent vector in place
+ * (task parallel-bba-raw-exp-probe / 336 uncovered that an earlier
+ * first-sight-caching design produced stale LMs for mutated polys,
+ * which invalidated the checker's LM-divides invariant-7 logic).
+ * Consumers that need "same source poly across events" use the
+ * source_ptr column in -polys.txt (copy -> source lookup). */
+struct CapturedPoly {
+  poly copy;            // fresh p_Copy at the moment of capture
+  const void *source;   // raw source pointer at capture time
+                        // (may be stale/freed post-capture)
+  ring lmRing;          // ring used by p_Delete
+  ring tailRing;        // separate tailRing, or same as lmRing
 };
-static std::mutex g_poly_map_lock;
-static std::unordered_map<const void *, PolyCopyEntry> *g_poly_map = nullptr;
+static std::mutex g_captured_lock;
+static std::vector<CapturedPoly> *g_captured = nullptr;
 
 /* Set of captured COPY pointers marked as final-S candidates (poly_ptr_1
  * of an EVT_ENTERS event).  Full p_String(p) is dumped into
@@ -115,11 +122,11 @@ void kevlog_init(int disp_id)
   g_aux_off.store(1, std::memory_order_release);
 
   {
-    std::lock_guard<std::mutex> lk(g_poly_map_lock);
-    if (g_poly_map == nullptr)
-      g_poly_map = new std::unordered_map<const void *, PolyCopyEntry>();
+    std::lock_guard<std::mutex> lk(g_captured_lock);
+    if (g_captured == nullptr)
+      g_captured = new std::vector<CapturedPoly>();
     else
-      g_poly_map->clear();
+      g_captured->clear();
   }
   {
     std::lock_guard<std::mutex> lk(g_enters_set_lock);
@@ -138,23 +145,23 @@ void kevlog_init(int disp_id)
  * have already run (it needs the copies live to format LMs). */
 static void kevlog_delete_captured_polys()
 {
-  std::unordered_map<const void *, PolyCopyEntry> *m = nullptr;
+  std::vector<CapturedPoly> *v = nullptr;
   {
-    std::lock_guard<std::mutex> lk(g_poly_map_lock);
-    m = g_poly_map;
-    g_poly_map = nullptr;  // detach so concurrent captures can't use it
+    std::lock_guard<std::mutex> lk(g_captured_lock);
+    v = g_captured;
+    g_captured = nullptr;  // detach so concurrent captures can't use it
   }
-  if (m == nullptr) return;
-  for (auto &kv : *m)
+  if (v == nullptr) return;
+  for (auto &e : *v)
   {
-    poly p = kv.second.copy;
+    poly p = e.copy;
     if (p == nullptr) continue;
-    if (kv.second.tailRing != nullptr && kv.second.tailRing != kv.second.lmRing)
-      p_Delete(&p, kv.second.lmRing, kv.second.tailRing);
-    else if (kv.second.lmRing != nullptr)
-      p_Delete(&p, kv.second.lmRing);
+    if (e.tailRing != nullptr && e.tailRing != e.lmRing)
+      p_Delete(&p, e.lmRing, e.tailRing);
+    else if (e.lmRing != nullptr)
+      p_Delete(&p, e.lmRing);
   }
-  delete m;
+  delete v;
 }
 
 void kevlog_shutdown()
@@ -227,27 +234,28 @@ uint32_t kevlog_aux_alloc(size_t n, void **out_ptr)
 }
 
 /* ------------------------------------------------------------------ */
-/*  Poly capture (p_Copy under mutex, source->copy identity map)       */
+/*  Poly capture (p_Copy under mutex, append-only — no source caching) */
 /* ------------------------------------------------------------------ */
 const void *kevlog_capture(const void *src, struct ip_sring *r)
 {
   if (!g_event_log_enabled || src == nullptr || r == nullptr) return nullptr;
-  std::lock_guard<std::mutex> lk(g_poly_map_lock);
-  if (g_poly_map == nullptr) return nullptr;
-  auto it = g_poly_map->find(src);
-  if (it != g_poly_map->end()) return (const void *)it->second.copy;
-  // First sight: copy under the lock.  p_Copy bottoms out in malloc
-  // (OMALLOC_USES_MALLOC=1 in this build), so it's thread-safe.  The
-  // source's tail chain may be mid-mutation on another thread; this
-  // is the same hazard the existing tracers face and is observed to
-  // be benign for the 0.2s reproducer (see task writeup).
+  // Always p_Copy fresh — every call yields a snapshot of `src` AT THE
+  // MOMENT of this call.  ksReducePoly mutates ap->P's exponents in
+  // place, so any source-caching scheme misrepresents later events.
+  // p_Copy bottoms out in malloc (OMALLOC_USES_MALLOC=1 in this build),
+  // so it's thread-safe.  The source's tail chain may be mid-mutation
+  // on another thread; this is the same hazard the existing tracers
+  // face and is observed to be benign for the 0.2s reproducer.
+  std::lock_guard<std::mutex> lk(g_captured_lock);
+  if (g_captured == nullptr) return nullptr;
   poly copy = p_Copy((poly)src, (ring)r);
   if (copy == nullptr) return nullptr;
-  PolyCopyEntry e;
+  CapturedPoly e;
   e.copy     = copy;
+  e.source   = src;
   e.lmRing   = (ring)r;
   e.tailRing = (ring)r;
-  (*g_poly_map)[src] = e;
+  g_captured->push_back(e);
   return (const void *)copy;
 }
 
@@ -259,17 +267,16 @@ const void *kevlog_capture_with_tail(const void *src,
   // Fall back to single-ring copy when the tailRing is identical.
   if (tailRing == nullptr || tailRing == lmRing)
     return kevlog_capture(src, lmRing);
-  std::lock_guard<std::mutex> lk(g_poly_map_lock);
-  if (g_poly_map == nullptr) return nullptr;
-  auto it = g_poly_map->find(src);
-  if (it != g_poly_map->end()) return (const void *)it->second.copy;
+  std::lock_guard<std::mutex> lk(g_captured_lock);
+  if (g_captured == nullptr) return nullptr;
   poly copy = p_Copy((poly)src, (ring)lmRing, (ring)tailRing);
   if (copy == nullptr) return nullptr;
-  PolyCopyEntry e;
+  CapturedPoly e;
   e.copy     = copy;
+  e.source   = src;
   e.lmRing   = (ring)lmRing;
   e.tailRing = (ring)tailRing;
-  (*g_poly_map)[src] = e;
+  g_captured->push_back(e);
   return (const void *)copy;
 }
 
@@ -347,31 +354,33 @@ void kevlog_dump_on_failure(int disp_id)
   snprintf(ppoly, sizeof(ppoly), "%s-polys.txt", base);
   FILE *fp = fopen(ppoly, "w");
   if (fp != nullptr) {
-    std::vector<std::pair<const void *, PolyCopyEntry>> entries;
+    std::vector<CapturedPoly> entries;
     {
-      std::lock_guard<std::mutex> lk(g_poly_map_lock);
-      if (g_poly_map != nullptr) {
-        entries.reserve(g_poly_map->size());
-        for (auto &kv : *g_poly_map) entries.push_back(kv);
+      std::lock_guard<std::mutex> lk(g_captured_lock);
+      if (g_captured != nullptr) {
+        entries.reserve(g_captured->size());
+        for (auto &e : *g_captured) entries.push_back(e);
       }
     }
     fprintf(fp, "# log-owned copies, safe to render\n");
-    fprintf(fp, "# FORMAT: copy_addr <TAB> lm [ <TAB> source_addr ]\n");
-    fprintf(fp, "# copy_addr is stored in *.bin records (EVT_*.poly_ptr_1/2,\n");
-    fprintf(fp, "# SWEEP_RESULT aux.entry_ptr); source_addr is the raw\n");
-    fprintf(fp, "# (non-p_Copy'd) T[j].p pointer — used to match\n");
-    fprintf(fp, "# SWEEP_RESULT_V2 aux.sweep_ptr (which is raw too).\n");
-    fprintf(fp, "# %zu unique poly pointers\n", entries.size());
+    fprintf(fp, "# FORMAT: copy_addr <TAB> lm <TAB> source_addr\n");
+    fprintf(fp, "# One row PER capture (no source-to-copy dedup).  Each\n");
+    fprintf(fp, "# capture is a live p_Copy snapshot taken at event time,\n");
+    fprintf(fp, "# so repeated captures of the same source (e.g. ap->P.p\n");
+    fprintf(fp, "# mutated by successive ksReducePoly calls) appear as\n");
+    fprintf(fp, "# distinct rows with different copy_addr and potentially\n");
+    fprintf(fp, "# different LMs, sharing source_addr.  Use source_addr\n");
+    fprintf(fp, "# for \"same source poly\" comparisons across events.\n");
+    fprintf(fp, "# %zu captures\n", entries.size());
     // Flush after every line so a SEGV partway through still leaves
     // a partial file.
     for (auto &e : entries) {
-      const void *src_ptr = e.first;
-      poly copy = e.second.copy;
+      poly copy = e.copy;
       char *lm = copy ? kt_lm_str(copy) : NULL;
       fprintf(fp, "0x%lx\t%s\t0x%lx\n",
               (unsigned long)(uintptr_t)copy,
               lm ? lm : "",
-              (unsigned long)(uintptr_t)src_ptr);
+              (unsigned long)(uintptr_t)e.source);
       fflush(fp);
       if (lm) omFree(lm);
     }
@@ -396,15 +405,17 @@ void kevlog_dump_on_failure(int disp_id)
         for (const void *p : *g_enters_set) enters_copies.push_back(p);
       }
     }
-    // Build copy->PolyCopyEntry lookup from g_poly_map values.  The
-    // map keys are source pointers, values are PolyCopyEntry with
-    // .copy + lmRing/tailRing — what we need to call p_String.
-    std::unordered_map<const void *, PolyCopyEntry> copy_to_entry;
+    // Build copy->CapturedPoly lookup from g_captured.  Each entry
+    // has .copy + lmRing/tailRing — what we need to call p_String.
+    // Multiple captures of the same source share nothing (each has a
+    // distinct copy pointer), so last-writer-wins collisions on the
+    // map key are impossible.
+    std::unordered_map<const void *, CapturedPoly> copy_to_entry;
     {
-      std::lock_guard<std::mutex> lk(g_poly_map_lock);
-      if (g_poly_map != nullptr) {
-        for (auto &kv : *g_poly_map)
-          copy_to_entry[(const void *)kv.second.copy] = kv.second;
+      std::lock_guard<std::mutex> lk(g_captured_lock);
+      if (g_captured != nullptr) {
+        for (auto &e : *g_captured)
+          copy_to_entry[(const void *)e.copy] = e;
       }
     }
     fprintf(ff, "# full polynomials for ENTERS arrival_id events\n");

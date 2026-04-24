@@ -76,13 +76,35 @@ and spent a full task redesigning around it). Every poly that lands
 in a `poly_ptr_{1,2}` or inside an aux payload goes through
 `kevlog_capture(src, ring)`:
 
-- Mutex-guarded `unordered_map<source_ptr, {copy, lmRing, tailRing}>`.
-- First sight of a source → `p_Copy(src, ring)` → store the fresh
-  copy in the map.
-- Later sights → return the cached copy (preserves pointer
-  identity across events: "same source poly" compares equal in
-  the log).
+- Mutex-guarded append-only `vector<{copy, source, lmRing,
+  tailRing}>`.
+- Every call → fresh `p_Copy(src, ring)` → append one entry.
+  Each capture is a **live snapshot** of the poly AT THE MOMENT
+  of the call.
 - At `kevlog_shutdown()`, every copy gets `p_Delete`d.
+
+### Why no source→copy caching
+
+Task 336 discovered that a first-sight-caching design (keyed by
+source pointer, returning the same cached copy for all later
+sights) produces stale LMs for any poly whose source is mutated
+in place later. The concrete offender is `ap->P.p`: the same raw
+pointer survives across successive `ksReducePoly` rounds carrying
+progressively-reduced content. Cached captures froze the
+*pre-mutation* snapshot forever, and the checker's LM-divides
+invariant-7 logic mistakenly compared sweep-time live sev against
+stale cached LM — producing a cascade of phantom sev-filter
+false-rejects that drove tasks 328-336. Once captures became live
+snapshots, every sev-filter "false-reject" disappeared.
+
+### Cross-event "same source" comparisons
+
+Losing the cache meant losing the free `copy_ptr == copy_ptr`
+identity check between events. Consumers now look up each event's
+`copy_ptr` in the 3-column `-polys.txt` to get its `source_ptr`,
+and compare source pointers. The checker's `copy_to_src[copy] =
+source` map makes this one line. See
+`check_survivor_bookkeeping` for the pattern.
 
 Thread-safety rests on this build's `OMALLOC_USES_MALLOC=1` and
 `XALLOC_BIN` being commented out in `omalloc/xalloc.h` — so
@@ -106,10 +128,15 @@ Path stem: `/tmp/audit-run/event-log-<disp>-<pid>-<ts>`.
 2. **`-aux.bin`** — the aux arena contents. Offset 0 is the
    "no-aux" sentinel. Records reference this by `aux_off`.
 3. **`-polys.txt`** — three columns:
-   `copy_addr<TAB>lm<TAB>source_addr`. The copy column is what
-   `*.bin` references; the source column (added in task 332) is
-   the raw pre-copy pointer, used to match `SWEEP_RESULT_V2+`
-   `sweep_ptr` entries against `entry_ptr` in the checker.
+   `copy_addr<TAB>lm<TAB>source_addr`. One row per capture (no
+   source-to-copy dedup after the drop-the-cache change): repeated
+   captures of the same source produce distinct `copy_addr` rows
+   with potentially distinct LMs (e.g., after each in-place
+   mutation), all sharing `source_addr`. Use `source_addr` for
+   "same source poly across events" comparisons; use `copy_addr`
+   for LM rendering of a specific event's snapshot. The checker
+   loads both `polys_by_copy[copy] = lm` and `copy_to_src[copy]
+   = source`.
 4. **`-full-polys.txt`** — full `p_String(p)` for every poly
    marked via `kevlog_mark_enters_poly` (called at each
    `EVT_ENTERS` site). These are the final-S candidates needed
