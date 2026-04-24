@@ -3929,6 +3929,11 @@ std::vector<LSet::iterator> kMergeBintoL_and_return_iterators(kStrategy strat)
 */
 void chainCritNormal (poly p,int ecart,kStrategy strat)
 {
+  // Ablation flag for cascading-coverage hypothesis test.
+  // When set, skip ALL chain-criterion pair eliminations; rely on
+  // sweep+reduction alone to keep the GB correct (slower but safer).
+  if (getenv("SINGULAR_SKIP_CHAINCRIT") != NULL) return;
+
   int j;
   unsigned long sev_p = p_GetShortExpVector(p, currRing);
 
