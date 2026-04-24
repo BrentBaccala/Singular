@@ -3507,7 +3507,15 @@ static void process_survivor_lobject(SweepContext *ctx, LObject *P, int thread_i
   // steal in between; that is fine — their phase 0 runs, they finish
   // enterS, they drop exclusive, we get shared.
   // ------------------------------------------------------------------
-  strat->S.unlock_exclusive();
+  // Ablation flag: when SINGULAR_HOLD_L_THROUGH_EP is set, hold
+  // S-exclusive across the whole phase 0+1 sequence to test whether
+  // the racing window between enterT(h) publishing h and enterpairs(h)
+  // pruning L is the source of the disp12 flake.  Holding S-exclusive
+  // blocks pop_and_prepare's S-shared acquire, so no L pop can race
+  // with the publish→prune window.
+  bool serialize_drain =
+      (getenv("SINGULAR_HOLD_L_THROUGH_EP") != NULL);
+  if (!serialize_drain) strat->S.unlock_exclusive();
 
   if (did_enterS)
   {
@@ -3529,7 +3537,9 @@ static void process_survivor_lobject(SweepContext *ctx, LObject *P, int thread_i
     t_local_my_arrival = my_arrival;
     t_local_pairtest_hits = &local_pairtest_hits;
 
-    kt_S_lock_shared(ctx, thread_id);
+    // serialize_drain: we still hold S-exclusive from phase 0; skip
+    // the S-shared acquire.  In normal mode, downgrade as before.
+    if (!serialize_drain) kt_S_lock_shared(ctx, thread_id);
 
     // Recompute pos_it after acquiring S-shared.  Between the phase-0
     // unlock_exclusive() above and this lock_shared(), peer drainers'
@@ -3672,12 +3682,15 @@ static void process_survivor_lobject(SweepContext *ctx, LObject *P, int thread_i
     t_local_pairtest_hits = saved_pairtest_hits;
 
     pthread_mutex_unlock(&ctx->L_lock);
-    strat->S.unlock_shared();
+    if (serialize_drain) strat->S.unlock_exclusive();
+    else strat->S.unlock_shared();
   }
   else
   {
     // No enterS happened (IDLIFT/syzComp gated it); nothing to do in
-    // phase 1.  The exclusive lock was already released above.
+    // phase 1.  The exclusive lock was already released above (in
+    // normal mode).  In serialize_drain mode, we still hold it.
+    if (serialize_drain) strat->S.unlock_exclusive();
   }
 
   kDeleteLcm(P);
