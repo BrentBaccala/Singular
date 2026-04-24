@@ -5,6 +5,14 @@ This is the `rustgb-integration` worktree of `~/Singular`. It hosts the
 the `rustgb-dispatch.lib` Singular shim. General rustgb docs live in
 `~/CLAUDE.md` under "Rust Port (rustgb)".
 
+## Task-runner agent type
+
+All rustgb tasks (`~/rustgb`, `~/Singular-rustgb`, and the `~/project`
+docs/prompts that go with them) run under the **`opus`** agent, not
+`rustgb`. Create with `task_runner.py --create NAME --agent opus`.
+Applies to both Rust-side and Singular-integration changes in this
+workstream.
+
 ## Staging validation under the subagent stream watchdog
 
 The staging validation suite (`~/project/run-rustgb-staging-validation.sh`)
