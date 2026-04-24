@@ -3500,6 +3500,22 @@ bba_post_loop:
         kevlog_dump_on_failure(__disp_id);
       }
     }
+    // Force-dump on PASS: if SINGULAR_EVENT_LOG_FORCE_DUMP is set and
+    // no violation fired above (otherwise the above block already
+    // dumped), emit a passing-run dump so the checker can replay a
+    // known-good trace.  Useful for calibrating semantic-replay
+    // invariants (invariant 11) against a ground-truth run.
+    else if (g_event_log_enabled
+             && getenv("SINGULAR_EVENT_LOG_FORCE_DUMP") != NULL)
+    {
+      kevlog_emit(EVT_BPL_END, 0, (uint16_t)strat->T.size(),
+                  0, 0, 0, 0, 0, NULL, NULL);
+      kevlog_dump_on_failure(__disp_id);
+      fprintf(stderr,
+              "[kevlog] FORCE_DUMP: passing run disp=%d dumped\n",
+              __disp_id);
+      fflush(stderr);
+    }
 
     if (trusted_gb != NULL) idDelete(&trusted_gb);
     if (S_as_ideal != NULL) idDelete(&S_as_ideal);
