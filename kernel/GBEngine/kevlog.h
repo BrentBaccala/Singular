@@ -121,6 +121,41 @@ enum kt_evt_type : uint16_t {
                             // H1a.2 (not_sev stale vs P.sev), or
                             // H1a.3 (both consistent — MYSTERY).
                             // Task parallel-bba-apP-sev-probe.
+  EVT_SWEEP_RESULT_V5 = 27, // Same V4 layout, but the slot-block
+                            // prelude grows from 32 bytes to 64 bytes
+                            // and rows grow from 40 bytes to 48
+                            // bytes.  The added fields capture the
+                            // RAW EXPONENT BYTES of ap->P.p and each
+                            // SEV-rejected T[j].p at sweep time, plus
+                            // the apP pointer and the worker's
+                            // currRing pointer.  This lets the
+                            // checker discriminate H1a.3 MYSTERY into
+                            // H1a.3.{mem, mutated, triple,
+                            // wrong_ring, corrupt_sev}.
+                            //
+                            // Slot-block (64 B):
+                            //   u32 n_examined; u32 pad;
+                            //   u64 apP_sev_stored;
+                            //   u64 apP_sev_computed;
+                            //   u64 apP_not_sev_stored;
+                            //   u64 apP_p_ptr;        (NEW)
+                            //   u64 apP_exps_packed;  (NEW)
+                            //   u64 apP_currRing_ptr; (NEW)
+                            // Row (48 B):
+                            //   u32 T_idx; u32 reason_packed;
+                            //   u64 entry_ptr;
+                            //   u64 sweep_ptr;
+                            //   u64 sev_sweep;
+                            //   u64 sev_computed;
+                            //   u64 T_exps_packed;    (NEW; 0 unless
+                            //                          SEV_REJECT)
+                            //
+                            // Pack format for *_exps_packed: in a
+                            // 3-variable ring, low 16 bits = exp(1),
+                            // bits 16..31 = exp(2), bits 32..47 =
+                            // exp(3).  For r->N != 3 only what fits
+                            // is stored.
+                            // Task parallel-bba-raw-exp-probe.
 };
 
 /* ------------------------------------------------------------------ */

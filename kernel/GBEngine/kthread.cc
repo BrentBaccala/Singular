@@ -240,6 +240,11 @@ struct SweepCaptureEntry {
                                // => sev self-consistent with poly at
                                // sweep time; H1b (!=) => sev and poly
                                // disagree at sweep time.
+  uint64_t T_exps_packed;      // Task parallel-bba-raw-exp-probe:
+                               // packed exponents of T[j].p at sweep
+                               // time (low16=e1, mid16=e2, hi16=e3).
+                               // Only meaningful for SEV_REJECT rows;
+                               // 0 for ACCEPTED / other outcomes.
 };
 static const uint32_t SWEEP_CAP_ROWS = 256;
 
@@ -258,6 +263,13 @@ struct SweepCaptureBuf {
   uint64_t apP_sev_computed;
   uint64_t apP_not_sev_stored;
   uint64_t apP_p_addr;
+  // Task parallel-bba-raw-exp-probe: extra apP captures for
+  // discriminating H1a.3 MYSTERY into mem / mutated / triple /
+  // wrong_ring / corrupt_sev sub-buckets.
+  uint64_t apP_p_ptr;          // raw (uint64_t)(uintptr_t)ap->P.p
+                               // (==apP_p_addr; kept for clarity)
+  uint64_t apP_exps_packed;    // kt_pack_exps3(ap->P.p, currRing)
+  uint64_t apP_currRing_ptr;   // (uint64_t)(uintptr_t)currRing
 };
 
 // [num_threads * max_active] flat array.  Allocated alongside
@@ -271,6 +283,22 @@ static inline SweepCaptureBuf& sweep_capture_buf(SweepContext *ctx,
   return g_sweep_captures[thread_id * ctx->max_active + slot];
 }
 
+/* Task parallel-bba-raw-exp-probe: pack the first three exponents of
+ * `p` against ring `r` into a u64 so the checker can compare the
+ * exponents the sweep was reading against the LM the dump-time
+ * formatter renders.  Layout is low16=exp(1), mid16=exp(2),
+ * hi16=exp(3); top 16 bits unused for this targeted diagnostic.
+ * For r->N != 3 only what fits is stored (still useful as a partial
+ * fingerprint).  Returns 0 if p or r is NULL. */
+static inline uint64_t kt_pack_exps3(poly p, ring r) {
+  if (p == NULL || r == NULL) return 0;
+  uint64_t e1 = 0, e2 = 0, e3 = 0;
+  if (r->N >= 1) e1 = (uint64_t)(uint16_t)p_GetExp(p, 1, r);
+  if (r->N >= 2) e2 = (uint64_t)(uint16_t)p_GetExp(p, 2, r);
+  if (r->N >= 3) e3 = (uint64_t)(uint16_t)p_GetExp(p, 3, r);
+  return e1 | (e2 << 16) | (e3 << 32);
+}
+
 /* Append one capture row for (slot, thread_id).  Silently drops if
  * the buffer is full (we emit a single warning aux-wide in that case
  * via the n_overflow counter at drain time — unused for now).  No
@@ -281,7 +309,8 @@ static inline void sweep_capture_push(SweepContext *ctx,
                                       int thread_id, int slot,
                                       int T_idx, uint32_t outcome,
                                       void *T_p, unsigned long sev,
-                                      unsigned long sev_computed)
+                                      unsigned long sev_computed,
+                                      uint64_t T_exps_packed)
 {
   if (g_sweep_captures == nullptr) return;
   SweepCaptureBuf &buf = sweep_capture_buf(ctx, thread_id, slot);
@@ -293,6 +322,7 @@ static inline void sweep_capture_push(SweepContext *ctx,
   e.T_p_at_sweep  = (uint64_t)T_p;
   e.sev_at_sweep  = (uint64_t)sev;
   e.sev_computed  = (uint64_t)sev_computed;
+  e.T_exps_packed = T_exps_packed;
 }
 
 static inline void sweep_capture_reset_one(SweepContext *ctx, int slot)
@@ -307,6 +337,9 @@ static inline void sweep_capture_reset_one(SweepContext *ctx, int slot)
     buf.apP_sev_computed = 0;
     buf.apP_not_sev_stored = 0;
     buf.apP_p_addr = 0;
+    buf.apP_p_ptr = 0;
+    buf.apP_exps_packed = 0;
+    buf.apP_currRing_ptr = 0;
   }
 }
 
@@ -1979,16 +2012,22 @@ static void emit_sweep_result_event(SweepContext *ctx, int s, int thread_id)
   // by tl+1, which is small (|T| <= few hundred in practice).
   struct SweepCapLookup { uint64_t sweep_ptr; uint64_t sev_sweep;
                           uint64_t sev_computed;
+                          uint64_t T_exps_packed;
                           uint32_t outcome; bool present; };
   SweepCapLookup *cap_idx = NULL;
   if (n_examined > 0) {
     cap_idx = (SweepCapLookup *)calloc(n_examined, sizeof(SweepCapLookup));
   }
   // Collect the apP sweep-time snapshot (first-present wins across
-  // threads).  Task parallel-bba-apP-sev-probe.
-  uint64_t apP_sev_stored_cap = 0;
-  uint64_t apP_sev_computed_cap = 0;
+  // threads).  Task parallel-bba-apP-sev-probe; extended for V5 by
+  // task parallel-bba-raw-exp-probe with apP_p_ptr / apP_exps_packed
+  // / apP_currRing_ptr.
+  uint64_t apP_sev_stored_cap     = 0;
+  uint64_t apP_sev_computed_cap   = 0;
   uint64_t apP_not_sev_stored_cap = 0;
+  uint64_t apP_p_ptr_cap          = 0;
+  uint64_t apP_exps_packed_cap    = 0;
+  uint64_t apP_currRing_ptr_cap   = 0;
   bool apP_cap_present = false;
   if (cap_idx != NULL && g_sweep_captures != NULL) {
     int total_threads = ctx->num_workers + 1;
@@ -2003,6 +2042,9 @@ static void emit_sweep_result_event(SweepContext *ctx, int s, int thread_id)
         apP_sev_stored_cap     = buf.apP_sev_stored;
         apP_sev_computed_cap   = buf.apP_sev_computed;
         apP_not_sev_stored_cap = buf.apP_not_sev_stored;
+        apP_p_ptr_cap          = buf.apP_p_ptr;
+        apP_exps_packed_cap    = buf.apP_exps_packed;
+        apP_currRing_ptr_cap   = buf.apP_currRing_ptr;
         apP_cap_present        = true;
       }
       uint32_t cnt = buf.count.load(std::memory_order_relaxed);
@@ -2014,11 +2056,12 @@ static void emit_sweep_result_event(SweepContext *ctx, int s, int thread_id)
         // K-strided: each j visited by exactly one thread.  If we see
         // a duplicate, keep the last (rare — e.g. a re-published slot
         // that wasn't reset, which would be a bug).
-        L.sweep_ptr    = e.T_p_at_sweep;
-        L.sev_sweep    = e.sev_at_sweep;
-        L.sev_computed = e.sev_computed;
-        L.outcome      = e.outcome;
-        L.present      = true;
+        L.sweep_ptr     = e.T_p_at_sweep;
+        L.sev_sweep     = e.sev_at_sweep;
+        L.sev_computed  = e.sev_computed;
+        L.T_exps_packed = e.T_exps_packed;
+        L.outcome       = e.outcome;
+        L.present       = true;
       }
     }
   }
@@ -2029,23 +2072,33 @@ static void emit_sweep_result_event(SweepContext *ctx, int s, int thread_id)
   if (!apP_cap_present) {
     apP_sev_stored_cap     = (uint64_t)ap->P.sev;
     apP_not_sev_stored_cap = (uint64_t)ap->not_sev;
+    apP_currRing_ptr_cap   = (uint64_t)(uintptr_t)currRing;
     if (ap->P.p != NULL) {
       apP_sev_computed_cap = (uint64_t)pGetShortExpVector(ap->P.p);
+      apP_p_ptr_cap        = (uint64_t)(uintptr_t)ap->P.p;
+      apP_exps_packed_cap  = kt_pack_exps3(ap->P.p, currRing);
     }
   }
 
-  // V4 aux layout: 32-byte slot-block prelude then V3-style rows.
+  // V5 aux layout: 64-byte slot-block prelude then 48-byte rows.
   //   offset  0: u32 n_examined
   //   offset  4: u32 pad (reserved)
   //   offset  8: u64 apP_sev_stored
   //   offset 16: u64 apP_sev_computed
   //   offset 24: u64 apP_not_sev_stored
-  //   offset 32: n_examined * 40-byte V3 rows (unchanged layout)
-  // The slot-block captures the active-slot P-side state the sweep
-  // predicate was evaluated against (per slot, not per T[j]).
-  // Task parallel-bba-apP-sev-probe.
-  size_t header_bytes = 32;  // n_examined + pad + 3 * u64
-  size_t n_bytes = header_bytes + (size_t)n_examined * 40;
+  //   offset 32: u64 apP_p_ptr        (NEW in V5)
+  //   offset 40: u64 apP_exps_packed  (NEW in V5)
+  //   offset 48: u64 apP_currRing_ptr (NEW in V5)
+  //   offset 56: u64 reserved
+  //   offset 64: n_examined * 48-byte rows.
+  // Per-row layout (48 B):
+  //   u32 T_idx; u32 reason_packed;
+  //   u64 entry_ptr; u64 sweep_ptr;
+  //   u64 sev_sweep; u64 sev_computed;
+  //   u64 T_exps_packed (NEW; 0 unless SEV_REJECT)
+  // Task parallel-bba-raw-exp-probe.
+  size_t header_bytes = 64;
+  size_t n_bytes = header_bytes + (size_t)n_examined * 48;
   void *aux_buf = NULL;
   uint32_t aux_off = kevlog_aux_alloc(n_bytes, &aux_buf);
   if (aux_buf == NULL && n_bytes > 0) {
@@ -2061,6 +2114,10 @@ static void emit_sweep_result_event(SweepContext *ctx, int s, int thread_id)
     hdr64[0] = apP_sev_stored_cap;
     hdr64[1] = apP_sev_computed_cap;
     hdr64[2] = apP_not_sev_stored_cap;
+    hdr64[3] = apP_p_ptr_cap;
+    hdr64[4] = apP_exps_packed_cap;
+    hdr64[5] = apP_currRing_ptr_cap;
+    hdr64[6] = 0;  // reserved
     unsigned char *rows = (unsigned char *)aux_buf + header_bytes;
 
     // Re-run the sweep predicates sequentially, classify each T[j].
@@ -2131,22 +2188,26 @@ static void emit_sweep_result_event(SweepContext *ctx, int s, int thread_id)
       uint64_t sweep_ptr = 0;
       uint64_t sev_sweep = 0;
       uint64_t sev_computed_sw = 0;
+      uint64_t T_exps_packed_sw = 0;
       if (cap_idx != NULL && cap_idx[j].present) {
-        sweep_outcome   = cap_idx[j].outcome & 0xffffu;
-        sweep_ptr       = cap_idx[j].sweep_ptr;
-        sev_sweep       = cap_idx[j].sev_sweep;
-        sev_computed_sw = cap_idx[j].sev_computed;
+        sweep_outcome    = cap_idx[j].outcome & 0xffffu;
+        sweep_ptr        = cap_idx[j].sweep_ptr;
+        sev_sweep        = cap_idx[j].sev_sweep;
+        sev_computed_sw  = cap_idx[j].sev_computed;
+        T_exps_packed_sw = cap_idx[j].T_exps_packed;
       }
       uint32_t reason_packed = (sweep_outcome << 16) | (reason & 0xffffu);
 
-      uint32_t *row_u32 = (uint32_t *)(rows + (size_t)j * 40);
-      uint64_t *row_u64 = (uint64_t *)(rows + (size_t)j * 40 + 8);
+      uint32_t *row_u32 = (uint32_t *)(rows + (size_t)j * 48);
+      uint64_t *row_u64 = (uint64_t *)(rows + (size_t)j * 48 + 8);
       row_u32[0] = (uint32_t)j;
       row_u32[1] = reason_packed;
       row_u64[0] = (uint64_t)(uintptr_t)cap;  // entry_ptr (p_Copy'd)
       row_u64[1] = sweep_ptr;                 // T_p at sweep time (raw)
       row_u64[2] = sev_sweep;                 // sevT[j] at sweep time
       row_u64[3] = sev_computed_sw;           // pGetShortExpVector(sweep_ptr)
+      row_u64[4] = T_exps_packed_sw;          // packed exps at sweep time
+                                              // (0 unless SEV_REJECT row)
     }
   }
   if (cap_idx != NULL) free(cap_idx);
@@ -2164,7 +2225,7 @@ static void emit_sweep_result_event(SweepContext *ctx, int s, int thread_id)
     best_cap = kevlog_capture(strat->T[best].p, currRing);
   }
   const void *p_cap = kevlog_capture(ap->P.p, currRing);
-  kevlog_emit(EVT_SWEEP_RESULT_V4,
+  kevlog_emit(EVT_SWEEP_RESULT_V5,
               (uint16_t)thread_id,
               (uint16_t)strat->T.size(),
               0,
@@ -2431,10 +2492,22 @@ static void sweep_one_tile(SweepContext *ctx, int thread_id,
       uint64_t sev_comp   = (p_addr != 0)
         ? (uint64_t)pGetShortExpVector(ap->P.p)
         : 0;
+      // Task parallel-bba-raw-exp-probe: also snapshot the raw
+      // exponents of ap->P.p (against the worker's currRing) and
+      // record the worker-thread currRing pointer.  These let the
+      // checker discriminate H1a.3 MYSTERY into mem / mutated /
+      // wrong_ring / corrupt_sev.
+      uint64_t exps_packed = (p_addr != 0)
+        ? kt_pack_exps3(ap->P.p, currRing)
+        : 0;
+      uint64_t cring_ptr   = (uint64_t)(uintptr_t)currRing;
       buf.apP_sev_stored      = sev_stored;
       buf.apP_sev_computed    = sev_comp;
       buf.apP_not_sev_stored  = not_sev_st;
       buf.apP_p_addr          = p_addr;
+      buf.apP_p_ptr           = p_addr;
+      buf.apP_exps_packed     = exps_packed;
+      buf.apP_currRing_ptr    = cring_ptr;
       buf.apP_present.store(1, std::memory_order_release);
     }
   }
@@ -2465,10 +2538,18 @@ static void sweep_one_tile(SweepContext *ctx, int thread_id,
       sev_computed_j = pGetShortExpVector((poly)tp_snap);
 
     if (sev_j & not_sev_s) {
-      if (capture_enabled)
+      if (capture_enabled) {
+        // Task parallel-bba-raw-exp-probe: capture raw exponents of
+        // T[j].p ONLY for SEV_REJECT rows (the diagnostic targets
+        // the SEV-filter mystery).  ACCEPTED / NOT_PUBLISHED /
+        // NOT_DIVISIBLE / ECART rows pass 0 to keep overhead down.
+        uint64_t T_exps = (tp_snap != NULL)
+          ? kt_pack_exps3((poly)tp_snap, currRing)
+          : 0;
         sweep_capture_push(ctx, thread_id, s, j,
                            SWEEP_ATOMIC_REJECT_SEV, tp_snap, sev_j,
-                           sev_computed_j);
+                           sev_computed_j, T_exps);
+      }
       continue;
     }
     // Acquire-load gate: only after observing published=true are the
@@ -2478,14 +2559,14 @@ static void sweep_one_tile(SweepContext *ctx, int thread_id,
       if (capture_enabled)
         sweep_capture_push(ctx, thread_id, s, j,
                            SWEEP_ATOMIC_REJECT_NOT_PUBLISHED,
-                           tp_snap, sev_j, sev_computed_j);
+                           tp_snap, sev_j, sev_computed_j, 0);
       continue;
     }
     if (!p_LmDivisibleBy(strat->T[j].p, ap->P.p, currRing)) {
       if (capture_enabled)
         sweep_capture_push(ctx, thread_id, s, j,
                            SWEEP_ATOMIC_REJECT_NOT_DIVISIBLE,
-                           tp_snap, sev_j, sev_computed_j);
+                           tp_snap, sev_j, sev_computed_j, 0);
       continue;
     }
 
@@ -2509,13 +2590,13 @@ static void sweep_one_tile(SweepContext *ctx, int thread_id,
       if (capture_enabled)
         sweep_capture_push(ctx, thread_id, s, j,
                            SWEEP_ACCEPTED_ATOMIC, tp_snap, sev_j,
-                           sev_computed_j);
+                           sev_computed_j, 0);
     }
     else {
       if (capture_enabled)
         sweep_capture_push(ctx, thread_id, s, j,
                            SWEEP_ATOMIC_REJECT_ECART, tp_snap, sev_j,
-                           sev_computed_j);
+                           sev_computed_j, 0);
     }
   }
 }
