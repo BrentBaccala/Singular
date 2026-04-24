@@ -2795,7 +2795,24 @@ static void reduce_slot_from_sweep(SweepContext *ctx, int slot, int thread_id)
         ptrs[j] = (uint64_t)(uintptr_t)cap;
       }
     }
+    // Materialize ap->P's bucket before capture so kevlog_capture
+    // sees the FULL poly (not just the head term).  With
+    // use_buckets=true, ap->P.p holds only the leading term and
+    // the tail lives in ap->P.bucket; p_Copy would capture only
+    // the head.  GetP() commits the bucket back into ap->P.p.
+    // The subsequent ksReducePoly will re-bucket as needed.
+    ap->P.GetP();
     const void *p_cap = kevlog_capture(ap->P.p, currRing);
+    // Mark ap->P.p's capture at REDUCE_START as a "full-polys"
+    // candidate so the dump writes its full p_String.
+    kevlog_mark_enters_poly(p_cap);
+    for (int j = 0; j < Tsz; j++) {
+      uint64_t cp = 0;
+      if (aux_buf != NULL) {
+        cp = ((uint64_t *)((char *)aux_buf + sizeof(uint32_t)))[j];
+      }
+      if (cp != 0) kevlog_mark_enters_poly((const void *)(uintptr_t)cp);
+    }
     kevlog_emit(EVT_REDUCE_START, (uint16_t)thread_id, (uint16_t)Tsz, 0,
                 (uint32_t)slot, (uint32_t)best, (uint32_t)Tsz,
                 aux_off, p_cap, NULL);
@@ -3038,7 +3055,15 @@ static void reduce_slot_from_sweep(SweepContext *ctx, int slot, int thread_id)
     if (lm) omFree(lm);
   }
   if (g_event_log_enabled) {
+    // Materialize bucket into ap->P.p before capture (see
+    // REDUCE_START emit comment).
+    ap->P.GetP();
     const void *p_cap = kevlog_capture(ap->P.p, currRing);
+    // Mark intermediate CONTINUE ap->P.p as full-polys candidate
+    // so the checker's replay can start from parallel's recorded
+    // intermediate state (needed to replay multi-round reductions
+    // faithfully).
+    kevlog_mark_enters_poly(p_cap);
     kevlog_emit(EVT_REDUCE_END, (uint16_t)thread_id,
                 (uint16_t)strat->T.size(), 0,
                 (uint32_t)slot, (uint32_t)RO_CONTINUE, 0, 0,
