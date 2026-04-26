@@ -9,7 +9,7 @@
 #   bench-classify.sh [--singular PATH] [--target-time 20] TESTFILE
 #
 # Output (comma-separated):
-#   TESTFILE,CLASS,ITERATIONS,SINGLE_RUN_MS
+#   TESTFILE,CLASS,ITERATIONS,SINGLE_RUN_US
 
 set -e
 
@@ -36,7 +36,7 @@ if [[ -z "$TESTFILE" ]]; then
 fi
 
 # Try a class: returns 0 if it works, 1 if not
-# Sets BENCH_TIME_MS on success
+# Sets BENCH_TIME_US on success
 try_class() {
     local class="$1"
     local iters="$2"
@@ -46,8 +46,8 @@ try_class() {
         "'$WRAPPER' --class '$class' --iterations '$iters' '$TESTFILE' | '$SINGULAR' -q 2>&1") || return 1
 
     # Wrapper emits BENCH_WALL: in microseconds (system("--ticks-per-sec",
-    # 1000000) is set in the HEADER). Older versions emitted BENCH_TIME:
-    # in milliseconds; that marker no longer exists.
+    # 1000000) is set in the HEADER). Iteration math throughout this
+    # script is in microseconds.
     local bench_line
     bench_line=$(echo "$output" | grep '^BENCH_WALL:' | tail -1) || return 1
 
@@ -55,18 +55,13 @@ try_class() {
         return 1
     fi
 
-    # Extract microseconds and convert to milliseconds for the rest of
-    # this script's arithmetic (TARGET_TIME is in seconds; iteration math
-    # uses ms throughout).
-    local bench_us
-    bench_us=$(echo "$bench_line" | sed 's/BENCH_WALL:[[:space:]]*//' | tr -d '[:space:],')
+    BENCH_TIME_US=$(echo "$bench_line" | sed 's/BENCH_WALL:[[:space:]]*//' | tr -d '[:space:],')
 
     # Check it's a valid number (may be negative if timer wraps)
-    if ! [[ "$bench_us" =~ ^-?[0-9]+$ ]]; then
+    if ! [[ "$BENCH_TIME_US" =~ ^-?[0-9]+$ ]]; then
         return 1
     fi
 
-    BENCH_TIME_MS=$(( bench_us / 1000 ))
     return 0
 }
 
@@ -74,7 +69,7 @@ try_class() {
 # If Singular's timer fails (e.g., test kills the basering), fall back to
 # wall-clock timing so we still get a baseline for calibration.
 if try_class C 1; then
-    SINGLE_TIME_MS=$BENCH_TIME_MS
+    SINGLE_TIME_US=$BENCH_TIME_US
 else
     # Wall-clock fallback
     start_ns=$(date +%s%N)
@@ -87,22 +82,22 @@ else
         echo -e "${TESTFILE},FAIL,0,0"
         exit 1
     fi
-    SINGLE_TIME_MS=$(( (end_ns - start_ns) / 1000000 ))
+    SINGLE_TIME_US=$(( (end_ns - start_ns) / 1000 ))
     # Subtract ~500ms for Singular startup overhead
-    SINGLE_TIME_MS=$(( SINGLE_TIME_MS > 500 ? SINGLE_TIME_MS - 500 : 0 ))
+    SINGLE_TIME_US=$(( SINGLE_TIME_US > 500000 ? SINGLE_TIME_US - 500000 : 0 ))
 fi
 
 # If single run takes > 10s, use Class C with 1 iteration
-if [[ $SINGLE_TIME_MS -ge 10000 ]]; then
-    echo "${TESTFILE},C,1,${SINGLE_TIME_MS}"
+if [[ $SINGLE_TIME_US -ge 10000000 ]]; then
+    echo "${TESTFILE},C,1,${SINGLE_TIME_US}"
     exit 0
 fi
 
 # Calculate target iterations based on single-run timing
-if [[ $SINGLE_TIME_MS -le 0 ]]; then
+if [[ $SINGLE_TIME_US -le 0 ]]; then
     TARGET_N=$MAX_ITERATIONS
 else
-    TARGET_N=$(( (TARGET_TIME * 1000 + SINGLE_TIME_MS - 1) / SINGLE_TIME_MS ))
+    TARGET_N=$(( (TARGET_TIME * 1000000 + SINGLE_TIME_US - 1) / SINGLE_TIME_US ))
 fi
 
 # Cap iterations
@@ -115,28 +110,28 @@ fi
 
 # If target is 1, no need for looping - use Class C
 if [[ $TARGET_N -le 1 ]]; then
-    echo "${TESTFILE},C,1,${SINGLE_TIME_MS}"
+    echo "${TESTFILE},C,1,${SINGLE_TIME_US}"
     exit 0
 fi
 
 # Phase 2: Test if Class A works with a small iteration count
 if try_class A "$TEST_ITERATIONS"; then
-    echo "${TESTFILE},A,${TARGET_N},${SINGLE_TIME_MS}"
+    echo "${TESTFILE},A,${TARGET_N},${SINGLE_TIME_US}"
     exit 0
 fi
 
 # Phase 3: Try Class B
 if try_class B "$TEST_ITERATIONS"; then
-    echo "${TESTFILE},B,${TARGET_N},${SINGLE_TIME_MS}"
+    echo "${TESTFILE},B,${TARGET_N},${SINGLE_TIME_US}"
     exit 0
 fi
 
 # Phase 4: Try Class D
 if try_class D "$TEST_ITERATIONS"; then
-    echo "${TESTFILE},D,${TARGET_N},${SINGLE_TIME_MS}"
+    echo "${TESTFILE},D,${TARGET_N},${SINGLE_TIME_US}"
     exit 0
 fi
 
 # Fallback: Class C single run
-echo "${TESTFILE},C,1,${SINGLE_TIME_MS}"
+echo "${TESTFILE},C,1,${SINGLE_TIME_US}"
 exit 0

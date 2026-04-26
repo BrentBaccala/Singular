@@ -33,7 +33,7 @@ benchmark cell at roughly the target wall time.
 | Script | Role |
 |---|---|
 | `bench-wrapper.sh` | takes `--class X --iterations N TESTFILE`, emits wrapped Singular input on stdout. The unit primitive — pipe to `Singular -q`. |
-| `bench-classify.sh` | tries Class C first to get a single-run baseline, then Class A with a tiny iteration count to see if looping works. Falls back to B / D as needed. Emits one CSV row: `testname.tst,CLASS,ITERATIONS,SINGLE_RUN_MS`. |
+| `bench-classify.sh` | tries Class C first to get a single-run baseline, then Class A with a tiny iteration count to see if looping works. Falls back to B / D as needed. Emits one CSV row: `testname.tst,CLASS,ITERATIONS,SINGLE_RUN_US`. The 4th column is microseconds (matching the wrapper's `BENCH_WALL:` units); not consumed by `bench-suite.sh`. |
 | `bench-suite.sh` | the orchestrator. Takes builds + `.lst` files (or individual `.tst` files), looks up each test's classification, builds the wrapped input, runs under `setarch -R` (ASLR off) + optional `numactl` / `taskset`, emits a wide CSV. |
 | `bench-launch.sh` | nohup-friendly background-run skeleton. scp to the host, `bash ~/bench-launch.sh`. |
 | `bench-analyze.py` | per-test mean / stddev / CV from a benchmark CSV. `--during START END` flags rows during a busy time window. |
@@ -220,7 +220,7 @@ where perf isn't usable.
   `bench-classify.sh` tries to detect this, but a test that
   succeeds-with-warnings on iter 2 can pass calibration and still
   be wrong. Sanity-check `cpu_us / iterations` against
-  `bench-classify.sh`'s `SINGLE_RUN_MS` for any new test.
+  `bench-classify.sh`'s `SINGLE_RUN_US` for any new test.
 - **`--no-warn`** is **not** set by the framework — Singular
   warnings (e.g. "redefining ring") go to stderr and are visible
   in the suite's log. Useful for catching silently-broken loop
