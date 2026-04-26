@@ -126,6 +126,42 @@ bench-classify.sh --singular <path/to/Singular> --target-time 20 \
   /path/to/test.tst > >(tee -a path/to/<list>_classification.csv)
 ```
 
+## Loading dispatch shims / extra LIBs (`--preamble-file`)
+
+For builds that need a Singular-level preamble before each test (e.g.
+the rustgb dispatch shim's `LIB "singrust.so"; LIB "rustgb-dispatch.lib";`),
+pass `--preamble-file FILE` to `bench-suite.sh`. The file's contents
+are prepended to the wrapped body **before the timer-start line**,
+so the LIB-load cost is paid once per Singular invocation but isn't
+charged against the per-iteration timing.
+
+A single preamble file works for all rustgb tests — the dispatch
+shim's filter (Z/p, degrevlex, ≤31 vars) is runtime, so the same
+preamble routes std() correctly across every workload.
+
+```
+# ~/rustgb-preamble.sing
+LIB "singrust.so";
+LIB "rustgb-dispatch.lib";
+```
+
+```bash
+bench-suite.sh -n 3 --taskset "-c 11" --save-classify \
+  --preamble-file ~/rustgb-preamble.sing \
+  "rustgb=LD_LIBRARY_PATH=$HOME/rustgb/target/release \
+         SINGULARPATH=$HOME/Singular-rustgb/install/lib/singular/MOD \
+         $HOME/Singular-rustgb/install/bin/Singular" \
+  -- ~/Singular-gb-testsuite/Tst/Short/libehv_s.tst
+```
+
+**Caveat:** classification (`bench-classify.sh`) does not yet honour
+the preamble. Iteration counts get calibrated against the
+no-preamble Singular, so any per-call overhead the preamble adds
+(or savings it produces, in the rustgb-dispatch case) shifts the
+post-preamble measurement away from the 20 s target. Acceptable
+when the shift is small; if a future preamble adds significant
+per-call cost, extend bench-classify.sh similarly.
+
 ## Standard invocation patterns
 
 c200-1 isolated benchmark host (CPU 11, NUMA-local memory on socket 1):

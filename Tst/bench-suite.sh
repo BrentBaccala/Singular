@@ -30,6 +30,17 @@
 #   --classify-from F   Load classifications from file F (read-only)
 #   --skip-to TEST      Skip tests until TEST is reached (resume)
 #   --append            Append to output file instead of overwriting
+#   --preamble-file F   Singular code prepended to every wrapped test
+#                       BEFORE the timed block. Used to load dispatch
+#                       shims / extra LIBs whose setup cost shouldn't
+#                       be charged against per-iter timing. (Notably:
+#                       LIB "singrust.so"; LIB "rustgb-dispatch.lib";
+#                       to route std() through rustgb_std for matching
+#                       rings.) Note: classification still runs WITHOUT
+#                       the preamble — the calibrated iteration count
+#                       reflects the no-preamble shape, which is
+#                       acceptable when the preamble's per-call cost
+#                       is small relative to the test body.
 
 set -e
 
@@ -44,6 +55,7 @@ SAVE_CLASSIFY=0
 CLASSIFY_FROM=""
 SKIP_TO=""
 APPEND=0
+PREAMBLE_FILE=""
 LISTFILES=()
 
 # Build specs: parallel arrays
@@ -69,6 +81,7 @@ while [[ $# -gt 0 ]]; do
         --classify-from) CLASSIFY_FROM="$2"; shift 2 ;;
         --skip-to) SKIP_TO="$2"; shift 2 ;;
         --append) APPEND=1; shift ;;
+        --preamble-file) PREAMBLE_FILE="$2"; shift 2 ;;
         --) parsing_builds=0; shift ;;
         *=*)
             if [[ $parsing_builds -eq 1 ]]; then
@@ -105,6 +118,11 @@ fi
 
 if [[ ${#LISTFILES[@]} -eq 0 ]]; then
     echo "Error: no list files specified. Use -- to separate builds from list files." >&2
+    exit 1
+fi
+
+if [[ -n "$PREAMBLE_FILE" && ! -f "$PREAMBLE_FILE" ]]; then
+    echo "Error: --preamble-file '$PREAMBLE_FILE' not found" >&2
     exit 1
 fi
 
@@ -253,10 +271,21 @@ benchmark_test() {
     local perf_output_file
     perf_output_file=$(mktemp /tmp/bench-perf.XXXXXX)
 
+    # If a preamble file is set, prepend its contents to the wrapped body
+    # before piping to Singular. The preamble runs before the timed
+    # block — useful for loading dispatch shims (e.g. rustgb-dispatch.lib)
+    # whose setup cost should not be charged against per-iter timing.
+    local stream_cmd
+    if [[ -n "$PREAMBLE_FILE" ]]; then
+        stream_cmd="{ cat '$PREAMBLE_FILE'; '$WRAPPER' --class '$class' --iterations '$iters' '$testfile'; }"
+    else
+        stream_cmd="'$WRAPPER' --class '$class' --iterations '$iters' '$testfile'"
+    fi
+
     start_ns=$(date +%s%N)
     output=$(timeout "$test_timeout" perf stat -e instructions,cycles,cache-misses,branch-misses \
         -o "$perf_output_file" \
-        bash -c "'$WRAPPER' --class '$class' --iterations '$iters' '$testfile' | $full_cmd 2>&1") || exit_code=$?
+        bash -c "$stream_cmd | $full_cmd 2>&1") || exit_code=$?
     end_ns=$(date +%s%N)
 
     local warmup_cpu_us=0
