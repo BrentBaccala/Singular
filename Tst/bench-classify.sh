@@ -45,22 +45,28 @@ try_class() {
     output=$(timeout "$TIMEOUT" bash -c \
         "'$WRAPPER' --class '$class' --iterations '$iters' '$TESTFILE' | '$SINGULAR' -q 2>&1") || return 1
 
-    # Check for BENCH_TIME in output
+    # Wrapper emits BENCH_WALL: in microseconds (system("--ticks-per-sec",
+    # 1000000) is set in the HEADER). Older versions emitted BENCH_TIME:
+    # in milliseconds; that marker no longer exists.
     local bench_line
-    bench_line=$(echo "$output" | grep '^BENCH_TIME:' | tail -1) || return 1
+    bench_line=$(echo "$output" | grep '^BENCH_WALL:' | tail -1) || return 1
 
     if [[ -z "$bench_line" ]]; then
         return 1
     fi
 
-    # Extract the time value
-    BENCH_TIME_MS=$(echo "$bench_line" | sed 's/BENCH_TIME:[[:space:]]*//' | tr -d '[:space:]')
+    # Extract microseconds and convert to milliseconds for the rest of
+    # this script's arithmetic (TARGET_TIME is in seconds; iteration math
+    # uses ms throughout).
+    local bench_us
+    bench_us=$(echo "$bench_line" | sed 's/BENCH_WALL:[[:space:]]*//' | tr -d '[:space:],')
 
     # Check it's a valid number (may be negative if timer wraps)
-    if ! [[ "$BENCH_TIME_MS" =~ ^-?[0-9]+$ ]]; then
+    if ! [[ "$bench_us" =~ ^-?[0-9]+$ ]]; then
         return 1
     fi
 
+    BENCH_TIME_MS=$(( bench_us / 1000 ))
     return 0
 }
 
