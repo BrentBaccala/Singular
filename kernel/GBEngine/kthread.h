@@ -360,6 +360,19 @@ struct SweepContext
   // Max survivor queue depth observed (for diagnostics).
   std::atomic<long> stat_max_queue_depth;
 
+  // Phase-1 enterpairs ordering (SINGULAR_SERIALIZE_ENTERPAIRS=1).
+  // Without this gate, two drain workers can reach phase 1 in arbitrary
+  // L-lock-acquisition order rather than arrival_id order: a later h_j
+  // may run its inline clearSbatch (tombstoning S entries) before an
+  // earlier h_i's enterpairs has scanned S, so h_i misses pairs and
+  // any GM B-criterion kill that cited those pairs as its co-spoly
+  // becomes unjustified.  See
+  // ~/project/docs/parallel-bba-deferred-enterpairs-clearS-violation.md.
+  // The cv shares L_lock since enterpairs is already L-lock-serialized.
+  std::atomic<uint64_t> next_enterpairs_arrival_id;
+  pthread_cond_t enterpairs_order_cv;
+  bool serialize_enterpairs;
+
 #ifdef KTHREAD_INSTRUMENT
   // ---- Instrumentation (task 482) ---------------------------------
   bool stats_enabled;           // runtime toggle (SINGULAR_KTHREAD_STATS)
