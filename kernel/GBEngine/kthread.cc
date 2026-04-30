@@ -1554,6 +1554,16 @@ SweepContext *sweep_context_init(kStrategy strat, int nthreads)
   ctx->enterpairs_active.store(0, std::memory_order_relaxed);
   ctx->stat_max_queue_depth.store(0, std::memory_order_relaxed);
 
+  // Phase-1 enterpairs ordering barrier (SINGULAR_SERIALIZE_ENTERPAIRS).
+  // Sync the barrier counter to strat's current arrival_counter so the
+  // first survivor to enter S in this dispatch passes immediately.
+  pthread_cond_init(&ctx->enterpairs_order_cv, NULL);
+  ctx->next_enterpairs_arrival_id.store(
+      strat->arrival_counter.load(std::memory_order_relaxed),
+      std::memory_order_relaxed);
+  ctx->serialize_enterpairs =
+      (getenv("SINGULAR_SERIALIZE_ENTERPAIRS") != NULL);
+
 #ifdef KTHREAD_INSTRUMENT
   ctx->stats_enabled = (getenv("SINGULAR_KTHREAD_STATS") != NULL);
   int total_tt = ctx->num_workers + 1;
@@ -1579,6 +1589,7 @@ void sweep_context_destroy(SweepContext *ctx)
   pthread_cond_destroy(&ctx->pairs_available);
   pthread_cond_destroy(&ctx->tiles_avail_cv);
   pthread_cond_destroy(&ctx->slot_freed_cv);
+  pthread_cond_destroy(&ctx->enterpairs_order_cv);
   delete ctx->survivor_queue;
   free(ctx->active);
   free(ctx->sweep_results);
@@ -3564,6 +3575,20 @@ static void process_survivor_lobject(SweepContext *ctx, LObject *P, int thread_i
 
     kt_L_lock_phase2(ctx, thread_id);
 
+    // Phase-1 enterpairs ordering barrier.  Block until predecessors
+    // (arrival_id < my_arrival) have completed their enterpairs,
+    // restoring the serial-equivalent invariant: enterpairs(h_i) sees
+    // an S in which no entry has been tombstoned by anyone with
+    // arrival_id > i.  cond_wait atomically releases L_lock so a
+    // predecessor can acquire it and bump the counter.  See
+    // ~/project/docs/parallel-bba-deferred-enterpairs-clearS-violation.md.
+    if (ctx->serialize_enterpairs) {
+      while (ctx->next_enterpairs_arrival_id.load(std::memory_order_relaxed)
+             != my_arrival) {
+        pthread_cond_wait(&ctx->enterpairs_order_cv, &ctx->L_lock);
+      }
+    }
+
 #ifdef KTHREAD_INSTRUMENT
     long p1_t0 = KT_STATS(ctx) ? kt_now_ns() : 0;
     long p1_l_t0 = p1_t0;  // L-lock held from here until unlock below
@@ -3680,6 +3705,14 @@ static void process_survivor_lobject(SweepContext *ctx, LObject *P, int thread_i
     t_local_B_override = saved_B_override;
     t_local_my_arrival = saved_my_arrival;
     t_local_pairtest_hits = saved_pairtest_hits;
+
+    // Phase-1 enterpairs ordering barrier: advance the counter and
+    // wake successors waiting for arrival_id == my_arrival + 1.
+    if (ctx->serialize_enterpairs) {
+      ctx->next_enterpairs_arrival_id.store(my_arrival + 1,
+                                            std::memory_order_relaxed);
+      pthread_cond_broadcast(&ctx->enterpairs_order_cv);
+    }
 
     pthread_mutex_unlock(&ctx->L_lock);
     if (serialize_drain) strat->S.unlock_exclusive();
