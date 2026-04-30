@@ -2829,8 +2829,25 @@ ideal bba (ideal F, ideal Q,intvec *w,bigintmat *hilb,kStrategy strat)
   #endif
 
 #ifdef HAVE_TAIL_RING
-  if(!idIs0(F) &&(!rField_is_Ring(currRing)))  // create strong gcd poly computes with tailring and S[i] ->to be fixed
-    kStratInitChangeTailRing(strat);
+  // Skip kStratInitChangeTailRing when going parallel.  It reduces
+  // strat->tailRing's bitmask (memory saving) but leaves tailRing
+  // != currRing, which breaks the invariant that redtailBba at
+  // kutil.cc:6977 relies on: `pNext(L->p) = pNext(p)` with p =
+  // L->t_p aliases L->p (currRing) and L->t_p (tailRing) tail
+  // chains — safe when currRing == tailRing (L->p IS L->t_p); a
+  // use-after-free when rings differ.  Serial path repairs this
+  // via the completeReduce retry at kstd2.cc:3153-3167; the
+  // parallel path's pre-expand at kthread.cc:2564-2569 only
+  // partially works.  Simplest fix: keep tailRing == currRing
+  // across parallel dispatch.  Parallel reducer pays memory to
+  // keep the invariant downstream code assumes.  Found via
+  // rr-replay hardware watchpoint, 20 Apr 2026.
+  {
+    int __st = get_singular_threads();
+    bool __will_go_parallel = (__st > 1) && (strat->red == redHoney);
+    if(!__will_go_parallel && !idIs0(F) &&(!rField_is_Ring(currRing)))  // create strong gcd poly computes with tailring and S[i] ->to be fixed
+      kStratInitChangeTailRing(strat);
+  }
 #endif
 
 #ifdef KDEBUG
