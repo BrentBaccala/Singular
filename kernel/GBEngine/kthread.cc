@@ -289,7 +289,8 @@ SweepContext *sweep_context_init(kStrategy strat, int nthreads)
   ctx->enterpairs_active.store(0, std::memory_order_relaxed);
   ctx->stat_max_queue_depth.store(0, std::memory_order_relaxed);
 
-  // Phase-1 enterpairs ordering barrier (SINGULAR_SERIALIZE_ENTERPAIRS).
+  // Phase-1 enterpairs ordering barrier (default on; opt out with
+  // SINGULAR_DISABLE_ENTERPAIRS_BARRIER=1 for ablation).
   // Sync the barrier counter to strat's current arrival_counter so the
   // first survivor to enter S in this dispatch passes immediately.
   pthread_cond_init(&ctx->enterpairs_order_cv, NULL);
@@ -297,7 +298,7 @@ SweepContext *sweep_context_init(kStrategy strat, int nthreads)
       strat->arrival_counter.load(std::memory_order_relaxed),
       std::memory_order_relaxed);
   ctx->serialize_enterpairs =
-      (getenv("SINGULAR_SERIALIZE_ENTERPAIRS") != NULL);
+      (getenv("SINGULAR_DISABLE_ENTERPAIRS_BARRIER") == NULL);
 
 #ifdef KTHREAD_INSTRUMENT
   ctx->stats_enabled = (getenv("SINGULAR_KTHREAD_STATS") != NULL);

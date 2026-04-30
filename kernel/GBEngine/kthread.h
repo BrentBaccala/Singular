@@ -360,8 +360,9 @@ struct SweepContext
   // Max survivor queue depth observed (for diagnostics).
   std::atomic<long> stat_max_queue_depth;
 
-  // Phase-1 enterpairs ordering (SINGULAR_SERIALIZE_ENTERPAIRS=1).
-  // Without this gate, two drain workers can reach phase 1 in arbitrary
+  // Phase-1 enterpairs ordering (default on; opt out with
+  // SINGULAR_DISABLE_ENTERPAIRS_BARRIER=1 for ablation).
+  // Without this barrier, two drain workers can reach phase 1 in arbitrary
   // L-lock-acquisition order rather than arrival_id order: a later h_j
   // may run its inline clearSbatch (tombstoning S entries) before an
   // earlier h_i's enterpairs has scanned S, so h_i misses pairs and
