@@ -1611,10 +1611,17 @@ void bba_parallel_loop(SweepContext *ctx)
       kt_L_lock(ctx, 0);
       bool L_empty = strat->L.empty();
       pthread_mutex_unlock(&ctx->L_lock);
-      if (queue_empty && L_empty)
+      // Worker drainers may be mid-flight between popping a survivor
+      // (queue becomes empty) and calling enterpairs (L gains new
+      // pairs).  Without checking enterpairs_active, main sees
+      // queue_empty && L_empty and breaks prematurely, losing the
+      // pairs the worker is about to add.  rr+gdb MCP, 20 Apr 2026.
+      int drainers_active = ctx->enterpairs_active.load(std::memory_order_acquire);
+      if (queue_empty && L_empty && drainers_active == 0)
         break;
-      // Else there is still work (drain produced survivors, or L has
-      // new entries) — loop back immediately.
+      // Else there is still work (drain produced survivors, L has
+      // new entries, or a worker drainer hasn't finished adding
+      // pairs) — loop back immediately.
       continue;
     }
 
