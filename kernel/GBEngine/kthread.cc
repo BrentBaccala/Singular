@@ -548,6 +548,16 @@ static void publish_slot_tiles_locked(SweepContext *ctx, int s)
   ActivePoly *ap = &ctx->active[s];
   int K = ctx->tiles_K;
 
+  // The closer-worker that last wrote ap->P / ap->not_sev finished its
+  // writes before storing ap->needs_republish=true (release) at
+  // close_slot's republish branch, or before storing ap->state=SLOT_EMPTY
+  // (release) at the survivor / zero branches.  refill_and_publish
+  // observes those release-stores via acquire-loads on needs_republish /
+  // state before calling here.  An explicit acquire fence here makes the
+  // cross-variable happens-before edge visible to TSan and to weakly-
+  // ordered architectures (no-op on x86 TSO).
+  std::atomic_thread_fence(std::memory_order_acquire);
+
   uint64_t new_gen = ap->gen.fetch_add(1, std::memory_order_relaxed) + 1;
   ap->needs_republish.store(false, std::memory_order_relaxed);
 

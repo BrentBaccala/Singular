@@ -72,7 +72,13 @@ class BlockArray {
   int num_blocks;       // current number of allocated blocks
   int dir_capacity;     // allocated directory slots
 protected:
-  int count;            // number of elements in use
+  // Atomic so parallel-bba readers (pop_and_prepare under L_lock,
+  // sweep workers without an S-lock) can load the size without
+  // racing the enterT writer (which holds S-exclusive).  release on
+  // setsize / acquire on size pairs with the existing tobject_publish
+  // release-store on the per-entry published flag, giving readers a
+  // stable size→entry-content ordering on weakly-ordered hardware.
+  std::atomic<int> count;
 public:
   BlockArray() : blocks(NULL), num_blocks(0), dir_capacity(0), count(0) {}
 
@@ -89,11 +95,11 @@ public:
   }
 
   // Number of elements in use
-  int size() const { return count; }
-  bool empty() const { return count == 0; }
+  int size() const { return count.load(std::memory_order_acquire); }
+  bool empty() const { return size() == 0; }
 
   // Set the count directly (for migration from external tl/sl counters)
-  void setsize(int n) { count = n; }
+  void setsize(int n) { count.store(n, std::memory_order_release); }
 
   // Ensure at least n elements are allocated (indices 0..n-1)
   void ensure_capacity(int n) {
@@ -122,27 +128,33 @@ public:
   int capacity() const { return num_blocks * BLOCK_SIZE; }
 
   // Insert val at position pos, shifting existing elements up.
-  // Automatically grows capacity and increments count.
+  // Automatically grows capacity and increments count.  Caller is
+  // expected to hold an exclusive lock on the array (BlockArray's
+  // own mutators are not safe against concurrent readers regardless
+  // of the count atomicity — the element-shift loop is non-atomic).
   void insert(int pos, const Elem& val) {
-    ensure_capacity(count + 1);
-    for (int i = count; i > pos; i--)
+    int c = count.load(std::memory_order_relaxed);
+    ensure_capacity(c + 1);
+    for (int i = c; i > pos; i--)
       (*this)[i] = (*this)[i-1];
     (*this)[pos] = val;
-    count++;
+    count.store(c + 1, std::memory_order_release);
   }
 
   // Append val at the end. Grows capacity and increments count.
   void push_back(const Elem& val) {
-    ensure_capacity(count + 1);
-    (*this)[count] = val;
-    count++;
+    int c = count.load(std::memory_order_relaxed);
+    ensure_capacity(c + 1);
+    (*this)[c] = val;
+    count.store(c + 1, std::memory_order_release);
   }
 
   // Erase element at position pos, shifting elements down. Decrements count.
   void erase(int pos) {
-    for (int i = pos; i < count - 1; i++)
+    int c = count.load(std::memory_order_relaxed);
+    for (int i = pos; i < c - 1; i++)
       (*this)[i] = (*this)[i+1];
-    count--;
+    count.store(c - 1, std::memory_order_release);
   }
 
   // Free all blocks and the directory, reset count
@@ -154,7 +166,7 @@ public:
     blocks = NULL;
     num_blocks = 0;
     dir_capacity = 0;
-    count = 0;
+    count.store(0, std::memory_order_relaxed);
   }
 };
 
@@ -391,7 +403,7 @@ public:
     // shared lock see a consistent value even while peer drainers
     // CAS-tombstone entries (task 506).
     void skip_deleted_forward() {
-      while (pos_ < set_->count && selement_deleted_load(set_->elem(pos_))) pos_++;
+      while (pos_ < set_->count.load(std::memory_order_relaxed) && selement_deleted_load(set_->elem(pos_))) pos_++;
     }
     void skip_deleted_backward() {
       while (pos_ > 0 && selement_deleted_load(set_->elem(pos_))) pos_--;
@@ -440,7 +452,7 @@ public:
     friend class sBasisSet;
 
     void skip_deleted_forward() {
-      while (pos_ < set_->count && selement_deleted_load(set_->elem(pos_))) pos_++;
+      while (pos_ < set_->count.load(std::memory_order_relaxed) && selement_deleted_load(set_->elem(pos_))) pos_++;
     }
 
     const_iterator(const sBasisSet* s, int pos) : set_(s), pos_(pos) { }
@@ -511,14 +523,14 @@ public:
     it.skip_deleted_forward();
     return it;
   }
-  iterator end() { return iterator(this, count); }
+  iterator end() { return iterator(this, count.load(std::memory_order_relaxed)); }
 
   const_iterator begin() const {
     const_iterator it(this, 0);
     it.skip_deleted_forward();
     return it;
   }
-  const_iterator end() const { return const_iterator(this, count); }
+  const_iterator end() const { return const_iterator(this, count.load(std::memory_order_relaxed)); }
 
   // cbegin/cend: explicit const_iterator access even when *this is non-const.
   // Useful for capturing a stable "end at snapshot time" iterator
@@ -528,7 +540,7 @@ public:
     it.skip_deleted_forward();
     return it;
   }
-  const_iterator cend() const { return const_iterator(this, count); }
+  const_iterator cend() const { return const_iterator(this, count.load(std::memory_order_relaxed)); }
 
   // --- Size ---
   int size() const { return live_count_; }
@@ -545,7 +557,7 @@ public:
   iterator push_back(const SElement& val) {
     BlockArray<SElement>::push_back(val);
     live_count_++;
-    return iterator(this, count - 1);
+    return iterator(this, count.load(std::memory_order_relaxed) - 1);
   }
 
   // --- Erase ---
@@ -600,7 +612,8 @@ public:
   // that concurrently read pairtest see atomically-cleared values; a stale
   // `true` read just means one extra (safe) chain-crit pass.
   void clear_pairtest() {
-    for (int i = 0; i < count; i++)
+    int n = count.load(std::memory_order_relaxed);
+    for (int i = 0; i < n; i++)
       selement_pairtest_clear(elem(i));
     __atomic_store_n(&pairtest_any_, false, __ATOMIC_RELAXED);
   }
@@ -620,15 +633,16 @@ public:
   // Also drops any tombstoned entries (whose p might still be non-NULL)
   // because after compact_null_p the intent is a packed live array.
   void compact_null_p() {
+    int n = count.load(std::memory_order_relaxed);
     int dst = 0;
-    for (int src = 0; src < count; src++) {
+    for (int src = 0; src < n; src++) {
       if (elem(src).p != NULL && !elem(src).deleted) {
         if (dst != src)
           elem(dst) = elem(src);
         dst++;
       }
     }
-    count = dst;
+    count.store(dst, std::memory_order_relaxed);
     live_count_ = dst;
     deleted_count_ = 0;
   }
@@ -644,19 +658,20 @@ public:
     compact_call_count_++;
     if (deleted_count_ > peak_deleted_count_)
       peak_deleted_count_ = deleted_count_;
-    if (deleted_count_ == 0 && live_count_ == count) {
+    int n = count.load(std::memory_order_relaxed);
+    if (deleted_count_ == 0 && live_count_ == n) {
       // Fast path: nothing to do.
       return;
     }
     int dst = 0;
-    for (int src = 0; src < count; src++) {
+    for (int src = 0; src < n; src++) {
       if (!elem(src).deleted) {
         if (dst != src)
           elem(dst) = elem(src);
         dst++;
       }
     }
-    count = dst;
+    count.store(dst, std::memory_order_relaxed);
     live_count_ = dst;
     deleted_count_ = 0;
   }
@@ -668,11 +683,11 @@ public:
   int peak_deleted_count() const { return peak_deleted_count_; }
   int erase_call_count() const { return erase_call_count_; }
   int compact_call_count() const { return compact_call_count_; }
-  int physical_count() const { return count; }
+  int physical_count() const { return count.load(std::memory_order_relaxed); }
   void debug_print_stats(const char *tag = NULL) const {
     fprintf(stderr,
             "sBasisSet[%s] live=%d physical=%d deleted=%d peak_deleted=%d erase_calls=%d compact_calls=%d\n",
-            tag ? tag : "", live_count_, count, deleted_count_,
+            tag ? tag : "", live_count_, count.load(std::memory_order_relaxed), deleted_count_,
             peak_deleted_count_, erase_call_count_, compact_call_count_);
   }
 
@@ -770,7 +785,7 @@ public:
     // Raw index of the element this reverse iterator points at.
     int index() const { iterator tmp = it_; --tmp; return tmp.index(); }
   };
-  reverse_iterator rbegin() { return reverse_iterator(iterator(this, count)); }
+  reverse_iterator rbegin() { return reverse_iterator(iterator(this, count.load(std::memory_order_relaxed))); }
   reverse_iterator rend()   { return reverse_iterator(iterator(this, 0)); }
 
   // Binary search for sorted insertion position (replaces free posInS).
