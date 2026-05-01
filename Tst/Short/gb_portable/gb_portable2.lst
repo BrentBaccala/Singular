@@ -1,0 +1,28 @@
+; gb_portable2.lst - Tests that check mathematical invariants only
+; (size, dim, reduce-to-zero, betti numbers, boolean checks)
+; Safe for testing non-deterministic GB implementations (multithreaded, etc.)
+;
+; Phase 1: modified from non-portable originals
+bug_orderM
+bug_qring
+bug_ring_quot
+bug_tr132
+bug_tr159
+bug_tr288
+bug_tr559
+bug_tr873
+bug_tr874
+hilb_weights
+intersect_q
+; Phase 2: converted from Tier 1 exact-output tests
+allres_s
+bug_24
+bug_29
+bug_division_2
+bug_qslimgb1
+bug_tr239
+bug_tr380
+divrem2
+finduni_s
+issue1285
+reduce_s
