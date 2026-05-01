@@ -53,6 +53,8 @@
 // #define ENTER_USE_MYMEMMOVE
 
 #include "kernel/GBEngine/kutil.h"
+#include "kernel/GBEngine/kthread.h"  // task 571: kt_my_thread_id, kt_now_ns
+#include <climits>
 #include "polys/kbuckets.h"
 #include "coeffs/numbers.h"
 #include "kernel/polys.h"
@@ -3423,6 +3425,19 @@ std::vector<LSet::iterator> kMergeBintoL_and_return_iterators(kStrategy strat)
 */
 void chainCritNormal (poly p,int ecart,kStrategy strat)
 {
+#ifdef KTHREAD_INSTRUMENT
+  // Task 571 parallel-bba-dump-on-demand: per-call timing.  We're
+  // running inside a drain worker's process_survivor_lobject phase 1
+  // (or, in a serial bba context, kt_my_thread_id == -1 and we skip).
+  // Sampling kt_now_ns() at entry/exit and bumping the owning
+  // thread's ThreadStats.  Cumulative chaincrit_total_ns ⊆
+  // ps_enterpairs_ns by construction (chainCritNormal is called from
+  // initenterpairs which is called from enterpairs).
+  long _cc_t0 = 0;
+  bool _cc_inst = (kt_current_ctx != NULL && kt_my_thread_id >= 0
+                   && kt_current_ctx->stats_enabled);
+  if (_cc_inst) _cc_t0 = kt_now_ns();
+#endif
   int j;
   unsigned long sev_p = p_GetShortExpVector(p, currRing);
 
@@ -3721,6 +3736,25 @@ void chainCritNormal (poly p,int ecart,kStrategy strat)
       }
     }
   }
+#ifdef KTHREAD_INSTRUMENT
+  if (_cc_inst)
+  {
+    long _cc_dt = kt_now_ns() - _cc_t0;
+    ThreadStats &ts = kt_current_ctx->tstats[kt_my_thread_id];
+    ts.chaincrit_count++;
+    ts.chaincrit_total_ns += _cc_dt;
+    if (_cc_dt > ts.chaincrit_max_ns) {
+      ts.chaincrit_max_ns = _cc_dt;
+      // arrival id of the survivor whose chainCritNormal we're inside —
+      // matches enterpairs_max_arrival's tagging convention.  Set to
+      // -1 if not in a phased-drain context (shouldn't happen since
+      // _cc_inst guards on kt_my_thread_id >= 0).
+      ts.chaincrit_max_arrival = (long)t_local_my_arrival;
+    }
+    if (_cc_dt < ts.chaincrit_min_ns)
+      ts.chaincrit_min_ns = _cc_dt;
+  }
+#endif
 }
 /*2
 *the pairset B of pairs of type (s[i],p) is complete now. It will be updated

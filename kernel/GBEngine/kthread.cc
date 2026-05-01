@@ -50,6 +50,7 @@
 #include <cstdlib>
 #include <cstdio>
 #include <cstring>
+#include <climits>
 
 /* ------------------------------------------------------------------ */
 /*  Instrumentation helpers (task 482)                                 */
@@ -59,6 +60,19 @@
 #  define KT_TS(ctx, tid)     ((ctx)->tstats[tid])
 #  define KT_TIME_START(var)  long var = kt_now_ns()
 #  define KT_TIME_DELTA(var)  (kt_now_ns() - (var))
+
+// Global ctx pointer for gdb-driven kt_dump_stats(kt_current_ctx)
+// (task 571 parallel-bba-dump-on-demand).  Set at bba_parallel_loop
+// entry, cleared at parallel_shutdown.  NULL when no parallel-bba run
+// is in flight.
+SweepContext *kt_current_ctx = NULL;
+
+// Thread-local thread_id so KTHREAD_INSTRUMENT-guarded sites in other
+// translation units (kutil.cc chainCritNormal) can find their
+// ThreadStats slot without plumbing a parameter through.  Set on
+// process_survivor_lobject entry and main's drain entry; -1 means
+// "outside the parallel phase, skip instrumentation".
+__thread int kt_my_thread_id = -1;
 
 // L-lock acquire helpers, split by call site (task 570 instrument-pie).
 // Two callers exist as of May 2026, audited via grep on
@@ -1120,6 +1134,11 @@ static void process_survivor_lobject(SweepContext *ctx, LObject *P, int thread_i
   (void)thread_id;
 
 #ifdef KTHREAD_INSTRUMENT
+  // Bind the thread-local thread_id so chainCritNormal (kutil.cc) can
+  // find its ThreadStats slot.  Restore at function exit so any
+  // surrounding code that bumped this is preserved.  See task 571.
+  int saved_kt_my_thread_id = kt_my_thread_id;
+  kt_my_thread_id = thread_id;
   long ps_t0 = KT_STATS(ctx) ? kt_now_ns() : 0;
   long redtail_accum = 0;
   long enterT_accum = 0;
@@ -1318,11 +1337,25 @@ static void process_survivor_lobject(SweepContext *ctx, LObject *P, int thread_i
     if (KT_STATS(ctx))
     {
       long now = kt_now_ns();
-      enterpairs_accum += now - ep0;
+      long ep_dt = now - ep0;
+      enterpairs_accum += ep_dt;
       phase1_work = now - p1_t0;
       // phase1_l_ns is now accumulated at the actual L-lock unlock site
       // below (option F of task 570 instrument-pie) using
       // p1_l_acquired_ns sampled right after kt_L_lock_phase2 returned.
+
+      // Per-call enterpairs distribution (task 571).  my_arrival
+      // captured under S-exclusive in phase 0 (line ~1207 above) is
+      // still in scope here — used as the "id of the slowest call"
+      // tag so we can locate it later if useful.
+      ThreadStats &ts = KT_TS(ctx, thread_id);
+      ts.enterpairs_count++;
+      if (ep_dt > ts.enterpairs_max_ns) {
+        ts.enterpairs_max_ns = ep_dt;
+        ts.enterpairs_max_arrival = (long)my_arrival;
+      }
+      if (ep_dt < ts.enterpairs_min_ns)
+        ts.enterpairs_min_ns = ep_dt;
     }
 #endif
 
@@ -1388,6 +1421,7 @@ static void process_survivor_lobject(SweepContext *ctx, LObject *P, int thread_i
     // unlock site (task 570 option F).  Strictly contains phase1_ns.
     ts.phase_survivors++;
   }
+  kt_my_thread_id = saved_kt_my_thread_id;
 #endif
 }
 
@@ -1512,6 +1546,15 @@ static void *worker_thread(void *arg)
   si_opt_1 = ctx->saved_si_opt_1;
   si_opt_2 = ctx->saved_si_opt_2;
 
+#ifdef KTHREAD_INSTRUMENT
+  // Bind thread-local thread_id for chainCritNormal instrumentation
+  // in kutil.cc (task 571).  Note: process_survivor_lobject also
+  // sets this — that path is taken from the survivor-drain which
+  // workers may execute (task 512 worker-side-drain), so the saved/
+  // restore there preserves this value.
+  kt_my_thread_id = thread_id;
+#endif
+
   // Wait for all threads to be created and main to be ready
   pthread_barrier_wait(&ctx->startup_barrier);
 
@@ -1529,6 +1572,242 @@ static void *worker_thread(void *arg)
 #endif
   return NULL;
 }
+
+/* ------------------------------------------------------------------ */
+/*  kt_dump_stats — extracted from end of bba_parallel_loop.            */
+/*                                                                     */
+/*  Task 571 parallel-bba-dump-on-demand: callable mid-run from gdb    */
+/*  via `call kt_dump_stats(kt_current_ctx)` so we can capture stats   */
+/*  on workloads where SIGINT-driven shutdown is unreachable (main    */
+/*  blocked in pthread_mutex_lock, etc).                               */
+/*                                                                     */
+/*  Behaviour is byte-identical to the previous in-line dump when      */
+/*  called from parallel_shutdown: — same fields in the same order,    */
+/*  same fprintf format strings.  When called mid-run, wall_ns         */
+/*  reflects "time when this dump was taken" (kt_now_ns() -            */
+/*  ctx->start_ns), not the eventual final wall.                      */
+/*                                                                     */
+/*  Safety: holds no locks, writes only to stderr / the optional CSV   */
+/*  file, reads atomic counters.  Per-thread fields are written by     */
+/*  exactly one thread each (the owning thread); a mid-run dump may   */
+/*  read fields concurrently with their owner's writes — those are    */
+/*  long-store races, fine for diagnostics (we may see a value         */
+/*  that's slightly stale or torn; never crash).                      */
+/* ------------------------------------------------------------------ */
+#ifdef KTHREAD_INSTRUMENT
+void kt_dump_stats(SweepContext *ctx)
+{
+  if (ctx == NULL) {
+    fprintf(stderr, "[kthread-stats] kt_dump_stats: ctx is NULL "
+                    "(no parallel-bba run in flight)\n");
+    fflush(stderr);
+    return;
+  }
+  if (!KT_STATS(ctx)) {
+    fprintf(stderr, "[kthread-stats] kt_dump_stats: stats_enabled is false "
+                    "(SINGULAR_KTHREAD_STATS unset)\n");
+    fflush(stderr);
+    return;
+  }
+
+  fflush(stdout);
+  long total_ns = kt_now_ns() - ctx->start_ns;
+  int tt = ctx->num_workers + 1;
+  fprintf(stderr, "\n============================================================\n");
+  fprintf(stderr, "[kthread-stats] tag=%s threads=%d workers=%d wall_ns=%ld (%.3fs)\n",
+          ctx->workload_tag, ctx->num_threads, ctx->num_workers,
+          total_ns, total_ns / 1e9);
+  fprintf(stderr, "[kthread-stats] reductions=%ld survivors=%ld rounds=%ld max_qd=%ld\n",
+          ctx->stat_reductions.load(), ctx->stat_survivors.load(),
+          ctx->stat_rounds.load(), ctx->stat_max_queue_depth.load());
+  // Per-thread bucket totals (task 570 instrument-pie reshaped this).
+  //   sweep_ns         : workers' tile_pull_loop wall (umbrella).
+  //   reduce_ns        : reduce_slot_from_sweep wall.
+  //   drain_ns         : drain_survivor_queue wall.
+  //   L_drain_wait_ns  : kt_L_lock_drain wait (post-survivor broadcast).
+  //   L_term_wait_ns   : kt_L_lock_term wait (main termination probe).
+  //   surv_q_wait_ns   : survivor_queue_mutex wait.
+  //   tile_idle_ns     : workers' pthread_cond_wait on tiles_avail_cv
+  //                      (closes the previously-unmeasured idle wedge).
+  fprintf(stderr, "[kthread-stats] %-4s %12s %12s %12s %12s %12s %12s %12s %12s %10s %10s %10s %10s\n",
+          "tid", "sweep_ns", "reduce_ns", "drain_ns",
+          "L_drain_wait", "L_term_wait", "L_refill_wait",
+          "surv_q_wait", "tile_idle_ns",
+          "sweeps", "reduces", "drains", "survivors");
+  for (int i = 0; i < tt; i++)
+  {
+    ThreadStats &ts = ctx->tstats[i];
+    fprintf(stderr, "[kthread-stats] %-4d %12ld %12ld %12ld %12ld %12ld %12ld %12ld %12ld %10ld %10ld %10ld %10ld\n",
+            i, ts.sweep_ns, ts.reduce_ns, ts.drain_ns,
+            ts.L_lock_drain_wait_ns, ts.L_lock_term_wait_ns,
+            ts.L_lock_refill_wait_ns,
+            ts.surv_q_wait_ns, ts.tile_idle_ns,
+            ts.sweep_count, ts.reduce_count, ts.drain_count,
+            ts.drain_survivors);
+  }
+
+  // Main-thread umbrella + sub-buckets (task 570 option C).
+  //   main_loop_ns     : umbrella (the whole bba_parallel_loop while(true)).
+  //   refill_ns        : refill_and_publish wall.
+  //   tile_help_ns     : tile_pull_loop(block=false) wall.
+  //   publish_wait_ns  : pthread_cond_timedwait on slot_freed_cv wall.
+  //   drain_ns         : (already shown above) drain_survivor_queue wall.
+  //   reduce_ns        : (already shown above) typically zero on main.
+  // Plus: L_term_wait_ns + L_drain_wait_ns from the per-thread block,
+  // and small loop overhead — sum should approximate main_loop_ns.
+  {
+    ThreadStats &ts0 = ctx->tstats[0];
+    fprintf(stderr, "[kthread-stats] main_pie: main_loop_ns=%ld refill_ns=%ld(n=%ld) "
+                    "tile_help_ns=%ld publish_wait_ns=%ld(n=%ld)\n",
+            ts0.main_loop_ns, ts0.refill_ns, ts0.refill_count,
+            ts0.tile_help_ns, ts0.publish_wait_ns, ts0.publish_wait_count);
+  }
+
+  // Per-thread process_survivor breakdown (task 570 option B).
+  // Previously only the run-total summary line existed; per-thread
+  // attribution needed scaling by drain-share.  Now both are emitted:
+  // per-thread first, then the run-total for back-compat with older
+  // analyze.py.
+  fprintf(stderr, "[kthread-stats] %-4s %14s %14s %14s %14s %14s %14s\n",
+          "tid", "ps_redtail", "ps_enterT", "ps_enterpairs",
+          "ps_enterS", "ps_other", "ps_total");
+  long tot_rt = 0, tot_et = 0, tot_ep = 0, tot_es = 0, tot_oth = 0, tot_drain = 0;
+  for (int i = 0; i < tt; i++)
+  {
+    ThreadStats &ts = ctx->tstats[i];
+    long ps_total =
+        ts.ps_redtail_ns + ts.ps_enterT_ns + ts.ps_enterpairs_ns +
+        ts.ps_enterS_ns + ts.ps_other_ns;
+    fprintf(stderr, "[kthread-stats] s%-3d %14ld %14ld %14ld %14ld %14ld %14ld\n",
+            i, ts.ps_redtail_ns, ts.ps_enterT_ns, ts.ps_enterpairs_ns,
+            ts.ps_enterS_ns, ts.ps_other_ns, ps_total);
+    tot_rt += ts.ps_redtail_ns;
+    tot_et += ts.ps_enterT_ns;
+    tot_ep += ts.ps_enterpairs_ns;
+    tot_es += ts.ps_enterS_ns;
+    tot_oth += ts.ps_other_ns;
+    tot_drain += ts.drain_ns;
+  }
+  fprintf(stderr, "[kthread-stats] process_survivor: redtail=%ld enterT=%ld enterpairs=%ld enterS=%ld other=%ld (sum_drain=%ld)\n",
+          tot_rt, tot_et, tot_ep, tot_es, tot_oth, tot_drain);
+  fprintf(stderr, "[kthread-stats] trylock: ");
+  for (int i = 0; i < tt; i++)
+    fprintf(stderr, "t%d=%ld/%ld ", i,
+            ctx->tstats[i].enterpairs_trylock_fail,
+            ctx->tstats[i].enterpairs_trylock_count);
+  fprintf(stderr, "\n");
+
+  // Phase breakdown (task 507 enterpairs-parallel-measure +
+  // task 508 enterpairs-parallel-phase1).  phase2_* renamed to
+  // phase1_l_* (L-lock wait/held during phase 1, not a separate
+  // phase).  ph1_cmax is the peak value of ctx->enterpairs_active
+  // sampled by this thread on phase-1 entry (how many drainers
+  // were concurrently in phase 1).
+  fprintf(stderr, "[kthread-stats] %-4s %14s %14s %14s %14s %14s %14s %10s %10s %10s %10s\n",
+          "tid", "phase0_wait", "phase0_ns", "phase1_wait", "phase1_ns",
+          "phase1_l_wait", "phase1_l_ns", "ph_surv", "ph_s_cas", "ph_l_cas",
+          "ph1_cmax");
+  for (int i = 0; i < tt; i++)
+  {
+    ThreadStats &ts = ctx->tstats[i];
+    fprintf(stderr, "[kthread-stats] p%-3d %14ld %14ld %14ld %14ld %14ld %14ld %10ld %10ld %10ld %10ld\n",
+            i, ts.phase0_wait_ns, ts.phase0_ns, ts.phase1_wait_ns, ts.phase1_ns,
+            ts.phase1_l_wait_ns, ts.phase1_l_ns, ts.phase_survivors,
+            ts.phase_s_cas_fail, ts.phase_l_cas_fail,
+            ts.phase1_concurrent_max);
+  }
+
+  // Worker-side drain participation (task 512 worker-side-drain).
+  //   drain_survivors : # of survivors this thread handled
+  //                     (was 0 for tid>0 before task 512; post-task,
+  //                     non-zero on workloads with survivor-queue
+  //                     backpressure).
+  //   idle_drain_ns / idle_drain_count : time & count of drain hops
+  //                     taken from the tile-idle branch of
+  //                     tile_pull_loop.
+  fprintf(stderr, "[kthread-stats] %-4s %14s %14s %14s\n",
+          "tid", "drain_survivors", "wrk_drain_ns", "wrk_drain_cnt");
+  for (int i = 0; i < tt; i++)
+  {
+    ThreadStats &ts = ctx->tstats[i];
+    fprintf(stderr, "[kthread-stats] d%-3d %14ld %14ld %14ld\n",
+            i, ts.drain_survivors,
+            ts.worker_drain_idle_ns,
+            ts.worker_drain_idle_count);
+  }
+
+  // Per-call enterpairs / chainCritNormal distribution (task 571
+  // parallel-bba-dump-on-demand).  Cumulative ps_enterpairs_ns lives
+  // in the s-block above; this block exposes count / min / max so
+  // single-call tail latency is visible.  *_min printed as 0 if no
+  // call has been made yet (initial sentinel value LONG_MAX).
+  fprintf(stderr, "[kthread-stats] %-4s %10s %14s %14s %14s %10s %14s %14s %14s %14s\n",
+          "tid", "ep_count", "ep_min", "ep_max", "ep_max@",
+          "cc_count", "cc_min", "cc_max", "cc_max@", "cc_total");
+  for (int i = 0; i < tt; i++)
+  {
+    ThreadStats &ts = ctx->tstats[i];
+    long ep_min = (ts.enterpairs_min_ns == LONG_MAX) ? 0 : ts.enterpairs_min_ns;
+    long cc_min = (ts.chaincrit_min_ns  == LONG_MAX) ? 0 : ts.chaincrit_min_ns;
+    fprintf(stderr, "[kthread-stats] e%-3d %10ld %14ld %14ld %14ld %10ld %14ld %14ld %14ld %14ld\n",
+            i, ts.enterpairs_count, ep_min, ts.enterpairs_max_ns,
+            ts.enterpairs_max_arrival,
+            ts.chaincrit_count, cc_min, ts.chaincrit_max_ns,
+            ts.chaincrit_max_arrival, ts.chaincrit_total_ns);
+  }
+
+  // L-set tombstone accumulation hypothesis (task 571 task-inbox):
+  // chainCritNormal's slowness is dominated by
+  // LSet::filtered_iterator::advance() linear-scanning sev_flat_ from
+  // 0 to flat_size, which includes tombstones.  LSet::compact() runs
+  // exactly once per GB run (at exitBuchMora), never during the loop.
+  // Per-call duration should scale with L_flat (not L_live).
+  //
+  // L_live  = strat->L.physical_size()   (multiset node count)
+  // L_flat  = strat->L.sev_flat_size()   (= sev_flat_.size(), the array
+  //                                        the iterator walks, parallel
+  //                                        to writable_set::flat_)
+  // tombstone_ratio = (L_flat - L_live) / L_flat.
+  {
+    long L_live = (long)ctx->strat->L.physical_size();
+    long L_flat = (long)ctx->strat->L.sev_flat_size();
+    double tombstone_ratio = (L_flat > 0)
+        ? (double)(L_flat - L_live) / (double)L_flat : 0.0;
+    fprintf(stderr,
+            "[kthread-stats] L_live=%ld L_flat=%ld tombstone_ratio=%.4f\n",
+            L_live, L_flat, tombstone_ratio);
+  }
+
+  // CSV output for per-round records
+  const char *csv_path = getenv("SINGULAR_KTHREAD_CSV");
+  if (csv_path != NULL)
+  {
+    FILE *f = fopen(csv_path, "w");
+    if (f != NULL)
+    {
+      fprintf(f, "round_id,ts_ns,qd_start,qd_end,active_slots,reductions,"
+                 "min_reduce_ns,max_reduce_ns,sum_reduce_ns,sweep_ns_main,round_total_ns\n");
+      for (auto &rr : *ctx->rounds)
+      {
+        fprintf(f, "%ld,%ld,%d,%d,%d,%d,%ld,%ld,%ld,%ld,%ld\n",
+                rr.round_id, rr.timestamp_ns, rr.queue_depth_start,
+                rr.queue_depth_end, rr.active_slots, rr.reductions,
+                rr.min_reduce_ns, rr.max_reduce_ns, rr.sum_reduce_ns,
+                rr.sweep_ns_main, rr.round_total_ns);
+      }
+      fclose(f);
+      fprintf(stderr, "[kthread-stats] wrote %zu round records to %s\n",
+              ctx->rounds->size(), csv_path);
+    }
+    else
+    {
+      fprintf(stderr, "[kthread-stats] could not open CSV file %s\n", csv_path);
+    }
+  }
+  fprintf(stderr, "============================================================\n\n");
+  fflush(stderr);
+}
+#endif
 
 /* ------------------------------------------------------------------ */
 /*  Main parallel loop                                                 */
@@ -1585,12 +1864,25 @@ void bba_parallel_loop(SweepContext *ctx)
   }
 
 #ifdef KTHREAD_INSTRUMENT
+  // Expose ctx for gdb-driven kt_dump_stats calls.  Set even when
+  // stats_enabled is false — kt_dump_stats itself is gated by
+  // KT_STATS(ctx), so a no-stats run still safely no-ops.
+  kt_current_ctx = ctx;
+  // Main thread runs as thread_id 0.
+  kt_my_thread_id = 0;
   if (KT_STATS(ctx))
   {
     ctx->start_ns = kt_now_ns();
     int tt = ctx->num_workers + 1;
     for (int i = 0; i < tt; i++)
+    {
       memset(&ctx->tstats[i], 0, sizeof(ThreadStats));
+      // Per-call min trackers (task 571): initial value is "no calls
+      // yet, treat as +inf"; the dump prints 0 if we exit before any
+      // value has overwritten this.
+      ctx->tstats[i].enterpairs_min_ns = LONG_MAX;
+      ctx->tstats[i].chaincrit_min_ns  = LONG_MAX;
+    }
     ctx->rounds->clear();
   }
 #endif
@@ -1868,162 +2160,16 @@ parallel_shutdown:
   }
 
 #ifdef KTHREAD_INSTRUMENT
-  if (KT_STATS(ctx))
-  {
-    fflush(stdout);
-    long total_ns = kt_now_ns() - ctx->start_ns;
-    int tt = ctx->num_workers + 1;
-    fprintf(stderr, "\n============================================================\n");
-    fprintf(stderr, "[kthread-stats] tag=%s threads=%d workers=%d wall_ns=%ld (%.3fs)\n",
-            ctx->workload_tag, ctx->num_threads, ctx->num_workers,
-            total_ns, total_ns / 1e9);
-    fprintf(stderr, "[kthread-stats] reductions=%ld survivors=%ld rounds=%ld max_qd=%ld\n",
-            ctx->stat_reductions.load(), ctx->stat_survivors.load(),
-            ctx->stat_rounds.load(), ctx->stat_max_queue_depth.load());
-    // Per-thread bucket totals (task 570 instrument-pie reshaped this).
-    //   sweep_ns         : workers' tile_pull_loop wall (umbrella).
-    //   reduce_ns        : reduce_slot_from_sweep wall.
-    //   drain_ns         : drain_survivor_queue wall.
-    //   L_drain_wait_ns  : kt_L_lock_drain wait (post-survivor broadcast).
-    //   L_term_wait_ns   : kt_L_lock_term wait (main termination probe).
-    //   surv_q_wait_ns   : survivor_queue_mutex wait.
-    //   tile_idle_ns     : workers' pthread_cond_wait on tiles_avail_cv
-    //                      (closes the previously-unmeasured idle wedge).
-    fprintf(stderr, "[kthread-stats] %-4s %12s %12s %12s %12s %12s %12s %12s %12s %10s %10s %10s %10s\n",
-            "tid", "sweep_ns", "reduce_ns", "drain_ns",
-            "L_drain_wait", "L_term_wait", "L_refill_wait",
-            "surv_q_wait", "tile_idle_ns",
-            "sweeps", "reduces", "drains", "survivors");
-    for (int i = 0; i < tt; i++)
-    {
-      ThreadStats &ts = ctx->tstats[i];
-      fprintf(stderr, "[kthread-stats] %-4d %12ld %12ld %12ld %12ld %12ld %12ld %12ld %12ld %10ld %10ld %10ld %10ld\n",
-              i, ts.sweep_ns, ts.reduce_ns, ts.drain_ns,
-              ts.L_lock_drain_wait_ns, ts.L_lock_term_wait_ns,
-              ts.L_lock_refill_wait_ns,
-              ts.surv_q_wait_ns, ts.tile_idle_ns,
-              ts.sweep_count, ts.reduce_count, ts.drain_count,
-              ts.drain_survivors);
-    }
-
-    // Main-thread umbrella + sub-buckets (task 570 option C).
-    //   main_loop_ns     : umbrella (the whole bba_parallel_loop while(true)).
-    //   refill_ns        : refill_and_publish wall.
-    //   tile_help_ns     : tile_pull_loop(block=false) wall.
-    //   publish_wait_ns  : pthread_cond_timedwait on slot_freed_cv wall.
-    //   drain_ns         : (already shown above) drain_survivor_queue wall.
-    //   reduce_ns        : (already shown above) typically zero on main.
-    // Plus: L_term_wait_ns + L_drain_wait_ns from the per-thread block,
-    // and small loop overhead — sum should approximate main_loop_ns.
-    {
-      ThreadStats &ts0 = ctx->tstats[0];
-      fprintf(stderr, "[kthread-stats] main_pie: main_loop_ns=%ld refill_ns=%ld(n=%ld) "
-                      "tile_help_ns=%ld publish_wait_ns=%ld(n=%ld)\n",
-              ts0.main_loop_ns, ts0.refill_ns, ts0.refill_count,
-              ts0.tile_help_ns, ts0.publish_wait_ns, ts0.publish_wait_count);
-    }
-
-    // Per-thread process_survivor breakdown (task 570 option B).
-    // Previously only the run-total summary line existed; per-thread
-    // attribution needed scaling by drain-share.  Now both are emitted:
-    // per-thread first, then the run-total for back-compat with older
-    // analyze.py.
-    fprintf(stderr, "[kthread-stats] %-4s %14s %14s %14s %14s %14s %14s\n",
-            "tid", "ps_redtail", "ps_enterT", "ps_enterpairs",
-            "ps_enterS", "ps_other", "ps_total");
-    long tot_rt = 0, tot_et = 0, tot_ep = 0, tot_es = 0, tot_oth = 0, tot_drain = 0;
-    for (int i = 0; i < tt; i++)
-    {
-      ThreadStats &ts = ctx->tstats[i];
-      long ps_total =
-          ts.ps_redtail_ns + ts.ps_enterT_ns + ts.ps_enterpairs_ns +
-          ts.ps_enterS_ns + ts.ps_other_ns;
-      fprintf(stderr, "[kthread-stats] s%-3d %14ld %14ld %14ld %14ld %14ld %14ld\n",
-              i, ts.ps_redtail_ns, ts.ps_enterT_ns, ts.ps_enterpairs_ns,
-              ts.ps_enterS_ns, ts.ps_other_ns, ps_total);
-      tot_rt += ts.ps_redtail_ns;
-      tot_et += ts.ps_enterT_ns;
-      tot_ep += ts.ps_enterpairs_ns;
-      tot_es += ts.ps_enterS_ns;
-      tot_oth += ts.ps_other_ns;
-      tot_drain += ts.drain_ns;
-    }
-    fprintf(stderr, "[kthread-stats] process_survivor: redtail=%ld enterT=%ld enterpairs=%ld enterS=%ld other=%ld (sum_drain=%ld)\n",
-            tot_rt, tot_et, tot_ep, tot_es, tot_oth, tot_drain);
-    fprintf(stderr, "[kthread-stats] trylock: ");
-    for (int i = 0; i < tt; i++)
-      fprintf(stderr, "t%d=%ld/%ld ", i,
-              ctx->tstats[i].enterpairs_trylock_fail,
-              ctx->tstats[i].enterpairs_trylock_count);
-    fprintf(stderr, "\n");
-
-    // Phase breakdown (task 507 enterpairs-parallel-measure +
-    // task 508 enterpairs-parallel-phase1).  phase2_* renamed to
-    // phase1_l_* (L-lock wait/held during phase 1, not a separate
-    // phase).  ph1_cmax is the peak value of ctx->enterpairs_active
-    // sampled by this thread on phase-1 entry (how many drainers
-    // were concurrently in phase 1).
-    fprintf(stderr, "[kthread-stats] %-4s %14s %14s %14s %14s %14s %14s %10s %10s %10s %10s\n",
-            "tid", "phase0_wait", "phase0_ns", "phase1_wait", "phase1_ns",
-            "phase1_l_wait", "phase1_l_ns", "ph_surv", "ph_s_cas", "ph_l_cas",
-            "ph1_cmax");
-    for (int i = 0; i < tt; i++)
-    {
-      ThreadStats &ts = ctx->tstats[i];
-      fprintf(stderr, "[kthread-stats] p%-3d %14ld %14ld %14ld %14ld %14ld %14ld %10ld %10ld %10ld %10ld\n",
-              i, ts.phase0_wait_ns, ts.phase0_ns, ts.phase1_wait_ns, ts.phase1_ns,
-              ts.phase1_l_wait_ns, ts.phase1_l_ns, ts.phase_survivors,
-              ts.phase_s_cas_fail, ts.phase_l_cas_fail,
-              ts.phase1_concurrent_max);
-    }
-
-    // Worker-side drain participation (task 512 worker-side-drain).
-    //   drain_survivors : # of survivors this thread handled
-    //                     (was 0 for tid>0 before task 512; post-task,
-    //                     non-zero on workloads with survivor-queue
-    //                     backpressure).
-    //   idle_drain_ns / idle_drain_count : time & count of drain hops
-    //                     taken from the tile-idle branch of
-    //                     tile_pull_loop.
-    fprintf(stderr, "[kthread-stats] %-4s %14s %14s %14s\n",
-            "tid", "drain_survivors", "wrk_drain_ns", "wrk_drain_cnt");
-    for (int i = 0; i < tt; i++)
-    {
-      ThreadStats &ts = ctx->tstats[i];
-      fprintf(stderr, "[kthread-stats] d%-3d %14ld %14ld %14ld\n",
-              i, ts.drain_survivors,
-              ts.worker_drain_idle_ns,
-              ts.worker_drain_idle_count);
-    }
-
-    // CSV output for per-round records
-    const char *csv_path = getenv("SINGULAR_KTHREAD_CSV");
-    if (csv_path != NULL)
-    {
-      FILE *f = fopen(csv_path, "w");
-      if (f != NULL)
-      {
-        fprintf(f, "round_id,ts_ns,qd_start,qd_end,active_slots,reductions,"
-                   "min_reduce_ns,max_reduce_ns,sum_reduce_ns,sweep_ns_main,round_total_ns\n");
-        for (auto &rr : *ctx->rounds)
-        {
-          fprintf(f, "%ld,%ld,%d,%d,%d,%d,%ld,%ld,%ld,%ld,%ld\n",
-                  rr.round_id, rr.timestamp_ns, rr.queue_depth_start,
-                  rr.queue_depth_end, rr.active_slots, rr.reductions,
-                  rr.min_reduce_ns, rr.max_reduce_ns, rr.sum_reduce_ns,
-                  rr.sweep_ns_main, rr.round_total_ns);
-        }
-        fclose(f);
-        fprintf(stderr, "[kthread-stats] wrote %zu round records to %s\n",
-                ctx->rounds->size(), csv_path);
-      }
-      else
-      {
-        fprintf(stderr, "[kthread-stats] could not open CSV file %s\n", csv_path);
-      }
-    }
-    fprintf(stderr, "============================================================\n\n");
-    fflush(stderr);
-  }
+  // Only emit the dump if stats are enabled — kt_dump_stats's own
+  // "stats_enabled is false" early-return is a diagnostic for gdb
+  // callers (who explicitly asked for the dump and expect feedback);
+  // we don't want it cluttering normal runs' stderr (which would
+  // also break the regress.cmd diff tests).
+  if (KT_STATS(ctx)) kt_dump_stats(ctx);
+  // Clear globals so a re-entry of bba_parallel_loop starts fresh
+  // and a stray gdb call to kt_dump_stats(kt_current_ctx) after the
+  // run finishes is a no-op (NULL deref would be an obvious bug).
+  kt_current_ctx = NULL;
+  kt_my_thread_id = -1;
 #endif
 }

@@ -88,6 +88,26 @@ struct ThreadStats
   long ps_enterS_ns;        // ns inside strat->enterS
   long ps_other_ns;         // remainder of process_survivor
 
+  // Per-call enterpairs / chainCritNormal max/min/count tracking
+  // (task 571 parallel-bba-dump-on-demand).  Existing ps_enterpairs_ns
+  // gives cumulative time; these expose the distribution so we can
+  // see single-call tail latency.  Min initialised to LONG_MAX (no
+  // calls yet) — the dump prints 0/"—" in that case.
+  long enterpairs_count;        // number of enterpairs() calls
+  long enterpairs_max_ns;       // max single-call duration
+  long enterpairs_min_ns;       // min single-call duration
+  long enterpairs_max_arrival;  // arrival_id of the slowest call
+
+  // chainCritNormal lives inside enterpairs (called via initenterpairs);
+  // chaincrit_total_ns ⊆ ps_enterpairs_ns, so
+  // enterpairs_other = ps_enterpairs_ns - chaincrit_total_ns shows how
+  // much of enterpairs is NOT chainCritNormal.
+  long chaincrit_count;
+  long chaincrit_total_ns;       // cumulative ns inside chainCritNormal
+  long chaincrit_max_ns;
+  long chaincrit_min_ns;          // init to LONG_MAX
+  long chaincrit_max_arrival;
+
   // Phase-split instrumentation (task 506 enterpairs-parallel /
   // task 508 enterpairs-parallel-phase1).
   //   phase0: S-exclusive for setup + enterT + enterS
@@ -425,5 +445,36 @@ int get_singular_threads();
 SweepContext *sweep_context_init(kStrategy strat, int nthreads);
 void sweep_context_destroy(SweepContext *ctx);
 void bba_parallel_loop(SweepContext *ctx);
+
+#ifdef KTHREAD_INSTRUMENT
+/**
+ * Emit a kthread-stats dump for `ctx` on stderr.  Extracted from the
+ * end of bba_parallel_loop (task 571 parallel-bba-dump-on-demand) so
+ * it can be called mid-run from gdb when SIGINT-driven shutdown is
+ * unreachable (e.g., main blocked in pthread_mutex_lock for L_lock).
+ *
+ *   (gdb) call kt_dump_stats(kt_current_ctx)
+ *
+ * `kt_current_ctx` (defined in kthread.cc) is set at bba_parallel_loop
+ * entry and cleared at parallel_shutdown, so a gdb call needs no
+ * stack walking to find the context pointer.
+ *
+ * The dump's wall_ns field reflects "time when this dump was taken"
+ * (= kt_now_ns() - ctx->start_ns), so multiple mid-run dumps show the
+ * elapsed time at each capture point.  The function holds no locks
+ * and writes only to stderr; safe to call at any moment.
+ */
+void kt_dump_stats(SweepContext *ctx);
+
+/**
+ * Per-thread thread_id bound at process_survivor_lobject entry so
+ * KTHREAD_INSTRUMENT-guarded code in chainCritNormal (kutil.cc) can
+ * find its ThreadStats slot without an extra parameter.  -1 means
+ * "no thread context" (skip instrumentation).
+ */
+extern __thread int kt_my_thread_id;
+
+extern SweepContext *kt_current_ctx;
+#endif
 
 #endif /* KTHREAD_H */
