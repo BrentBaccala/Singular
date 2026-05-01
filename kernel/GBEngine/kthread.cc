@@ -60,7 +60,15 @@
 #  define KT_TIME_START(var)  long var = kt_now_ns()
 #  define KT_TIME_DELTA(var)  (kt_now_ns() - (var))
 
-static inline void kt_L_lock(SweepContext *ctx, int thread_id)
+// L-lock acquire helpers, split by call site (task 570 instrument-pie).
+// Two callers exist as of May 2026, audited via grep on
+// pthread_mutex_lock(&ctx->L_lock):
+//   - drain_survivor_queue (post-survivor broadcast, kthread.cc ~1393)
+//   - bba_parallel_loop termination probe (kthread.cc ~1655)
+// Each accumulates its wait into a distinct bucket so main's
+// L_lock_wait can be split between drain-side and termination-poll
+// sites in the per-thread pie.
+static inline void kt_L_lock_drain(SweepContext *ctx, int thread_id)
 {
   if (KT_STATS(ctx))
   {
@@ -68,8 +76,42 @@ static inline void kt_L_lock(SweepContext *ctx, int thread_id)
     pthread_mutex_lock(&ctx->L_lock);
     long dt = kt_now_ns() - t0;
     ThreadStats &ts = KT_TS(ctx, thread_id);
-    ts.L_lock_wait_ns += dt;
-    ts.L_lock_count++;
+    ts.L_lock_drain_wait_ns += dt;
+    ts.L_lock_drain_count++;
+  }
+  else
+  {
+    pthread_mutex_lock(&ctx->L_lock);
+  }
+}
+
+static inline void kt_L_lock_term(SweepContext *ctx, int thread_id)
+{
+  if (KT_STATS(ctx))
+  {
+    long t0 = kt_now_ns();
+    pthread_mutex_lock(&ctx->L_lock);
+    long dt = kt_now_ns() - t0;
+    ThreadStats &ts = KT_TS(ctx, thread_id);
+    ts.L_lock_term_wait_ns += dt;
+    ts.L_lock_term_count++;
+  }
+  else
+  {
+    pthread_mutex_lock(&ctx->L_lock);
+  }
+}
+
+static inline void kt_L_lock_refill(SweepContext *ctx, int thread_id)
+{
+  if (KT_STATS(ctx))
+  {
+    long t0 = kt_now_ns();
+    pthread_mutex_lock(&ctx->L_lock);
+    long dt = kt_now_ns() - t0;
+    ThreadStats &ts = KT_TS(ctx, thread_id);
+    ts.L_lock_refill_wait_ns += dt;
+    ts.L_lock_refill_count++;
   }
   else
   {
@@ -161,7 +203,9 @@ static inline void kt_L_lock_phase2(SweepContext *ctx, int thread_id)
 #  define KT_STATS(ctx)       (false)
 #  define KT_TIME_START(var)  ((void)0)
 #  define KT_TIME_DELTA(var)  (0L)
-static inline void kt_L_lock(SweepContext *ctx, int /*tid*/) { pthread_mutex_lock(&ctx->L_lock); }
+static inline void kt_L_lock_drain(SweepContext *ctx, int /*tid*/) { pthread_mutex_lock(&ctx->L_lock); }
+static inline void kt_L_lock_term(SweepContext *ctx, int /*tid*/) { pthread_mutex_lock(&ctx->L_lock); }
+static inline void kt_L_lock_refill(SweepContext *ctx, int /*tid*/) { pthread_mutex_lock(&ctx->L_lock); }
 static inline void kt_surv_q_lock(SweepContext *ctx, int /*tid*/) { pthread_mutex_lock(&ctx->survivor_queue_mutex); }
 static inline void kt_record_reduce(SweepContext*, int, long, long) {}
 static inline void kt_S_lock_exclusive(SweepContext *ctx, int /*tid*/) { ctx->strat->S.lock_exclusive(); }
@@ -789,7 +833,20 @@ static void tile_pull_loop(SweepContext *ctx, int thread_id, bool block)
       uint64_t cur2 = ctx->tile_cursor.load(std::memory_order_acquire);
       bool done = ctx->done.load(std::memory_order_acquire);
       if (cur2 >= end2 && !done)
+      {
+#ifdef KTHREAD_INSTRUMENT
+        long ti_t0 = KT_STATS(ctx) ? kt_now_ns() : 0;
+#endif
         pthread_cond_wait(&ctx->tiles_avail_cv, &ctx->publish_lock);
+#ifdef KTHREAD_INSTRUMENT
+        if (KT_STATS(ctx))
+        {
+          ThreadStats &ts = KT_TS(ctx, thread_id);
+          ts.tile_idle_ns += kt_now_ns() - ti_t0;
+          ts.tile_idle_count++;
+        }
+#endif
+      }
       pthread_mutex_unlock(&ctx->publish_lock);
       continue;
     }
@@ -968,7 +1025,7 @@ static int refill_and_publish(SweepContext *ctx)
       ctx->strat->S.unlock_shared();
 
       // Try to fill from L.
-      kt_L_lock(ctx, 0);
+      kt_L_lock_refill(ctx, 0);
       BOOLEAN got = pop_and_prepare(ctx, ap, sl_snapshot);
       pthread_mutex_unlock(&ctx->L_lock);
       if (got)
@@ -1199,6 +1256,15 @@ static void process_survivor_lobject(SweepContext *ctx, LObject *P, int thread_i
     kt_S_lock_shared(ctx, thread_id);
     kt_L_lock_phase2(ctx, thread_id);
 
+#ifdef KTHREAD_INSTRUMENT
+    // Task 570 instrument-pie option F: sample timestamp at L-lock
+    // acquisition (the point kt_L_lock_phase2 returned) so phase1_l_ns
+    // measures genuine L-hold time, not phase-1 work time.  Previously
+    // p1_l_t0 was initialised to p1_t0 below, making phase1_l_ns
+    // algebraically equal to phase1_ns — useless.
+    long p1_l_acquired_ns = KT_STATS(ctx) ? kt_now_ns() : 0;
+#endif
+
     // Phase-1 enterpairs ordering barrier.  Block until predecessors
     // (arrival_id < my_arrival) have completed their enterpairs,
     // restoring the serial-equivalent invariant: enterpairs(h_i) sees
@@ -1215,7 +1281,6 @@ static void process_survivor_lobject(SweepContext *ctx, LObject *P, int thread_i
 
 #ifdef KTHREAD_INSTRUMENT
     long p1_t0 = KT_STATS(ctx) ? kt_now_ns() : 0;
-    long p1_l_t0 = p1_t0;  // L-lock held from here until unlock below
     long ep0 = KT_STATS(ctx) ? kt_now_ns() : 0;
     // Sample how many drainers are concurrently in phase 1 right now.
     // enterpairs_active counts drain_survivor_queue callers; this is an
@@ -1255,9 +1320,9 @@ static void process_survivor_lobject(SweepContext *ctx, LObject *P, int thread_i
       long now = kt_now_ns();
       enterpairs_accum += now - ep0;
       phase1_work = now - p1_t0;
-      long p1_l_dt = now - p1_l_t0;
-      ThreadStats &ts = KT_TS(ctx, thread_id);
-      ts.phase1_l_ns += p1_l_dt;
+      // phase1_l_ns is now accumulated at the actual L-lock unlock site
+      // below (option F of task 570 instrument-pie) using
+      // p1_l_acquired_ns sampled right after kt_L_lock_phase2 returned.
     }
 #endif
 
@@ -1279,6 +1344,17 @@ static void process_survivor_lobject(SweepContext *ctx, LObject *P, int thread_i
       pthread_cond_broadcast(&ctx->enterpairs_order_cv);
     }
 
+#ifdef KTHREAD_INSTRUMENT
+    if (KT_STATS(ctx))
+    {
+      // Sample L-hold delta just before the unlock — covers the entire
+      // span L-lock-acquired → L-lock-released, including the cond_wait
+      // on enterpairs_order_cv (which atomically released L during the
+      // wait, but resumed with L held).  See task 570 option F.
+      KT_TS(ctx, thread_id).phase1_l_ns +=
+          kt_now_ns() - p1_l_acquired_ns;
+    }
+#endif
     pthread_mutex_unlock(&ctx->L_lock);
     strat->S.unlock_shared();
   }
@@ -1308,9 +1384,8 @@ static void process_survivor_lobject(SweepContext *ctx, LObject *P, int thread_i
 
     ts.phase0_ns += phase0_work;
     ts.phase1_ns += phase1_work;
-    // phase1_l_ns: time with L-lock held during phase 1 (formerly
-    // "phase2").  Accumulated via the lambda below — see the
-    // in-phase-1 block above.
+    // phase1_l_ns is accumulated inside the phase-1 block at the L-lock
+    // unlock site (task 570 option F).  Strictly contains phase1_ns.
     ts.phase_survivors++;
   }
 #endif
@@ -1390,7 +1465,7 @@ static void drain_survivor_queue(SweepContext *ctx, int thread_id)
 #endif
 
     // Wake anyone blocked waiting for L to refill.
-    kt_L_lock(ctx, thread_id);
+    kt_L_lock_drain(ctx, thread_id);
     pthread_cond_broadcast(&ctx->pairs_available);
     pthread_mutex_unlock(&ctx->L_lock);
   }
@@ -1606,6 +1681,13 @@ void bba_parallel_loop(SweepContext *ctx)
   bool clear_L_after_join = false;
   bool clear_slots_after_join = false;
 
+#ifdef KTHREAD_INSTRUMENT
+  // main_loop umbrella — bracket the whole while(true) so the per-thread
+  // pie for tid 0 has a closed total to attribute against (task 570
+  // option C).
+  long main_loop_t0 = KT_STATS(ctx) ? kt_now_ns() : 0;
+#endif
+
   while (true)
   {
     if (siCntrlc)
@@ -1642,7 +1724,18 @@ void bba_parallel_loop(SweepContext *ctx)
     }
 
     // Step 2: refill empty slots and republish any slot needing another pass.
+#ifdef KTHREAD_INSTRUMENT
+    long refill_t0 = KT_STATS(ctx) ? kt_now_ns() : 0;
+#endif
     int in_pipeline = refill_and_publish(ctx);
+#ifdef KTHREAD_INSTRUMENT
+    if (KT_STATS(ctx))
+    {
+      ThreadStats &ts = KT_TS(ctx, 0);
+      ts.refill_ns += kt_now_ns() - refill_t0;
+      ts.refill_count++;
+    }
+#endif
 
     // Step 3: termination check.
     if (in_pipeline == 0)
@@ -1652,7 +1745,7 @@ void bba_parallel_loop(SweepContext *ctx)
       pthread_mutex_unlock(&ctx->survivor_queue_mutex);
       // Task 512 worker-side-drain: L.empty() must be read under L_lock
       // to avoid racing with worker drainers' chainCritNormal pushes.
-      kt_L_lock(ctx, 0);
+      kt_L_lock_term(ctx, 0);
       bool L_empty = strat->L.empty();
       pthread_mutex_unlock(&ctx->L_lock);
       // Worker drainers may be mid-flight between popping a survivor
@@ -1672,7 +1765,14 @@ void bba_parallel_loop(SweepContext *ctx)
     // Step 4: help sweep with tiles while waiting. Non-blocking: main
     // returns as soon as the tile cursor catches up with tile_end so
     // it can go back to refilling/draining.
+#ifdef KTHREAD_INSTRUMENT
+    long th_t0 = KT_STATS(ctx) ? kt_now_ns() : 0;
+#endif
     tile_pull_loop(ctx, 0, /*block=*/false);
+#ifdef KTHREAD_INSTRUMENT
+    if (KT_STATS(ctx))
+      KT_TS(ctx, 0).tile_help_ns += kt_now_ns() - th_t0;
+#endif
 
     // Step 5: wait for a slot-freed event or new tiles available.
     // We use a short timed wait so we don't rely solely on signals —
@@ -1698,12 +1798,27 @@ void bba_parallel_loop(SweepContext *ctx)
       // 1 ms timeout.
       ts.tv_nsec += 1000000;
       if (ts.tv_nsec >= 1000000000) { ts.tv_sec++; ts.tv_nsec -= 1000000000; }
+#ifdef KTHREAD_INSTRUMENT
+      long pw_t0 = KT_STATS(ctx) ? kt_now_ns() : 0;
+#endif
       pthread_cond_timedwait(&ctx->slot_freed_cv, &ctx->publish_lock, &ts);
+#ifdef KTHREAD_INSTRUMENT
+      if (KT_STATS(ctx))
+      {
+        ThreadStats &mts = KT_TS(ctx, 0);
+        mts.publish_wait_ns += kt_now_ns() - pw_t0;
+        mts.publish_wait_count++;
+      }
+#endif
     }
     pthread_mutex_unlock(&ctx->publish_lock);
   }
 
 parallel_shutdown:
+#ifdef KTHREAD_INSTRUMENT
+  if (KT_STATS(ctx))
+    KT_TS(ctx, 0).main_loop_ns += kt_now_ns() - main_loop_t0;
+#endif
   // Signal done and wake all workers so they exit their tile_pull_loop.
   ctx->done.store(true, std::memory_order_release);
   pthread_mutex_lock(&ctx->publish_lock);
@@ -1765,23 +1880,67 @@ parallel_shutdown:
     fprintf(stderr, "[kthread-stats] reductions=%ld survivors=%ld rounds=%ld max_qd=%ld\n",
             ctx->stat_reductions.load(), ctx->stat_survivors.load(),
             ctx->stat_rounds.load(), ctx->stat_max_queue_depth.load());
-    fprintf(stderr, "[kthread-stats] %-4s %12s %12s %12s %12s %12s %12s %12s %12s %12s %12s\n",
-            "tid", "sweep_ns", "reduce_ns", "drain_ns", "B0_wait_ns", "B1_wait_ns",
-            "L_wait_ns", "sweeps", "reduces", "drains", "survivors");
+    // Per-thread bucket totals (task 570 instrument-pie reshaped this).
+    //   sweep_ns         : workers' tile_pull_loop wall (umbrella).
+    //   reduce_ns        : reduce_slot_from_sweep wall.
+    //   drain_ns         : drain_survivor_queue wall.
+    //   L_drain_wait_ns  : kt_L_lock_drain wait (post-survivor broadcast).
+    //   L_term_wait_ns   : kt_L_lock_term wait (main termination probe).
+    //   surv_q_wait_ns   : survivor_queue_mutex wait.
+    //   tile_idle_ns     : workers' pthread_cond_wait on tiles_avail_cv
+    //                      (closes the previously-unmeasured idle wedge).
+    fprintf(stderr, "[kthread-stats] %-4s %12s %12s %12s %12s %12s %12s %12s %12s %10s %10s %10s %10s\n",
+            "tid", "sweep_ns", "reduce_ns", "drain_ns",
+            "L_drain_wait", "L_term_wait", "L_refill_wait",
+            "surv_q_wait", "tile_idle_ns",
+            "sweeps", "reduces", "drains", "survivors");
     for (int i = 0; i < tt; i++)
     {
       ThreadStats &ts = ctx->tstats[i];
-      fprintf(stderr, "[kthread-stats] %-4d %12ld %12ld %12ld %12ld %12ld %12ld %12ld %12ld %12ld %12ld\n",
+      fprintf(stderr, "[kthread-stats] %-4d %12ld %12ld %12ld %12ld %12ld %12ld %12ld %12ld %10ld %10ld %10ld %10ld\n",
               i, ts.sweep_ns, ts.reduce_ns, ts.drain_ns,
-              ts.wait_B0_ns, ts.wait_B1_ns, ts.L_lock_wait_ns,
+              ts.L_lock_drain_wait_ns, ts.L_lock_term_wait_ns,
+              ts.L_lock_refill_wait_ns,
+              ts.surv_q_wait_ns, ts.tile_idle_ns,
               ts.sweep_count, ts.reduce_count, ts.drain_count,
               ts.drain_survivors);
     }
-    // process_survivor breakdown (main + drain workers)
+
+    // Main-thread umbrella + sub-buckets (task 570 option C).
+    //   main_loop_ns     : umbrella (the whole bba_parallel_loop while(true)).
+    //   refill_ns        : refill_and_publish wall.
+    //   tile_help_ns     : tile_pull_loop(block=false) wall.
+    //   publish_wait_ns  : pthread_cond_timedwait on slot_freed_cv wall.
+    //   drain_ns         : (already shown above) drain_survivor_queue wall.
+    //   reduce_ns        : (already shown above) typically zero on main.
+    // Plus: L_term_wait_ns + L_drain_wait_ns from the per-thread block,
+    // and small loop overhead — sum should approximate main_loop_ns.
+    {
+      ThreadStats &ts0 = ctx->tstats[0];
+      fprintf(stderr, "[kthread-stats] main_pie: main_loop_ns=%ld refill_ns=%ld(n=%ld) "
+                      "tile_help_ns=%ld publish_wait_ns=%ld(n=%ld)\n",
+              ts0.main_loop_ns, ts0.refill_ns, ts0.refill_count,
+              ts0.tile_help_ns, ts0.publish_wait_ns, ts0.publish_wait_count);
+    }
+
+    // Per-thread process_survivor breakdown (task 570 option B).
+    // Previously only the run-total summary line existed; per-thread
+    // attribution needed scaling by drain-share.  Now both are emitted:
+    // per-thread first, then the run-total for back-compat with older
+    // analyze.py.
+    fprintf(stderr, "[kthread-stats] %-4s %14s %14s %14s %14s %14s %14s\n",
+            "tid", "ps_redtail", "ps_enterT", "ps_enterpairs",
+            "ps_enterS", "ps_other", "ps_total");
     long tot_rt = 0, tot_et = 0, tot_ep = 0, tot_es = 0, tot_oth = 0, tot_drain = 0;
     for (int i = 0; i < tt; i++)
     {
       ThreadStats &ts = ctx->tstats[i];
+      long ps_total =
+          ts.ps_redtail_ns + ts.ps_enterT_ns + ts.ps_enterpairs_ns +
+          ts.ps_enterS_ns + ts.ps_other_ns;
+      fprintf(stderr, "[kthread-stats] s%-3d %14ld %14ld %14ld %14ld %14ld %14ld\n",
+              i, ts.ps_redtail_ns, ts.ps_enterT_ns, ts.ps_enterpairs_ns,
+              ts.ps_enterS_ns, ts.ps_other_ns, ps_total);
       tot_rt += ts.ps_redtail_ns;
       tot_et += ts.ps_enterT_ns;
       tot_ep += ts.ps_enterpairs_ns;

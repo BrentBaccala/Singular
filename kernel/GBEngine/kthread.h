@@ -43,27 +43,40 @@ static inline long kt_now_ns()
  */
 struct ThreadStats
 {
-  long wait_B0_ns;          // cumulative ns waiting at B0 barrier
-  long wait_B1_ns;          // cumulative ns waiting at B1 barrier
-  long wait_B0_count;       // number of B0 waits
-  long wait_B1_count;       // number of B1 waits
-  long wait_B0_max_ns;      // single longest B0 wait
-  long wait_B1_max_ns;      // single longest B1 wait
+  // (B0/B1 barrier-wait fields removed in task 570 instrument-pie:
+  // the continuous-cursor redesign in milestone d eliminated B0/B1.
+  // No accumulation site has existed since task 283.)
 
-  long sweep_ns;            // cumulative ns inside sweep_phase
-  long sweep_count;         // number of sweep_phase calls
+  long sweep_ns;            // cumulative ns inside tile_pull_loop (workers)
+  long sweep_count;         // number of tile_pull_loop entries
   long reduce_ns;           // cumulative ns inside reduce_slot_from_sweep
   long reduce_count;        // number of reduce_slot_from_sweep calls
 
-  long drain_ns;            // cumulative ns inside drain_survivor_queue_locked
+  long drain_ns;            // cumulative ns inside drain_survivor_queue
   long drain_count;         // number of drain calls (not survivors)
   long drain_survivors;     // total survivors processed on this thread
 
-  long L_lock_wait_ns;      // cumulative ns waiting for L_lock
-  long L_lock_count;        // number of L_lock acquisitions
+  // L-lock wait split by call site (task 570 instrument-pie).
+  //   drain  : kt_L_lock_drain  — broadcast after each drained survivor
+  //                               (drain_survivor_queue).
+  //   term   : kt_L_lock_term   — main's termination probe of L.empty().
+  //   refill : kt_L_lock_refill — main's pop_and_prepare in refill_and_publish.
+  long L_lock_drain_wait_ns; // cumulative ns waiting for L_lock at drain
+  long L_lock_drain_count;
+  long L_lock_term_wait_ns;  // cumulative ns waiting for L_lock at term
+  long L_lock_term_count;
+  long L_lock_refill_wait_ns; // cumulative ns waiting for L_lock at refill
+  long L_lock_refill_count;
 
   long surv_q_wait_ns;      // cumulative ns waiting for survivor_queue_mutex
   long surv_q_count;        // survivor queue mutex acquisitions
+
+  // Worker tile-idle wait (task 570 instrument-pie).
+  //   tile_idle_ns: pthread_cond_wait on tiles_avail_cv from
+  //                 tile_pull_loop block=true.  Closes the previously-
+  //                 unmeasured remainder in worker wall-clock pies.
+  long tile_idle_ns;
+  long tile_idle_count;
 
   long enterpairs_trylock_count;   // number of trylock attempts
   long enterpairs_trylock_fail;    // number of failed trylocks
@@ -115,6 +128,27 @@ struct ThreadStats
   //   worker_drain_idle_count : number of such drain hops.
   long worker_drain_idle_ns;
   long worker_drain_idle_count;
+
+  // Main-thread umbrella + sub-buckets (task 570 instrument-pie).
+  //
+  // Workers' wall is bracketed by sweep_ns (the whole tile_pull_loop
+  // call).  Main has no equivalent: previously its wall was inferred
+  // by subtraction.  These fields give main a closed pie matching the
+  // worker pie shape:
+  //
+  //   main_loop_ns  ≈ drain_ns + reduce_ns (rare; main almost never
+  //                                          reduces in the d design)
+  //                 + refill_ns + tile_help_ns + publish_wait_ns
+  //                 + L_lock_term_wait_ns
+  //                 + small remainder (loop overhead).
+  //
+  // Only tid 0 ever bumps these.
+  long main_loop_ns;        // umbrella around the bba_parallel_loop while(true)
+  long refill_ns;           // refill_and_publish wall
+  long refill_count;
+  long tile_help_ns;        // tile_pull_loop(block=false) wall
+  long publish_wait_ns;     // pthread_cond_timedwait on slot_freed_cv wall
+  long publish_wait_count;
 
   long round_start_ns;      // timestamp at start of current round
 };
