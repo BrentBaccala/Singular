@@ -182,7 +182,7 @@ EXTERN_VAR denominator_list DENOMINATOR_LIST;
 // SElement: one element of the S set (standard basis).
 //
 // The `deleted` field is a plain bool but is accessed via atomic ops
-// from the parallel phase-1 drain path (task 506).  Writers in phase 1
+// from the parallel phase-1 drain path (task 299; run 506).  Writers in phase 1
 // hold only a shared lock on the enclosing sBasisSet, so concurrent
 // writers must CAS to claim "tombstone ownership" (the winning thread
 // is responsible for any owner-side cleanup such as freeing polys).
@@ -222,7 +222,7 @@ struct SElement {
                deleted(false), pairtest(false) {}
 };
 
-// Thread-local override for strat->B (task 508 enterpairs-parallel-phase1).
+// Thread-local override for strat->B (task 301; run 508).
 // When non-NULL, the parallel phase-1 drain sets this before calling into
 // enterpairs / initenterpairs; the enterOnePair family and chainCrit family
 // write into *t_local_B_override instead of strat->B.  Serial code leaves
@@ -245,7 +245,7 @@ extern __thread LSet* t_local_B_override;
 // complete).
 
 // Thread-local "my arrival" for the parallel phase-1 drain
-// (task 508 enterpairs-parallel-phase1).
+// (task 301; run 508).
 //
 // When set to a value != UINT64_MAX, the enterpairs / initenterpairs /
 // chainCrit family filter their S-iteration to entries with
@@ -258,7 +258,7 @@ extern __thread LSet* t_local_B_override;
 // is trivially true for every finite arrival_id ever stamped).
 extern __thread uint64_t t_local_my_arrival;
 
-// Thread-local pairtest-hit list (task 508 enterpairs-parallel-phase1).
+// Thread-local pairtest-hit list (task 301; run 508).
 //
 // In serial mode SElement.pairtest is used: enterOnePair sets it for
 // S[i] whose spoly with h is zero, chainCritNormal scans S for pairtest
@@ -401,7 +401,7 @@ public:
 
     // Uses atomic load on SElement.deleted so phase-1 readers under
     // shared lock see a consistent value even while peer drainers
-    // CAS-tombstone entries (task 506).
+    // CAS-tombstone entries (task 299; run 506).
     void skip_deleted_forward() {
       while (pos_ < set_->count.load(std::memory_order_relaxed) && selement_deleted_load(set_->elem(pos_))) pos_++;
     }
@@ -493,7 +493,7 @@ public:
   sBasisSet(const sBasisSet&) = delete;
   sBasisSet& operator=(const sBasisSet&) = delete;
 
-  // --- Parallel locking (task 506 enterpairs-parallel) ---
+  // --- Parallel locking (task 299; run 506) ---
   // Replaced the prior pthread_mutex with a pthread_rwlock to support the
   // phase-0/1/2 drain design: phase-0 writers (enterS append) take
   // lock_exclusive(); phase-1 readers (iteration + tombstone writes via
@@ -502,7 +502,7 @@ public:
   // lock; they are single-threaded so there is no contention.
   //
   // The legacy lock()/unlock() names map to exclusive mode so callers that
-  // were using the mutex prior to task 506 continue to get the same
+  // were using the mutex prior to task 299 (run 506) continue to get the same
   // serialisation semantics unchanged.
   // See ~/project/docs/parallel-bba-thread-safety-report.md for rationale.
   void lock()            { pthread_rwlock_wrlock(&rwlock_); }
@@ -570,7 +570,7 @@ public:
   //   shift avoids touching the binary-search assumptions of the
   //   monfirst-count logic in find_pos_monfirst.
   //
-  // Parallel (task 506): phase-1 drainers may call erase() under shared
+  // Parallel (task 299; run 506): phase-1 drainers may call erase() under shared
   // S-lock concurrently.  The CAS on SElement.deleted ensures only one
   // thread succeeds; only the winning thread decrements live_count_ and
   // bumps deleted_count_.  live_count_ / deleted_count_ / erase_call_count_
@@ -812,7 +812,7 @@ private:
   SOrderMode order_;
   int live_count_;
   bool pairtest_any_;  // sentinel: true if any SElement.pairtest was set
-  pthread_rwlock_t rwlock_;  // parallel drain path serialization (task 506)
+  pthread_rwlock_t rwlock_;  // parallel drain path serialization (task 299; run 506)
 
   // Erase / compact instrumentation (cumulative across the lifetime of
   // the sBasisSet). deleted_count_ is the current tombstone population
@@ -970,7 +970,7 @@ public:
 #endif
 };
 
-// Atomic helpers for sTObject.published (task 510 t-iterator-published).
+// Atomic helpers for sTObject.published (task 303; run 510).
 //
 // The published flag transitions at most once from false to true (in
 // enterT, after all other fields of the T-slot are written).  Readers
@@ -996,7 +996,7 @@ static inline void tobject_unpublish(sTObject &t) {
   __atomic_store_n(&t.published, false, __ATOMIC_RELAXED);
 }
 
-// Skipping iterator for BlockArray<TObject> (task 510 t-iterator-published).
+// Skipping iterator for BlockArray<TObject> (task 303; run 510).
 //
 // Mirrors the sBasisSet iterator's skip_deleted_forward shape, but T is
 // append-only (no tombstones), so the iterator only needs to skip
@@ -1169,7 +1169,7 @@ public:
                       // multiset tree and deallocates the LObject.
                       // Initialized to false by sLObject::Init() via memset.
                       //
-                      // Parallel phase-1 (task 506): accessed via atomic ops.
+                      // Parallel phase-1 (task 299; run 506): accessed via atomic ops.
                       // Writers under shared S-lock CAS deleted false->true
                       // to claim cleanup ownership; readers use a relaxed
                       // load.  Helper functions below (lobject_deleted_load,

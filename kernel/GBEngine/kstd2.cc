@@ -201,7 +201,7 @@ int kFindSameLMInT_Z(const kStrategy strat, const LObject* L, const int start)
   BlockArray<TObject>& T=strat->T;
   const BlockArray<unsigned long>& sevT=strat->sevT;
   number gcd, ogcd;
-  // Iterate via the skipping iterator (task 511 t-iterator-migrate-hot-path):
+  // Iterate via the skipping iterator (task 304; run 511):
   // skips unpublished T slots, acquire-synchronising the slot's field
   // writes against enterT's release-publish on any concurrent drainer.
   auto t_end = end_T(T);
@@ -330,7 +330,7 @@ int kFindDivisibleByInT_Z(const kStrategy strat, const LObject* L, const int sta
   BlockArray<TObject>& T=strat->T;
   const BlockArray<unsigned long>& sevT=strat->sevT;
   number rest, orest, mult;
-  // Iterate via the skipping iterator (task 511 t-iterator-migrate-hot-path):
+  // Iterate via the skipping iterator (task 304; run 511):
   // skips unpublished slots, acquire-synchronising the T fields against
   // enterT's release-publish on any concurrent drainer.
   auto t_end = end_T(T);
@@ -430,7 +430,7 @@ static sBasisSet::iterator kFindDivisibleByInS_Z(const kStrategy strat, LObject*
 // return -1 if no divisor is found
 //        number of first divisor, otherwise
 //
-// Task 511 t-iterator-migrate-hot-path: non-SIMD paths migrated to use
+// Task 304 (run 511): non-SIMD paths migrated to use
 // the skipping T iterator, which acquire-synchronises against enterT's
 // release-publish of new T slots.  The SIMD paths keep integer-indexed
 // sevT scans (SIMD load) but gate the per-candidate T-field access

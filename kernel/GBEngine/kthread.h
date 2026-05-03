@@ -22,7 +22,7 @@
 #include <vector>
 
 /* ------------------------------------------------------------------ */
-/*  Instrumentation (task 482)                                         */
+/*  Instrumentation (task 277; run 482)                               */
 /*  Compile-time flag KTHREAD_INSTRUMENT enables measurement code.     */
 /*  At runtime, SINGULAR_KTHREAD_STATS=1 must be set to actually       */
 /*  emit output. When the flag is off, all instrumentation is stubbed  */
@@ -43,7 +43,7 @@ static inline long kt_now_ns()
  */
 struct ThreadStats
 {
-  // (B0/B1 barrier-wait fields removed in task 570 instrument-pie:
+  // (B0/B1 barrier-wait fields removed in task 357 (run 570):
   // the continuous-cursor redesign in milestone d eliminated B0/B1.
   // No accumulation site has existed since task 283.)
 
@@ -56,7 +56,7 @@ struct ThreadStats
   long drain_count;         // number of drain calls (not survivors)
   long drain_survivors;     // total survivors processed on this thread
 
-  // L-lock wait split by call site (task 570 instrument-pie).
+  // L-lock wait split by call site (task 357; run 570).
   //   drain  : kt_L_lock_drain  — broadcast after each drained survivor
   //                               (drain_survivor_queue).
   //   term   : kt_L_lock_term   — main's termination probe of L.empty().
@@ -71,7 +71,7 @@ struct ThreadStats
   long surv_q_wait_ns;      // cumulative ns waiting for survivor_queue_mutex
   long surv_q_count;        // survivor queue mutex acquisitions
 
-  // Worker tile-idle wait (task 570 instrument-pie).
+  // Worker tile-idle wait (task 357; run 570).
   //   tile_idle_ns: pthread_cond_wait on tiles_avail_cv from
   //                 tile_pull_loop block=true.  Closes the previously-
   //                 unmeasured remainder in worker wall-clock pies.
@@ -89,7 +89,7 @@ struct ThreadStats
   long ps_other_ns;         // remainder of process_survivor
 
   // Per-call enterpairs / chainCritNormal max/min/count tracking
-  // (task 571 parallel-bba-dump-on-demand).  Existing ps_enterpairs_ns
+  // (task 358; run 571).  Existing ps_enterpairs_ns
   // gives cumulative time; these expose the distribution so we can
   // see single-call tail latency.  Min initialised to LONG_MAX (no
   // calls yet) — the dump prints 0/"—" in that case.
@@ -108,12 +108,12 @@ struct ThreadStats
   long chaincrit_min_ns;          // init to LONG_MAX
   long chaincrit_max_arrival;
 
-  // Phase-split instrumentation (task 506 enterpairs-parallel /
-  // task 508 enterpairs-parallel-phase1).
+  // Phase-split instrumentation (task 299 (run 506) /
+  // task 301; run 508).
   //   phase0: S-exclusive for setup + enterT + enterS
   //   phase1: S-shared + L-exclusive for enterpairs iteration +
   //           chainCrit (merges local B into strat->L) + clearS
-  // As of task 508, phase 2 no longer exists (chainCritNormal does the
+  // As of task 301 (run 508), phase 2 no longer exists (chainCritNormal does the
   // B-into-L merge inline under L-lock).  The phase2_* fields are
   // retained for ABI compatibility with the post-506 dump format but
   // renamed semantically.
@@ -132,7 +132,7 @@ struct ThreadStats
                                // ctx->enterpairs_active during this
                                // thread's phase 1 (sampled at entry).
 
-  // Worker-side drain participation (task 512 worker-side-drain).
+  // Worker-side drain participation (task 305; run 512).
   //
   // drain_survivors (above) already records the number of survivors this
   // thread processed through its drain call — tid > 0 values become
@@ -149,7 +149,7 @@ struct ThreadStats
   long worker_drain_idle_ns;
   long worker_drain_idle_count;
 
-  // Main-thread umbrella + sub-buckets (task 570 instrument-pie).
+  // Main-thread umbrella + sub-buckets (task 357; run 570).
   //
   // Workers' wall is bracketed by sweep_ns (the whole tile_pull_loop
   // call).  Main has no equivalent: previously its wall was inferred
@@ -381,7 +381,7 @@ struct SweepContext
   // processing. Pushed by main thread at end of round; drained by
   // any worker thread that observes the queue non-empty.
   //
-  // Concurrency model (task 483, replacing task 275):
+  // Concurrency model (task 278 (run 483), replacing task 275):
   //   - Queue push/pop is under survivor_queue_mutex (brief).
   //   - Each drain worker pops one survivor, then runs
   //     process_survivor_lobject while holding BOTH strat->S's mutex
@@ -429,7 +429,7 @@ struct SweepContext
   bool serialize_enterpairs;
 
 #ifdef KTHREAD_INSTRUMENT
-  // ---- Instrumentation (task 482) ---------------------------------
+  // ---- Instrumentation (task 277; run 482) -----------------------
   bool stats_enabled;           // runtime toggle (SINGULAR_KTHREAD_STATS)
   ThreadStats *tstats;          // [num_workers+1]
   std::vector<RoundRecord> *rounds;
@@ -449,7 +449,7 @@ void bba_parallel_loop(SweepContext *ctx);
 #ifdef KTHREAD_INSTRUMENT
 /**
  * Emit a kthread-stats dump for `ctx` on stderr.  Extracted from the
- * end of bba_parallel_loop (task 571 parallel-bba-dump-on-demand) so
+ * end of bba_parallel_loop (task 358; run 571) so
  * it can be called mid-run from gdb when SIGINT-driven shutdown is
  * unreachable (e.g., main blocked in pthread_mutex_lock for L_lock).
  *

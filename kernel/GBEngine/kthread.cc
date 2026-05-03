@@ -53,7 +53,7 @@
 #include <climits>
 
 /* ------------------------------------------------------------------ */
-/*  Instrumentation helpers (task 482)                                 */
+/*  Instrumentation helpers (task 277; run 482)                       */
 /* ------------------------------------------------------------------ */
 #ifdef KTHREAD_INSTRUMENT
 #  define KT_STATS(ctx)       ((ctx)->stats_enabled)
@@ -62,7 +62,7 @@
 #  define KT_TIME_DELTA(var)  (kt_now_ns() - (var))
 
 // Global ctx pointer for gdb-driven kt_dump_stats(kt_current_ctx)
-// (task 571 parallel-bba-dump-on-demand).  Set at bba_parallel_loop
+// (task 358; run 571).  Set at bba_parallel_loop
 // entry, cleared at parallel_shutdown.  NULL when no parallel-bba run
 // is in flight.
 SweepContext *kt_current_ctx = NULL;
@@ -74,7 +74,7 @@ SweepContext *kt_current_ctx = NULL;
 // "outside the parallel phase, skip instrumentation".
 __thread int kt_my_thread_id = -1;
 
-// L-lock acquire helpers, split by call site (task 570 instrument-pie).
+// L-lock acquire helpers, split by call site (task 357; run 570).
 // Two callers exist as of May 2026, audited via grep on
 // pthread_mutex_lock(&ctx->L_lock):
 //   - drain_survivor_queue (post-survivor broadcast, kthread.cc ~1393)
@@ -197,7 +197,7 @@ static inline void kt_S_lock_shared(SweepContext *ctx, int thread_id)
 
 /* L exclusive lock held during phase 1 (chainCritNormal merges local B
  * into strat->L).  Records wait time in phase1_l_wait_ns (renamed from
- * phase2_wait_ns in task 508 — phase 2 no longer exists). */
+ * phase2_wait_ns in task 301 (run 508) — phase 2 no longer exists). */
 static inline void kt_L_lock_phase2(SweepContext *ctx, int thread_id)
 {
   if (KT_STATS(ctx))
@@ -407,8 +407,8 @@ void sweep_context_destroy(SweepContext *ctx)
 /*
  * pop_and_prepare — pop next LObject from strat->L and set up ap for
  * reduction.  Caller holds ctx->L_lock.  The `sl_snapshot` parameter
- * is the T-size bound captured BEFORE taking L_lock (task 512
- * worker-side-drain); this avoids taking S-shared while holding L_lock,
+ * is the T-size bound captured BEFORE taking L_lock (task 305;
+ * run 512); this avoids taking S-shared while holding L_lock,
  * which would invert the drainer's S → L order and risk deadlock.
  */
 static BOOLEAN pop_and_prepare(SweepContext *ctx, ActivePoly *ap,
@@ -491,7 +491,7 @@ static BOOLEAN pop_and_prepare(SweepContext *ctx, ActivePoly *ap,
     ap->best_good = -1;
 
     // Task 280 milestone (a): record current T bound for this slot.
-    // Task 512 worker-side-drain: sl_snapshot_arg was captured in the
+    // Task 305 (run 512): sl_snapshot_arg was captured in the
     // caller BEFORE L_lock was taken, under S-shared — ensures a
     // consistent view of T.size() without inverting the lock order
     // (phase-1 drainers take S-shared then L-exclusive; main acquires
@@ -724,7 +724,7 @@ static void close_slot(SweepContext *ctx, int s, int thread_id)
  * strat->T up to tl_snapshot; writes only to the worker's private
  * SweepResult.
  *
- * Task 511 t-iterator-migrate-hot-path: the K-stride access pattern
+ * Task 304 (run 511): the K-stride access pattern
  * visits indices j, j+K, j+2K, ..., which does not fit a sequential
  * iterator walk.  Instead we keep the integer j loop and add an
  * explicit tobject_published_load gate before dereferencing T[j]
@@ -810,7 +810,7 @@ static void tile_pull_loop(SweepContext *ctx, int thread_id, bool block)
     {
       if (!block) return;
       if (ctx->done.load(std::memory_order_acquire)) return;
-      // Task 512 worker-side-drain: before going to sleep, check whether
+      // Task 305 (run 512): before going to sleep, check whether
       // the survivor queue has work.  If so, drain instead of cond_wait.
       // Only workers do this (block=true); main has its own drain pass
       // in bba_parallel_loop and calls tile_pull_loop with block=false.
@@ -1031,7 +1031,7 @@ static int refill_and_publish(SweepContext *ctx)
 
     if (st == SLOT_EMPTY)
     {
-      // Task 512 worker-side-drain: capture sl_snapshot under S-shared
+      // Task 305 (run 512): capture sl_snapshot under S-shared
       // BEFORE taking L_lock, to avoid inverting the worker drainer's
       // S → L lock order.
       kt_S_lock_shared(ctx, 0);
@@ -1081,9 +1081,9 @@ static int refill_and_publish(SweepContext *ctx)
 /* ------------------------------------------------------------------ */
 
 /*
- * Phase-0 / Phase-1 design (task 508 enterpairs-parallel-phase1).
+ * Phase-0 / Phase-1 design (task 301; run 508).
  *
- * Task 506 landed infrastructure (rwlock on sBasisSet, atomic CAS on
+ * Task 299 (run 506) landed infrastructure (rwlock on sBasisSet, atomic CAS on
  * tombstone flags, explicit phase 0/1/2 structure, per-phase
  * instrumentation) but kept phase 1 under an S-exclusive lock because
  * enterpairs writes into the strat-global strat->B.  This task enables
@@ -1136,7 +1136,7 @@ static void process_survivor_lobject(SweepContext *ctx, LObject *P, int thread_i
 #ifdef KTHREAD_INSTRUMENT
   // Bind the thread-local thread_id so chainCritNormal (kutil.cc) can
   // find its ThreadStats slot.  Restore at function exit so any
-  // surrounding code that bumped this is preserved.  See task 571.
+  // surrounding code that bumped this is preserved.  See task 358 (run 571).
   int saved_kt_my_thread_id = kt_my_thread_id;
   kt_my_thread_id = thread_id;
   long ps_t0 = KT_STATS(ctx) ? kt_now_ns() : 0;
@@ -1276,7 +1276,7 @@ static void process_survivor_lobject(SweepContext *ctx, LObject *P, int thread_i
     kt_L_lock_phase2(ctx, thread_id);
 
 #ifdef KTHREAD_INSTRUMENT
-    // Task 570 instrument-pie option F: sample timestamp at L-lock
+    // Task 357 (run 570) option F: sample timestamp at L-lock
     // acquisition (the point kt_L_lock_phase2 returned) so phase1_l_ns
     // measures genuine L-hold time, not phase-1 work time.  Previously
     // p1_l_t0 was initialised to p1_t0 below, making phase1_l_ns
@@ -1341,10 +1341,10 @@ static void process_survivor_lobject(SweepContext *ctx, LObject *P, int thread_i
       enterpairs_accum += ep_dt;
       phase1_work = now - p1_t0;
       // phase1_l_ns is now accumulated at the actual L-lock unlock site
-      // below (option F of task 570 instrument-pie) using
+      // below (option F of task 357; run 570) using
       // p1_l_acquired_ns sampled right after kt_L_lock_phase2 returned.
 
-      // Per-call enterpairs distribution (task 571).  my_arrival
+      // Per-call enterpairs distribution (task 358; run 571).  my_arrival
       // captured under S-exclusive in phase 0 (line ~1207 above) is
       // still in scope here — used as the "id of the slowest call"
       // tag so we can locate it later if useful.
@@ -1383,7 +1383,7 @@ static void process_survivor_lobject(SweepContext *ctx, LObject *P, int thread_i
       // Sample L-hold delta just before the unlock — covers the entire
       // span L-lock-acquired → L-lock-released, including the cond_wait
       // on enterpairs_order_cv (which atomically released L during the
-      // wait, but resumed with L held).  See task 570 option F.
+      // wait, but resumed with L held).  See task 357 (run 570) option F.
       KT_TS(ctx, thread_id).phase1_l_ns +=
           kt_now_ns() - p1_l_acquired_ns;
     }
@@ -1418,7 +1418,7 @@ static void process_survivor_lobject(SweepContext *ctx, LObject *P, int thread_i
     ts.phase0_ns += phase0_work;
     ts.phase1_ns += phase1_work;
     // phase1_l_ns is accumulated inside the phase-1 block at the L-lock
-    // unlock site (task 570 option F).  Strictly contains phase1_ns.
+    // unlock site (task 357; run 570, option F).  Strictly contains phase1_ns.
     ts.phase_survivors++;
   }
   kt_my_thread_id = saved_kt_my_thread_id;
@@ -1458,7 +1458,7 @@ static void queue_survivor(SweepContext *ctx, ActivePoly *ap)
 /*  concurrently. Each call pops at most as many survivors as remain   */
 /*  in the queue at the time of the pop.                               */
 /*                                                                     */
-/*  Task 506: locking moved into process_survivor_lobject, which runs  */
+/*  Task 299 (run 506): locking moved into process_survivor_lobject, which runs  */
 /*  explicit phase 0 / 1 / 2 blocks.  drain_survivor_queue no longer   */
 /*  holds S.lock() or L_lock around the call.                          */
 /*                                                                     */
@@ -1490,7 +1490,7 @@ static void drain_survivor_queue(SweepContext *ctx, int thread_id)
     pthread_mutex_unlock(&ctx->survivor_queue_mutex);
 
     // process_survivor_lobject now manages its own locking via the
-    // phase-0/1/2 structure (task 506).  It takes S-exclusive in
+    // phase-0/1/2 structure (task 299; run 506).  It takes S-exclusive in
     // phase 0 and releases before returning.
     process_survivor_lobject(ctx, &P, thread_id);
 
@@ -1548,9 +1548,9 @@ static void *worker_thread(void *arg)
 
 #ifdef KTHREAD_INSTRUMENT
   // Bind thread-local thread_id for chainCritNormal instrumentation
-  // in kutil.cc (task 571).  Note: process_survivor_lobject also
+  // in kutil.cc (task 358; run 571).  Note: process_survivor_lobject also
   // sets this — that path is taken from the survivor-drain which
-  // workers may execute (task 512 worker-side-drain), so the saved/
+  // workers may execute (task 305; run 512), so the saved/
   // restore there preserves this value.
   kt_my_thread_id = thread_id;
 #endif
@@ -1576,7 +1576,7 @@ static void *worker_thread(void *arg)
 /* ------------------------------------------------------------------ */
 /*  kt_dump_stats — extracted from end of bba_parallel_loop.            */
 /*                                                                     */
-/*  Task 571 parallel-bba-dump-on-demand: callable mid-run from gdb    */
+/*  Task 358 (run 571): callable mid-run from gdb    */
 /*  via `call kt_dump_stats(kt_current_ctx)` so we can capture stats   */
 /*  on workloads where SIGINT-driven shutdown is unreachable (main    */
 /*  blocked in pthread_mutex_lock, etc).                               */
@@ -1620,7 +1620,7 @@ void kt_dump_stats(SweepContext *ctx)
   fprintf(stderr, "[kthread-stats] reductions=%ld survivors=%ld rounds=%ld max_qd=%ld\n",
           ctx->stat_reductions.load(), ctx->stat_survivors.load(),
           ctx->stat_rounds.load(), ctx->stat_max_queue_depth.load());
-  // Per-thread bucket totals (task 570 instrument-pie reshaped this).
+  // Per-thread bucket totals.  Task 357 (run 570) reshaped this.
   //   sweep_ns         : workers' tile_pull_loop wall (umbrella).
   //   reduce_ns        : reduce_slot_from_sweep wall.
   //   drain_ns         : drain_survivor_queue wall.
@@ -1646,7 +1646,7 @@ void kt_dump_stats(SweepContext *ctx)
             ts.drain_survivors);
   }
 
-  // Main-thread umbrella + sub-buckets (task 570 option C).
+  // Main-thread umbrella + sub-buckets (task 357; run 570, option C).
   //   main_loop_ns     : umbrella (the whole bba_parallel_loop while(true)).
   //   refill_ns        : refill_and_publish wall.
   //   tile_help_ns     : tile_pull_loop(block=false) wall.
@@ -1663,7 +1663,7 @@ void kt_dump_stats(SweepContext *ctx)
             ts0.tile_help_ns, ts0.publish_wait_ns, ts0.publish_wait_count);
   }
 
-  // Per-thread process_survivor breakdown (task 570 option B).
+  // Per-thread process_survivor breakdown (task 357; run 570, option B).
   // Previously only the run-total summary line existed; per-thread
   // attribution needed scaling by drain-share.  Now both are emitted:
   // per-thread first, then the run-total for back-compat with older
@@ -1697,8 +1697,8 @@ void kt_dump_stats(SweepContext *ctx)
             ctx->tstats[i].enterpairs_trylock_count);
   fprintf(stderr, "\n");
 
-  // Phase breakdown (task 507 enterpairs-parallel-measure +
-  // task 508 enterpairs-parallel-phase1).  phase2_* renamed to
+  // Phase breakdown (task 300 / run 507 +
+  // task 301 / run 508).  phase2_* renamed to
   // phase1_l_* (L-lock wait/held during phase 1, not a separate
   // phase).  ph1_cmax is the peak value of ctx->enterpairs_active
   // sampled by this thread on phase-1 entry (how many drainers
@@ -1717,9 +1717,9 @@ void kt_dump_stats(SweepContext *ctx)
             ts.phase1_concurrent_max);
   }
 
-  // Worker-side drain participation (task 512 worker-side-drain).
+  // Worker-side drain participation (task 305; run 512).
   //   drain_survivors : # of survivors this thread handled
-  //                     (was 0 for tid>0 before task 512; post-task,
+  //                     (was 0 for tid>0 before task 305 / run 512; post-task,
   //                     non-zero on workloads with survivor-queue
   //                     backpressure).
   //   idle_drain_ns / idle_drain_count : time & count of drain hops
@@ -1736,8 +1736,8 @@ void kt_dump_stats(SweepContext *ctx)
             ts.worker_drain_idle_count);
   }
 
-  // Per-call enterpairs / chainCritNormal distribution (task 571
-  // parallel-bba-dump-on-demand).  Cumulative ps_enterpairs_ns lives
+  // Per-call enterpairs / chainCritNormal distribution (task 358;
+  // run 571).  Cumulative ps_enterpairs_ns lives
   // in the s-block above; this block exposes count / min / max so
   // single-call tail latency is visible.  *_min printed as 0 if no
   // call has been made yet (initial sentinel value LONG_MAX).
@@ -1756,7 +1756,7 @@ void kt_dump_stats(SweepContext *ctx)
             ts.chaincrit_max_arrival, ts.chaincrit_total_ns);
   }
 
-  // L-set tombstone accumulation hypothesis (task 571 task-inbox):
+  // L-set tombstone accumulation hypothesis (task 358; run 571):
   // chainCritNormal's slowness is dominated by
   // LSet::filtered_iterator::advance() linear-scanning sev_flat_ from
   // 0 to flat_size, which includes tombstones.  LSet::compact() runs
@@ -1877,7 +1877,7 @@ void bba_parallel_loop(SweepContext *ctx)
     for (int i = 0; i < tt; i++)
     {
       memset(&ctx->tstats[i], 0, sizeof(ThreadStats));
-      // Per-call min trackers (task 571): initial value is "no calls
+      // Per-call min trackers (task 358; run 571): initial value is "no calls
       // yet, treat as +inf"; the dump prints 0 if we exit before any
       // value has overwritten this.
       ctx->tstats[i].enterpairs_min_ns = LONG_MAX;
@@ -1896,9 +1896,9 @@ void bba_parallel_loop(SweepContext *ctx)
     pthread_create(&ctx->threads[t], NULL, worker_thread, wa);
   }
 
-  // Task 511 t-iterator-migrate-hot-path: the startup-time pLength
+  // Task 304 (run 511): the startup-time pLength
   // pre-population loop is gone.  Every T entry in strat->T was
-  // created by enterT (task 510), which computes pLength inline
+  // created by enterT (task 303; run 510), which computes pLength inline
   // before release-publishing the slot.  So by the time
   // bba_parallel_loop runs, every T[j] already has pLength > 0 and
   // published = true — no pre-scan needed.
@@ -1914,10 +1914,10 @@ void bba_parallel_loop(SweepContext *ctx)
   //   2. Drain any survivors from the FIFO.  Main still takes a drain
   //      pass here (important when workers are all busy on tiles); in
   //      addition, workers now drain from their tile-idle branch
-  //      (task 512 worker-side-drain).
+  //      (task 305; run 512).
   //      enterT (invoked from drain_survivor_queue) computes pLength
   //      inline and release-publishes T slots, so no post-drain
-  //      refresh is needed (task 511).
+  //      refresh is needed (task 304; run 511).
   //   3. Refill empty slots from L and (re)publish tiles for any slot
   //      that closer-reduce marked needs_republish.
   //   4. If nothing to do (all slots empty, L empty, queue empty):
@@ -1926,7 +1926,7 @@ void bba_parallel_loop(SweepContext *ctx)
   //        b. If still idle after that, break out — we are done.
   //   5. Else, wait briefly on slot_freed_cv so closers can wake us.
   //
-  // Task 512 worker-side-drain lifted the main-only-drain architectural
+  // Task 305 (run 512) lifted the main-only-drain architectural
   // invariant.  Workers in tile_pull_loop, when tile_cursor catches up
   // to tile_end, peek at the survivor queue and call drain_survivor_queue
   // if non-empty.  process_survivor_lobject's phase 0 (S-exclusive)
@@ -1937,7 +1937,7 @@ void bba_parallel_loop(SweepContext *ctx)
   // workers are parked on tiles_avail_cv waiting for tiles but the
   // survivor queue is non-empty).
   //
-  // T/L access audit for main outside drain (task 512):
+  // T/L access audit for main outside drain (task 305; run 512):
   //   - pop_and_prepare: reads strat->L.{top,pop,empty,size} under
   //     L_lock (refill_and_publish acquires it); safe vs worker
   //     chainCritNormal which takes L_lock inside phase 1.
@@ -1959,7 +1959,7 @@ void bba_parallel_loop(SweepContext *ctx)
   //     siCntrlc / overflow ARE racy: handled separately below.)
   //   - strat->T[i] accesses on main outside drain: none.
   //     sweep_one_tile runs through acquire-loaded published gate
-  //     (task 511) and is called from tile_pull_loop which main
+  //     (task 304; run 511) and is called from tile_pull_loop which main
   //     invokes with block=false — main is a tile reader at the same
   //     terms as workers.
   //   - strat->B: accessed via strat_B(strat) which returns the
@@ -1967,7 +1967,7 @@ void bba_parallel_loop(SweepContext *ctx)
   //     Main outside drain never touches strat->B (only serial code
   //     before / after bba_parallel_loop does).
   // Error-path L-clear flags (set here, acted on after workers join).
-  // Task 512 worker-side-drain: we cannot touch strat->L while workers
+  // Task 305 (run 512): we cannot touch strat->L while workers
   // may be inside chainCritNormal (which takes L_lock from phase 1).
   // Defer L mutation until after ctx->done + pthread_join below.
   bool clear_L_after_join = false;
@@ -1975,8 +1975,8 @@ void bba_parallel_loop(SweepContext *ctx)
 
 #ifdef KTHREAD_INSTRUMENT
   // main_loop umbrella — bracket the whole while(true) so the per-thread
-  // pie for tid 0 has a closed total to attribute against (task 570
-  // option C).
+  // pie for tid 0 has a closed total to attribute against (task 357;
+  // run 570, option C).
   long main_loop_t0 = KT_STATS(ctx) ? kt_now_ns() : 0;
 #endif
 
@@ -1998,10 +1998,10 @@ void bba_parallel_loop(SweepContext *ctx)
 
     // Step 1: drain survivor FIFO on main thread.
     //
-    // Task 511 t-iterator-migrate-hot-path: the post-drain pLength
+    // Task 304 (run 511): the post-drain pLength
     // refresh loop that ran here after every drain is gone — enterT
     // now computes pLength inline and release-publishes the slot in
-    // one step (see kutil.cc enterT, task 510).  Every T entry
+    // one step (see kutil.cc enterT, task 303 / run 510).  Every T entry
     // created during drain is therefore already pLength-filled and
     // published by the time drain_survivor_queue returns; no external
     // refresh is needed.
@@ -2035,7 +2035,7 @@ void bba_parallel_loop(SweepContext *ctx)
       kt_surv_q_lock(ctx, 0);
       bool queue_empty = ctx->survivor_queue->empty();
       pthread_mutex_unlock(&ctx->survivor_queue_mutex);
-      // Task 512 worker-side-drain: L.empty() must be read under L_lock
+      // Task 305 (run 512): L.empty() must be read under L_lock
       // to avoid racing with worker drainers' chainCritNormal pushes.
       kt_L_lock_term(ctx, 0);
       bool L_empty = strat->L.empty();
@@ -2121,7 +2121,7 @@ parallel_shutdown:
     pthread_join(ctx->threads[t], NULL);
 
   // Now workers are joined — safe to mutate strat->L and slots.
-  // (Task 512 worker-side-drain: chainCritNormal from worker drain is
+  // (Task 305 (run 512): chainCritNormal from worker drain is
   // the only writer of L outside main; joined workers cannot be inside
   // that critical section any longer.)
   if (clear_L_after_join)

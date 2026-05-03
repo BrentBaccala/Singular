@@ -53,7 +53,7 @@
 // #define ENTER_USE_MYMEMMOVE
 
 #include "kernel/GBEngine/kutil.h"
-#include "kernel/GBEngine/kthread.h"  // task 571: kt_my_thread_id, kt_now_ns
+#include "kernel/GBEngine/kthread.h"  // task 358 (run 571): kt_my_thread_id, kt_now_ns
 #include <climits>
 #include "polys/kbuckets.h"
 #include "coeffs/numbers.h"
@@ -583,7 +583,7 @@ void cleanT (kStrategy strat)
   assume(currRing == strat->tailRing || strat->tailRing != NULL);
 
   // Optional tombstone-pile-up instrumentation for SORDER_STANDARD /
-  // SORDER_APPEND tombstone-on-erase (task 503). Set env var
+  // SORDER_APPEND tombstone-on-erase (task 297; run 503). Set env var
   // SINGULAR_SBASIS_STATS to see the stats at cleanT entry.
   if (getenv("SINGULAR_SBASIS_STATS") != NULL) {
     strat->S.debug_print_stats("cleanT");
@@ -3426,7 +3426,7 @@ std::vector<LSet::iterator> kMergeBintoL_and_return_iterators(kStrategy strat)
 void chainCritNormal (poly p,int ecart,kStrategy strat)
 {
 #ifdef KTHREAD_INSTRUMENT
-  // Task 571 parallel-bba-dump-on-demand: per-call timing.  We're
+  // Task 358 (run 571): per-call timing.  We're
   // running inside a drain worker's process_survivor_lobject phase 1
   // (or, in a serial bba context, kt_my_thread_id == -1 and we skip).
   // Sampling kt_now_ns() at entry/exit and bumping the owning
@@ -6820,7 +6820,7 @@ poly redtailBba (LObject* L, sBasisSet::const_iterator end, kStrategy strat, BOO
         int j;
         j = kFindDivisibleByInT(strat, &Ln);
         if (j < 0) break;
-        // Task 511 t-iterator-migrate-hot-path: route the T[j] access
+        // Task 304 (run 511): route the T[j] access
         // through the skipping iterator.  kFindDivisibleByInT returns
         // the physical index of a slot it already observed as published
         // (via iterator walk or tobject_published_load gate), so
@@ -6935,7 +6935,7 @@ poly redtailBbaBound (LObject* L, sBasisSet::const_iterator end, kStrategy strat
         int j;
         j = kFindDivisibleByInT(strat, &Ln);
         if (j < 0) break;
-        // Task 511 t-iterator-migrate-hot-path: route T[j] access through
+        // Task 304 (run 511): route T[j] access through
         // the skipping iterator (j is already known published by
         // kFindDivisibleByInT).
         auto t_it = iterator_at_T(strat->T, j);
@@ -8950,7 +8950,7 @@ void enterT(LObject &p, kStrategy strat, int atT)
   else
     strat->T[atT].max_exp = NULL;
 
-  // Compute pLength inline (task 510 t-iterator-published).  Moves the
+  // Compute pLength inline (task 303; run 510).  Moves the
   // work that the parallel main-loop used to do in a post-drain refresh
   // loop (kthread.cc post-drain "pLength <= 0 -> set it") into enterT
   // itself.  The LObject-to-TObject assignment above copies p.pLength
@@ -8972,7 +8972,7 @@ void enterT(LObject &p, kStrategy strat, int atT)
   strat->T[atT].i_r = strat->T.size();
   p.i_r = strat->T.size();  // propagate back so enterS can use it
 
-  // Release-publish the slot (task 510 t-iterator-published).  All
+  // Release-publish the slot (task 303; run 510).  All
   // field writes above must complete before any reader observes
   // published=true via the acquire-loading iterator.  In serial code
   // (THREADS=1 or main-thread drain) this is a no-op logically —
@@ -9056,7 +9056,7 @@ void enterT_strong(LObject &p, kStrategy strat, int atT)
   else
     strat->T[atT].max_exp = NULL;
 
-  // Compute pLength inline (task 510 t-iterator-published) — parallel
+  // Compute pLength inline (task 303; run 510) — parallel
   // with enterT above.
   if (strat->T[atT].pLength <= 0)
     strat->T[atT].pLength =
@@ -9068,7 +9068,7 @@ void enterT_strong(LObject &p, kStrategy strat, int atT)
   strat->T[atT].i_r = strat->T.size()-1;
   assume(p.sev == 0 || pGetShortExpVector(p.p) == p.sev);
   strat->sevT[atT] = (p.sev == 0 ? pGetShortExpVector(p.p) : p.sev);
-  // Release-publish the slot (task 510 t-iterator-published).
+  // Release-publish the slot (task 303; run 510).
   tobject_publish(strat->T[atT]);
   #if 1
   if(rHasLocalOrMixedOrdering(currRing)
@@ -9586,7 +9586,7 @@ void exitBuchMora (kStrategy strat)
 {
   /*- release temp data -*/
   // Dump L tombstone stats if requested (SINGULAR_LSET_STATS=1).  This is
-  // the analogue of SINGULAR_SBASIS_STATS from task 503.
+  // the analogue of SINGULAR_SBASIS_STATS from task 297 (run 503).
   if (getenv("SINGULAR_LSET_STATS")) {
     strat->L.debug_print_stats("exitBuchMora");
     strat_B(strat).debug_print_stats("exitBuchMora.B");
