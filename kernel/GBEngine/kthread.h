@@ -118,7 +118,18 @@ struct ThreadStats
   // retained for ABI compatibility with the post-506 dump format but
   // renamed semantically.
   long phase0_wait_ns;      // blocked on S exclusive lock (phase 0)
-  long phase0_ns;           // work inside phase 0
+  long phase0_ns;           // work inside phase 0 — as of task 359 (run 572)
+                            // this is JUST enterT+enterS S-exclusive hold time,
+                            // not the whole phase-0 work (the redtailBba/
+                            // pCleardenom block runs under S-shared as
+                            // phase0_shared_ns).
+  long phase0_shared_wait_ns; // blocked on S shared lock for phase-0 redtailBba
+                            // (task 359; run 572).  The S-exclusive critical
+                            // section was shrunk to enterT+enterS, while
+                            // redtailBba moved to a preceding S-shared region.
+  long phase0_shared_ns;    // work inside the phase-0 S-shared region:
+                            // pCleardenom/pNorm + redtailBba +
+                            // SetShortExpVector (task 359; run 572).
   long phase1_wait_ns;      // blocked on S shared lock (phase 1)
   long phase1_ns;           // iteration + chainCrit + clearS + B construction
   long phase1_l_wait_ns;    // blocked on L-exclusive during phase 1
@@ -361,6 +372,18 @@ struct SweepContext
 
   // Mutex for L access (multiple threads pop from L)
   pthread_mutex_t L_lock;
+
+  // Mutex serializing the phase-0 redtailBba block (task 359; run 572).
+  // The S-exclusive critical section was shrunk to just enterT+enterS;
+  // redtailBba and its surrounding pCleardenom/pNorm now run under the
+  // S-shared lock so they don't block main's S-shared acquire at refill.
+  // But redtailBba writes strat->redTailChange and strat->completeReduce_retry
+  // (shared strat fields), so concurrent redtailBba calls would race on
+  // those writes.  This mutex serializes the redtailBba block — workers
+  // still serialize on it, but other threads can hold S-shared in
+  // parallel (e.g. main's refill_and_publish), which was the actual
+  // bottleneck per the staging-9454 wall-clock attribution.
+  pthread_mutex_t redtail_lock;
 
   // Shutdown flag (per-context, not global static)
   std::atomic<bool> done;

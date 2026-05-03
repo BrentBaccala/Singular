@@ -195,6 +195,27 @@ static inline void kt_S_lock_shared(SweepContext *ctx, int thread_id)
   }
 }
 
+/* Phase-0 S shared lock: shared lock for redtailBba/pCleardenom/etc.
+ * Same lock as phase-1 shared, but recorded in a separate wait bucket
+ * (phase0_shared_wait_ns) so the attribution table can distinguish the
+ * pre-enterS shared region from the post-enterS phase-1 shared region. */
+static inline void kt_S_lock_shared_phase0(SweepContext *ctx, int thread_id)
+{
+  kStrategy strat = ctx->strat;
+  if (KT_STATS(ctx))
+  {
+    long t0 = kt_now_ns();
+    strat->S.lock_shared();
+    long dt = kt_now_ns() - t0;
+    ThreadStats &ts = KT_TS(ctx, thread_id);
+    ts.phase0_shared_wait_ns += dt;
+  }
+  else
+  {
+    strat->S.lock_shared();
+  }
+}
+
 /* L exclusive lock held during phase 1 (chainCritNormal merges local B
  * into strat->L).  Records wait time in phase1_l_wait_ns (renamed from
  * phase2_wait_ns in task 301 (run 508) — phase 2 no longer exists). */
@@ -224,6 +245,7 @@ static inline void kt_surv_q_lock(SweepContext *ctx, int /*tid*/) { pthread_mute
 static inline void kt_record_reduce(SweepContext*, int, long, long) {}
 static inline void kt_S_lock_exclusive(SweepContext *ctx, int /*tid*/) { ctx->strat->S.lock_exclusive(); }
 static inline void kt_S_lock_shared(SweepContext *ctx, int /*tid*/) { ctx->strat->S.lock_shared(); }
+static inline void kt_S_lock_shared_phase0(SweepContext *ctx, int /*tid*/) { ctx->strat->S.lock_shared(); }
 static inline void kt_L_lock_phase2(SweepContext *ctx, int /*tid*/) { pthread_mutex_lock(&ctx->L_lock); }
 #endif
 
@@ -333,6 +355,7 @@ SweepContext *sweep_context_init(kStrategy strat, int nthreads)
   ctx->thread_ids = (int *)calloc(alloc_n, sizeof(int));
 
   pthread_mutex_init(&ctx->L_lock, NULL);
+  pthread_mutex_init(&ctx->redtail_lock, NULL);
 
   ctx->done.store(false, std::memory_order_relaxed);
   ctx->stat_reductions.store(0, std::memory_order_relaxed);
@@ -378,6 +401,7 @@ void sweep_context_destroy(SweepContext *ctx)
   if (ctx == NULL) return;
   pthread_barrier_destroy(&ctx->startup_barrier);
   pthread_mutex_destroy(&ctx->L_lock);
+  pthread_mutex_destroy(&ctx->redtail_lock);
   pthread_mutex_destroy(&ctx->survivor_queue_mutex);
   pthread_mutex_destroy(&ctx->publish_lock);
   pthread_cond_destroy(&ctx->pairs_available);
@@ -1144,31 +1168,58 @@ static void process_survivor_lobject(SweepContext *ctx, LObject *P, int thread_i
   long enterT_accum = 0;
   long enterpairs_accum = 0;
   long enterS_accum = 0;
-  long phase0_work = 0;
+  long phase0_work = 0;        // S-exclusive hold time (enterT+enterS)
+  long phase0_shared_work = 0; // S-shared hold time (redtailBba etc.)
   long phase1_work = 0;
 #endif
 
   // ------------------------------------------------------------------
-  // Phase 0 — S-exclusive, brief: everything that must run under
-  // exclusive semantics.  GetP / initEcart / find_pos / redtailBba /
-  // pCleardenom / pNorm / SetShortExpVector / enterT / enterS.
+  // Phase 0 (task 359; run 572) — split between three regions to
+  // shrink the S-exclusive critical section to enterT + enterS only.
   //
-  // Capturing my_arrival: because we hold S-exclusive, strat->arrival_counter
-  // reflects the id of the NEXT entry enterS will take.  Read it
-  // here; enterS then fetch_add's it, stamping the new SElement.
+  //   (a) Unlocked: GetP / initEcart / PrintS / redTailChange = FALSE.
+  //       Pure LObject mutations.
+  //
+  //   (b) S-shared: redtailBbaAlsoLC_Z / pCleardenom (or pNorm) /
+  //       redtailBba / pCleardenom (INTSTRATEGY post-redtail) /
+  //       SetShortExpVector.  These read T/S but never mutate them.
+  //       Multiple drainers can run this region concurrently.
+  //       redtailBba is passed strat->S.end() instead of a precomputed
+  //       find_pos result: in the common withT=true (non-homogeneous)
+  //       case redtailBba doesn't read S at all (it uses
+  //       kFindDivisibleByInT); in the withT=false (homogeneous) case
+  //       kFindDivisibleByInS_T iterates S to end(), with the sev/
+  //       pLmCmp prefilter making the divisor search cheap.
+  //
+  //   (c) S-exclusive: enterT + capture my_arrival + enterS.  enterS
+  //       returns the iterator at the inserted position (h's index);
+  //       phase 1 uses that as pos_it.  my_arrival is the arrival_id
+  //       enterS will stamp on h (enter_bba fetch_add's the counter;
+  //       we hold S-exclusive so the counter is stable between the
+  //       load and the fetch_add).
+  //
+  // Motivation: staging-9454 attribution showed main's phase1_wait
+  // (S-shared at refill) dominated by workers stuck in phase-0
+  // S-exclusive doing redtailBba (~17 % of worker wall).  Splitting
+  // redtailBba off S-exclusive directly attacks that contention.
   // ------------------------------------------------------------------
-  kt_S_lock_exclusive(ctx, thread_id);
-#ifdef KTHREAD_INSTRUMENT
-  long p0_t0 = KT_STATS(ctx) ? kt_now_ns() : 0;
-#endif
 
+  // (a) Unlocked.
   P->GetP(strat->lmBin);
   if (strat->homog) strat->initEcart(P);
 
   if (TEST_OPT_PROT) PrintS("s");
 
-  auto pos_it = strat->S.find_pos(P->p, P->ecart);
-
+  // (b) S-shared.  Hold redtail_lock while running redtailBba: it writes
+  // strat->redTailChange and strat->completeReduce_retry (shared strat
+  // fields), so concurrent calls would race.  redtail_lock serializes
+  // the redtailBba block but does not block S-shared readers (e.g.
+  // main's refill_and_publish), which was the actual bottleneck.
+  kt_S_lock_shared_phase0(ctx, thread_id);
+  pthread_mutex_lock(&ctx->redtail_lock);
+#ifdef KTHREAD_INSTRUMENT
+  long p0s_t0 = KT_STATS(ctx) ? kt_now_ns() : 0;
+#endif
   strat->redTailChange = FALSE;
 
   if (rField_is_Z(currRing) && !rHasLocalOrMixedOrdering(currRing))
@@ -1182,7 +1233,7 @@ static void process_survivor_lobject(SweepContext *ctx, LObject *P, int thread_i
 #ifdef KTHREAD_INSTRUMENT
       long rt0 = KT_STATS(ctx) ? kt_now_ns() : 0;
 #endif
-      P->p = redtailBba(P, pos_it, strat, withT,
+      P->p = redtailBba(P, strat->S.end(), strat, withT,
                         !TEST_OPT_CONTENTSB);
 #ifdef KTHREAD_INSTRUMENT
       if (KT_STATS(ctx)) redtail_accum += kt_now_ns() - rt0;
@@ -1199,7 +1250,7 @@ static void process_survivor_lobject(SweepContext *ctx, LObject *P, int thread_i
 #ifdef KTHREAD_INSTRUMENT
       long rt0 = KT_STATS(ctx) ? kt_now_ns() : 0;
 #endif
-      P->p = redtailBba(P, pos_it, strat, withT);
+      P->p = redtailBba(P, strat->S.end(), strat, withT);
 #ifdef KTHREAD_INSTRUMENT
       if (KT_STATS(ctx)) redtail_accum += kt_now_ns() - rt0;
 #endif
@@ -1207,15 +1258,32 @@ static void process_survivor_lobject(SweepContext *ctx, LObject *P, int thread_i
     }
   }
 
-  // Enter h into T and S under exclusive lock.  my_arrival is the
-  // arrival_id enterS will stamp on h (enter_bba fetch_add's the
-  // counter; we're the only thread doing enterS under S-exclusive).
+  pthread_mutex_unlock(&ctx->redtail_lock);
+
+  // SetShortExpVector is a pure LObject mutation but is needed before
+  // enterT (which reads p.sev to populate sevT[atT]).  Compute it here
+  // so we don't redo it under exclusive.
+  bool will_enterS = ((!TEST_OPT_IDLIFT) || (pGetComp(P->p) <= strat->syzComp));
+  if (will_enterS)
+    P->SetShortExpVector();
+
+#ifdef KTHREAD_INSTRUMENT
+  if (KT_STATS(ctx)) phase0_shared_work = kt_now_ns() - p0s_t0;
+#endif
+  strat->S.unlock_shared();
+
+  // (c) S-exclusive: enterT + enterS.  Capture pos_it from enterS's
+  // return (the iterator at h's inserted position) for phase 1.
+  // pos_it must be default-constructible / assignable across the
+  // shared/exclusive boundary; sBasisSet::iterator is a thin wrapper.
+  sBasisSet::iterator pos_it = strat->S.end();
   uint64_t my_arrival = UINT64_MAX;
   bool did_enterS = false;
-  if ((!TEST_OPT_IDLIFT) || (pGetComp(P->p) <= strat->syzComp))
+  if (will_enterS)
   {
-    P->SetShortExpVector();
+    kt_S_lock_exclusive(ctx, thread_id);
 #ifdef KTHREAD_INSTRUMENT
+    long p0_t0 = KT_STATS(ctx) ? kt_now_ns() : 0;
     long et0 = KT_STATS(ctx) ? kt_now_ns() : 0;
 #endif
     enterT(*P, strat);
@@ -1224,16 +1292,15 @@ static void process_survivor_lobject(SweepContext *ctx, LObject *P, int thread_i
     long es0 = KT_STATS(ctx) ? kt_now_ns() : 0;
 #endif
     my_arrival = strat->arrival_counter.load(std::memory_order_relaxed);
-    strat->enterS(*P, strat, strat->T.size()-1, strat->S.end());
+    pos_it = strat->enterS(*P, strat, strat->T.size()-1, strat->S.end());
     did_enterS = true;
 #ifdef KTHREAD_INSTRUMENT
     if (KT_STATS(ctx)) enterS_accum += kt_now_ns() - es0;
+    if (KT_STATS(ctx)) phase0_work = kt_now_ns() - p0_t0;
 #endif
+    strat->S.unlock_exclusive();
   }
-
-#ifdef KTHREAD_INSTRUMENT
-  if (KT_STATS(ctx)) phase0_work = kt_now_ns() - p0_t0;
-#endif
+  // else: nothing entered T/S; phase 1 is skipped (did_enterS == false)
 
   // ------------------------------------------------------------------
   // Phase 1 — S-shared + L-exclusive: thread-local B, arrival_id
@@ -1245,12 +1312,11 @@ static void process_survivor_lobject(SweepContext *ctx, LObject *P, int thread_i
   // chainCritNormal's L mutations are serialised against peer
   // drainers' own chainCritNormal and against fill_active_slots).
   //
-  // Downgrade S-exclusive → S-shared: no atomic path, so unlock then
-  // rdlock.  Peer drainers' phase 0 (which needs exclusive) could
-  // steal in between; that is fine — their phase 0 runs, they finish
-  // enterS, they drop exclusive, we get shared.
+  // S-exclusive was already released at the end of phase 0(c).  Peer
+  // drainers' phase 0 (which needs exclusive) can run between (c) and
+  // the kt_S_lock_shared below; that is fine — their phase 0 runs,
+  // they finish enterS, they drop exclusive, we get shared.
   // ------------------------------------------------------------------
-  strat->S.unlock_exclusive();
 
   if (did_enterS)
   {
@@ -1416,6 +1482,7 @@ static void process_survivor_lobject(SweepContext *ctx, LObject *P, int thread_i
     ts.drain_survivors++;
 
     ts.phase0_ns += phase0_work;
+    ts.phase0_shared_ns += phase0_shared_work;
     ts.phase1_ns += phase1_work;
     // phase1_l_ns is accumulated inside the phase-1 block at the L-lock
     // unlock site (task 357; run 570, option F).  Strictly contains phase1_ns.
@@ -1703,15 +1770,23 @@ void kt_dump_stats(SweepContext *ctx)
   // phase).  ph1_cmax is the peak value of ctx->enterpairs_active
   // sampled by this thread on phase-1 entry (how many drainers
   // were concurrently in phase 1).
-  fprintf(stderr, "[kthread-stats] %-4s %14s %14s %14s %14s %14s %14s %10s %10s %10s %10s\n",
-          "tid", "phase0_wait", "phase0_ns", "phase1_wait", "phase1_ns",
+  //
+  // task 359 (run 572): phase 0 was split into a pre-enterS S-shared
+  // region (phase0_shared_*) and the original S-exclusive enterT+enterS
+  // region (still phase0_*).  Old phase0_ns ≈ new phase0_ns +
+  // new phase0_shared_ns.
+  fprintf(stderr, "[kthread-stats] %-4s %14s %14s %14s %14s %14s %14s %14s %14s %10s %10s %10s %10s\n",
+          "tid", "phase0_wait", "phase0_ns", "p0_sh_wait", "p0_sh_ns",
+          "phase1_wait", "phase1_ns",
           "phase1_l_wait", "phase1_l_ns", "ph_surv", "ph_s_cas", "ph_l_cas",
           "ph1_cmax");
   for (int i = 0; i < tt; i++)
   {
     ThreadStats &ts = ctx->tstats[i];
-    fprintf(stderr, "[kthread-stats] p%-3d %14ld %14ld %14ld %14ld %14ld %14ld %10ld %10ld %10ld %10ld\n",
-            i, ts.phase0_wait_ns, ts.phase0_ns, ts.phase1_wait_ns, ts.phase1_ns,
+    fprintf(stderr, "[kthread-stats] p%-3d %14ld %14ld %14ld %14ld %14ld %14ld %14ld %14ld %10ld %10ld %10ld %10ld\n",
+            i, ts.phase0_wait_ns, ts.phase0_ns,
+            ts.phase0_shared_wait_ns, ts.phase0_shared_ns,
+            ts.phase1_wait_ns, ts.phase1_ns,
             ts.phase1_l_wait_ns, ts.phase1_l_ns, ts.phase_survivors,
             ts.phase_s_cas_fail, ts.phase_l_cas_fail,
             ts.phase1_concurrent_max);
