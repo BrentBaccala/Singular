@@ -375,6 +375,7 @@ SweepContext *sweep_context_init(kStrategy strat, int nthreads)
   // Sync the barrier counter to strat's current arrival_counter so the
   // first survivor to enter S in this dispatch passes immediately.
   pthread_cond_init(&ctx->enterpairs_order_cv, NULL);
+  pthread_mutex_init(&ctx->enterpairs_order_lock, NULL);
   ctx->next_enterpairs_arrival_id.store(
       strat->arrival_counter.load(std::memory_order_relaxed),
       std::memory_order_relaxed);
@@ -408,6 +409,7 @@ void sweep_context_destroy(SweepContext *ctx)
   pthread_cond_destroy(&ctx->tiles_avail_cv);
   pthread_cond_destroy(&ctx->slot_freed_cv);
   pthread_cond_destroy(&ctx->enterpairs_order_cv);
+  pthread_mutex_destroy(&ctx->enterpairs_order_lock);
   delete ctx->survivor_queue;
   free(ctx->active);
   free(ctx->sweep_results);
@@ -1339,6 +1341,32 @@ static void process_survivor_lobject(SweepContext *ctx, LObject *P, int thread_i
     t_local_pairtest_hits = &local_pairtest_hits;
 
     kt_S_lock_shared(ctx, thread_id);
+
+    // Phase-1 enterpairs ordering barrier.  Block until predecessors
+    // (arrival_id < my_arrival) have completed their enterpairs,
+    // restoring the serial-equivalent invariant: enterpairs(h_i) sees
+    // an S in which no entry has been tombstoned by anyone with
+    // arrival_id > i.  Wait BEFORE acquiring L_lock so we don't hold
+    // L_lock during the wait — predecessors need L_lock for their
+    // enterpairs work, so blocking on it would self-deadlock.  See
+    // ~/project/docs/parallel-bba-deferred-enterpairs-clearS-violation.md.
+    //
+    // Task 360: the cond_wait used to share L_lock as its mutex, which
+    // forced the wait to happen *after* L-lock acquisition — making
+    // L_lock load-bearing for ordering rather than just data
+    // protection.  The chunked-LSet refactor decouples the two:
+    // enterpairs_order_lock is dedicated to the barrier, held only
+    // for the wait/broadcast pair, and uncontended outside that
+    // window.
+    if (ctx->serialize_enterpairs) {
+      pthread_mutex_lock(&ctx->enterpairs_order_lock);
+      while (ctx->next_enterpairs_arrival_id.load(std::memory_order_relaxed)
+             != my_arrival) {
+        pthread_cond_wait(&ctx->enterpairs_order_cv, &ctx->enterpairs_order_lock);
+      }
+      pthread_mutex_unlock(&ctx->enterpairs_order_lock);
+    }
+
     kt_L_lock_phase2(ctx, thread_id);
 
 #ifdef KTHREAD_INSTRUMENT
@@ -1349,20 +1377,6 @@ static void process_survivor_lobject(SweepContext *ctx, LObject *P, int thread_i
     // algebraically equal to phase1_ns — useless.
     long p1_l_acquired_ns = KT_STATS(ctx) ? kt_now_ns() : 0;
 #endif
-
-    // Phase-1 enterpairs ordering barrier.  Block until predecessors
-    // (arrival_id < my_arrival) have completed their enterpairs,
-    // restoring the serial-equivalent invariant: enterpairs(h_i) sees
-    // an S in which no entry has been tombstoned by anyone with
-    // arrival_id > i.  cond_wait atomically releases L_lock so a
-    // predecessor can acquire it and bump the counter.  See
-    // ~/project/docs/parallel-bba-deferred-enterpairs-clearS-violation.md.
-    if (ctx->serialize_enterpairs) {
-      while (ctx->next_enterpairs_arrival_id.load(std::memory_order_relaxed)
-             != my_arrival) {
-        pthread_cond_wait(&ctx->enterpairs_order_cv, &ctx->L_lock);
-      }
-    }
 
 #ifdef KTHREAD_INSTRUMENT
     long p1_t0 = KT_STATS(ctx) ? kt_now_ns() : 0;
@@ -1437,19 +1451,28 @@ static void process_survivor_lobject(SweepContext *ctx, LObject *P, int thread_i
 
     // Phase-1 enterpairs ordering barrier: advance the counter and
     // wake successors waiting for arrival_id == my_arrival + 1.
+    // Task 360: broadcast under enterpairs_order_lock (not L_lock) so
+    // waiters that woke spuriously and re-checked the predicate before
+    // we updated it cannot miss the wakeup.  release-store on the
+    // counter pairs with the cond_wait's lock-acquire fence to ensure
+    // the new value is visible to a freshly-woken waiter.
     if (ctx->serialize_enterpairs) {
+      pthread_mutex_lock(&ctx->enterpairs_order_lock);
       ctx->next_enterpairs_arrival_id.store(my_arrival + 1,
-                                            std::memory_order_relaxed);
+                                            std::memory_order_release);
       pthread_cond_broadcast(&ctx->enterpairs_order_cv);
+      pthread_mutex_unlock(&ctx->enterpairs_order_lock);
     }
 
 #ifdef KTHREAD_INSTRUMENT
     if (KT_STATS(ctx))
     {
       // Sample L-hold delta just before the unlock — covers the entire
-      // span L-lock-acquired → L-lock-released, including the cond_wait
-      // on enterpairs_order_cv (which atomically released L during the
-      // wait, but resumed with L held).  See task 357 (run 570) option F.
+      // span L-lock-acquired → L-lock-released.  The barrier wait now
+      // happens BEFORE L_lock acquisition (task 360), so phase1_l_ns
+      // no longer includes barrier-wait time — that's a separate
+      // bucket on the predecessor's enterpairs.  See task 357 (run 570)
+      // option F for the original L-lock instrumentation choice.
       KT_TS(ctx, thread_id).phase1_l_ns +=
           kt_now_ns() - p1_l_acquired_ns;
     }

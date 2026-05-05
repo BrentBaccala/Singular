@@ -446,9 +446,14 @@ struct SweepContext
   // any GM B-criterion kill that cited those pairs as its co-spoly
   // becomes unjustified.  See
   // ~/project/docs/parallel-bba-deferred-enterpairs-clearS-violation.md.
-  // The cv shares L_lock since enterpairs is already L-lock-serialized.
+  // The cv has its own dedicated mutex (enterpairs_order_lock).  Prior
+  // to task 360 the cv shared L_lock because enterpairs ran under L-lock
+  // for data-protection; the chunked-LSet refactor decouples L access
+  // from the barrier so the cv now needs its own lock.  Held only for
+  // the cond_wait/cond_broadcast pair, otherwise uncontended.
   std::atomic<uint64_t> next_enterpairs_arrival_id;
   pthread_cond_t enterpairs_order_cv;
+  pthread_mutex_t enterpairs_order_lock;
   bool serialize_enterpairs;
 
 #ifdef KTHREAD_INSTRUMENT
