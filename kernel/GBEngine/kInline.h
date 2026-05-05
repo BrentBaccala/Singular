@@ -1030,15 +1030,13 @@ KINLINE void LSetChunk::pop(void) {
    * absolute count exceeds the fixed minimum — so small-L workloads
    * never hit it.
    */
-  // Compact when tombstones outnumber live entries AND there are enough
-  // tombstones that the skip-walk cost per pop exceeds a small absolute
-  // cap.  Threshold chosen so that small L/B sets never pay compaction
-  // overhead; only loads that generate large tombstone backlogs (typical
-  // for long-running bba computations) trigger the bounded compact.
-  static const int COMPACT_THRESHOLD = 1024;
-  if (deleted_count_ > live_count_ && deleted_count_ > COMPACT_THRESHOLD) {
-    compact();
-  }
+  // Compact-on-pop policy used to live here as an inline call; in
+  // task 360 step 5 it moved up to the wrapper level (LSet::pop and
+  // its caller-side drop-and-reacquire).  The chunk-level pop is now
+  // a pure removal: it must not mutate state in a way that requires
+  // the writer lock, because a caller may be holding the wrapper's
+  // reader lock when calling chunk.pop().  See
+  // ~/project/docs/parallel-bba-chunked-lsets.md.
 
   if (deleted_count_ > 0) {
     long skip = 0;

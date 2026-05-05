@@ -1781,11 +1781,40 @@ public:
   long pop_skip_count() const                       { return chunk_.pop_skip_count(); }
   void debug_print_stats(const char *tag = NULL) const { chunk_.debug_print_stats(tag); }
 
-  // ----- Step 5/6 hooks (placeholders, not yet acquired) -----
-  // These will be wired into every dispatching method in step 5.
-  // Exposing them here ahead of time lets a caller take an explicit
-  // read/write lock if needed during the transition (no current
-  // caller does).
+  // ----- Compact threshold -----
+  // Step 5: callers driving the rdlock-pop / wrlock-compact dance check
+  // this AFTER releasing the rdlock; if true, take the wrlock and call
+  // compact().  Pre-step-5 the equivalent check lived inline in
+  // LSetChunk::pop, where it ran under the global L_lock — but that
+  // shape doesn't survive the read/write split because compact() must
+  // not run under a reader lock.  Threshold matches the prior policy:
+  // tombstones > live AND tombstones > 1024.  Step 6 will broaden to
+  // include a chunk-count threshold (k > 256).
+  bool needs_compact() const {
+    int d = chunk_.deleted_count();
+    int l = (int)chunk_.size();
+    return d > l && d > 1024;
+  }
+
+  // ----- Reader-writer lock interface -----
+  //
+  // Concurrency discipline (steady state under parallel-bba):
+  //   - Multi-call L-touching blocks (worker phase 1: chainCritNormal
+  //     scan + erases + kMergeBintoL): the **caller** wraps the block
+  //     in rdlock() / unlock().  Wrapper methods invoked inside the
+  //     block do NOT acquire — iterator validity is preserved across
+  //     the block.
+  //   - Single-call ops (empty, size, top, pop, ...): caller may invoke
+  //     directly, but for safety against a concurrent compact under
+  //     write-lock, the caller-side wrapper IS expected to hold the
+  //     rdlock.  The current call-site discipline (in kthread.cc and
+  //     kutil.cc parallel paths) is "every site that touched L_lock
+  //     pre-step-5 now takes rdlock"; non-parallel paths (exitBuchMora,
+  //     bba serial driver) need no locking because no concurrency.
+  //   - compact(): caller must hold the wrlock.  The natural pattern
+  //     is rdlock-pop-unlock, then check needs_compact(), then
+  //     wrlock-compact-unlock (drop-and-reacquire).  See
+  //     fill_active_slots in kthread.cc.
   void rdlock()   { pthread_rwlock_rdlock(&rwlock_); }
   void wrlock()   { pthread_rwlock_wrlock(&rwlock_); }
   void unlock()   { pthread_rwlock_unlock(&rwlock_); }

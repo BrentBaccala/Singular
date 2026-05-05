@@ -370,8 +370,11 @@ struct SweepContext
   pthread_t *threads;
   int *thread_ids;          // thread_id for each worker
 
-  // Mutex for L access (multiple threads pop from L)
-  pthread_mutex_t L_lock;
+  // L data-protection lock (task 360 step 5): the pthread_mutex_t
+  // L_lock that used to live here moved onto strat->L itself
+  // (LSet::rwlock_) when we promoted full mutual exclusion to a
+  // reader/writer lock.  See kutil.h's class LSet and
+  // ~/project/docs/parallel-bba-chunked-lsets.md.
 
   // Mutex serializing the phase-0 redtailBba block (task 359; run 572).
   // The S-exclusive critical section was shrunk to just enterT+enterS;
