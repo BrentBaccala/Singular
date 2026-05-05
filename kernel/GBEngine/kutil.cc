@@ -725,17 +725,47 @@ void cleanTSbaRing (kStrategy strat)
 /*2
 *test whether (p1,p2) or (p2,p1) is in L at or after iterator it
 *it returns TRUE if yes and modifies the iterator to point to the match
-*Uses pair_index for O(1) lookup, then checks position constraint
+*Uses pair_index for O(1) lookup, then checks position constraint.
+*
+* Task 360, step 6d: pair_index is now per-chunk; the wrapper-level
+* pair_index_find walks chunks and returns the first hit (an LSet
+* wrapper iterator).  Time spent in the lookup is accumulated to
+* the calling thread's pair_index_lookup_ns counter for diagnostic
+* purposes — instrumentation lets us see if the per-chunk walk
+* ever becomes a hot path.
 */
-BOOLEAN isInPairsetL(LSetChunk::iterator &it,poly p1,poly p2,kStrategy strat)
+BOOLEAN isInPairsetL(LSet::iterator &it,poly p1,poly p2,kStrategy strat)
 {
   if (it == strat->L.end()) return FALSE;
   if (p1 == NULL || p2 == NULL) return FALSE;
   auto key = LSetChunk::canonicalize_pair(p1, p2);
-  auto found = strat->L.pair_index().find(key);
-  if (found != strat->L.pair_index().end()) {
-    LSetChunk::iterator candidate = found->second;
-    // Check position constraint: candidate must be at or after 'it'
+#ifdef KTHREAD_INSTRUMENT
+  long _pi_t0 = 0;
+  bool _pi_inst = (kt_current_ctx != NULL && kt_my_thread_id >= 0
+                   && kt_current_ctx->stats_enabled);
+  if (_pi_inst) _pi_t0 = kt_now_ns();
+#endif
+  LSet::iterator candidate = strat->L.pair_index_find(key);
+#ifdef KTHREAD_INSTRUMENT
+  if (_pi_inst) {
+    ThreadStats &ts = kt_current_ctx->tstats[kt_my_thread_id];
+    ts.pair_index_lookup_ns += kt_now_ns() - _pi_t0;
+    ts.pair_index_lookup_count++;
+  }
+#endif
+  if (candidate != strat->L.end()) {
+    // Stale-entry check: under the chunked-LSet design, pair_index
+    // may contain entries pointing at LObjects that have been
+    // tombstoned by a concurrent peer worker (no atomic erase from
+    // pair_index on the read-path tombstone, to avoid pair_index
+    // races under shared lock — task 360 step 6d).  The wrapper
+    // pair_index_find returns such stale iterators; we verify via
+    // the deleted flag and treat tombstoned candidates as not-found.
+    if (lobject_deleted_load(*candidate)) return FALSE;
+    // Check position constraint: candidate must be at or after 'it'.
+    // Comparator is well-defined across chunks (compares LObjects,
+    // not chunk identity).  See ~/project/docs/parallel-bba-chunked-lsets.md
+    // for the cross-chunk position-check rationale.
     if (candidate == it || !strat->L.key_comp()(*candidate, *it)) {
       it = candidate;
       return TRUE;
@@ -1371,73 +1401,126 @@ static void kLSet_free_polys(LObject& Lp, kStrategy strat) {
 // the cache-friendly unordered and filtered scans skip the slot.  Does
 // NOT touch the multiset tree and does NOT free polys — compact() will
 // do both in one pass when the pile-up gets inconvenient.
+// LSetChunk::erase — tombstone-only erase via the ordered iterator.
+//
+// Task 360, step 6d: under chunked design with rdlock-shared erase
+// path, pair_index updates and counter increments are races under
+// concurrent peer workers tombstoning entries in the SAME chunk
+// (cross-chunk erases happen because filtered_iterator scans walk
+// every chunk).  Mitigation:
+//   - lp->deleted: CAS (lobject_deleted_cas) — only the winner
+//     proceeds with bookkeeping.
+//   - sev_flat_[i] = 0: plain store (atomic in practice on x86;
+//     readers tolerate stale 0 sentinel — they'll re-skip on the
+//     next iteration).
+//   - pair_index.erase: skipped here.  Stale entries linger until
+//     compact rebuilds; isInPairsetL verifies via lobject_deleted_load
+//     before acting on a candidate (kutil.cc:730).
+//   - counters (deleted_count_, live_count_, erase_call_count_):
+//     atomic increments via __atomic_*.  Bumped only by the CAS
+//     winner.
 LSetChunk::iterator LSetChunk::erase(LSetChunk::iterator it) {
   LObject& Lp = *it;
-  if (Lp.deleted) {
-    // Idempotent: a second erase of the same tombstone is a no-op.
+  if (!lobject_deleted_cas(Lp)) {
+    // Lost the race or already deleted; idempotent no-op.
     ++it;
     return it;
   }
-  // Remove from pair_index
-  if (Lp.p1 != NULL && Lp.p2 != NULL) {
-    auto key = canonicalize_pair(Lp.p1, Lp.p2);
-    pair_index.erase(key);
-  }
-  // Mark the sev_flat_ and sevSig_flat_ entries as sentinel (0)
+  // Mark the sev_flat_ and sevSig_flat_ entries as sentinel (0).
+  // Plain stores — concurrent readers tolerate the 0 sentinel.
   if (Lp.flat_index < sev_flat_.size()) sev_flat_[Lp.flat_index] = 0;
   if (Lp.flat_index < sevSig_flat_.size()) sevSig_flat_[Lp.flat_index] = 0;
-  Lp.deleted = true;
-  ++erase_call_count_;
-  ++deleted_count_;
-  if (deleted_count_ > peak_deleted_count_)
-    peak_deleted_count_ = deleted_count_;
-  --live_count_;
-  // Advance to the next live entry (skip_deleted_forward is triggered
-  // by operator++ on the ordered iterator).
+  __atomic_fetch_add(&erase_call_count_, 1, __ATOMIC_RELAXED);
+  int new_deleted = __atomic_add_fetch(&deleted_count_, 1, __ATOMIC_RELAXED);
+  // peak_deleted_count_ is diagnostic; race-tolerant.
+  if (new_deleted > peak_deleted_count_) peak_deleted_count_ = new_deleted;
+  __atomic_fetch_sub(&live_count_, 1, __ATOMIC_RELAXED);
   ++it;
   return it;
 }
 
 LSetChunk::unordered_iterator LSetChunk::erase(LSetChunk::unordered_iterator it) {
   LObject& Lp = *it;
-  if (Lp.deleted) {
-    ++it;  // skip_deleted() inside will advance past it
+  if (!lobject_deleted_cas(Lp)) {
+    ++it;
     return it;
-  }
-  if (Lp.p1 != NULL && Lp.p2 != NULL) {
-    auto key = canonicalize_pair(Lp.p1, Lp.p2);
-    pair_index.erase(key);
   }
   if (Lp.flat_index < sev_flat_.size()) sev_flat_[Lp.flat_index] = 0;
   if (Lp.flat_index < sevSig_flat_.size()) sevSig_flat_[Lp.flat_index] = 0;
-  Lp.deleted = true;
-  ++erase_call_count_;
-  ++deleted_count_;
-  if (deleted_count_ > peak_deleted_count_)
-    peak_deleted_count_ = deleted_count_;
-  --live_count_;
+  __atomic_fetch_add(&erase_call_count_, 1, __ATOMIC_RELAXED);
+  int new_deleted = __atomic_add_fetch(&deleted_count_, 1, __ATOMIC_RELAXED);
+  if (new_deleted > peak_deleted_count_) peak_deleted_count_ = new_deleted;
+  __atomic_fetch_sub(&live_count_, 1, __ATOMIC_RELAXED);
   ++it;
   return it;
 }
 
 LSetChunk::filtered_iterator LSetChunk::erase(LSetChunk::filtered_iterator fit) {
   LObject* lp = flat_ptr(fit.pos_);
-  if (lp != nullptr && !lp->deleted) {
-    if (lp->p1 != NULL && lp->p2 != NULL) {
-      auto key = canonicalize_pair(lp->p1, lp->p2);
-      pair_index.erase(key);
-    }
+  if (lp != nullptr && lobject_deleted_cas(*lp)) {
     if (fit.pos_ < sev_flat_.size()) sev_flat_[fit.pos_] = 0;
     if (fit.pos_ < sevSig_flat_.size()) sevSig_flat_[fit.pos_] = 0;
-    lp->deleted = true;
-    ++erase_call_count_;
-    ++deleted_count_;
-    --live_count_;
+    __atomic_fetch_add(&erase_call_count_, 1, __ATOMIC_RELAXED);
+    __atomic_fetch_add(&deleted_count_, 1, __ATOMIC_RELAXED);
+    __atomic_fetch_sub(&live_count_, 1, __ATOMIC_RELAXED);
   }
-  // Build a new filtered_iterator from the advanced position — the
-  // filtered_iterator::advance inside the ctor handles tombstone/sev
-  // skip-forward.
   return filtered_iterator(this, fit.pos_ + 1, fit.sev1_, fit.sev2_, fit.sev_array_);
+}
+
+// LSetChunk::absorb_live(src): pull live entries from `src` into
+// `*this` via the regular insert path.  See kutil.h declaration.
+//
+// Implementation note: writable_set's `data_` field is private, so we
+// can't `std::multiset::merge` directly (which would be a node-splice
+// O(N log N) without copies).  Instead we walk `src`'s flat_ array
+// and re-push each live entry; this calls writable_set::insert(T&&)
+// which moves the LObject into a new heap node and inserts into our
+// multiset.  Polys (pointer fields inside LObject) are transferred
+// by-value.  Cost is O(N log N) for the inserts plus the
+// rebuild_*-side work — we re-stamp seq during re-push so the merged
+// result has consistent ordering.
+void LSetChunk::absorb_live(LSetChunk& src) {
+  // Walk src's flat_ array (preserves flat_index ordering, which is
+  // insertion order).  Each live entry is push()-ed into *this.
+  size_t n = src.flat_size();
+  for (size_t i = 0; i < n; i++) {
+    LObject* sp = src.flat_ptr(i);
+    if (sp == nullptr) continue;             // tombstoned slot
+    if (lobject_deleted_load(*sp)) continue; // logical tombstone
+    // Push: bumps our seq, re-stamps lobject.seq, inserts into our
+    // tree.  The LObject struct is copied by value into the new
+    // tree node; polys (raw pointer fields) are transferred.
+    LObject moved = *sp;
+    push(moved);
+  }
+  // src is now logically empty (its polys have been transferred via
+  // the LObject copies above).  Calling clear() would `delete`
+  // src's tree nodes including the polys we just transferred —
+  // freeing them in the new chunk.  Instead, clear src's
+  // bookkeeping and detach its tree nodes safely:
+  //
+  //   - Each LObject inside src->data_ is a heap-allocated wrapper
+  //     for a (now-defunct) entry.  We need to drop those wrappers
+  //     without freeing the polys (the polys live in the new
+  //     chunk's wrappers now).  Set deleted=true on each, then
+  //     clear src's poly pointers, then call writable_set::clear
+  //     which `delete`s wrappers but the polys are already null.
+  //
+  // Simpler: walk src's flat, set p/t_p/lcm/p1/p2/sig pointers to
+  // NULL on the source LObjects, then clear src.  The wrapper
+  // delete in writable_set::clear then frees zero polys.
+  for (size_t i = 0; i < n; i++) {
+    LObject* sp = src.flat_ptr(i);
+    if (sp == nullptr) continue;
+    sp->p = NULL;
+    sp->t_p = NULL;
+    sp->lcm = NULL;
+    sp->p1 = NULL;
+    sp->p2 = NULL;
+    sp->sig = NULL;
+    sp->bucket = NULL;
+  }
+  src.clear();   // frees the wrappers (polys already nulled)
 }
 
 // compact(): physically remove all tombstoned entries from the multiset
@@ -1513,6 +1596,57 @@ void LSetChunk::compact() {
   rebuild_sev_flat();
   rebuild_sevSig_flat();
   rebuild_pair_index();
+}
+
+// LSet::compact() — coalesce all chunks into the head chunk and drop
+// tombstones.  Caller MUST hold the writer lock (compact is the only
+// writer-lock holder; concurrent readers would observe inconsistent
+// chain state during the absorb / free-successors phase).
+//
+// Algorithm (task 360, step 6e):
+//   1. Drop tombstones from head via LSetChunk::compact() in place.
+//   2. For each successor chunk (head->next, ...), absorb live
+//      entries into head via LSetChunk::absorb_live (re-push under
+//      head's seq counter, transferring polys by value), then free
+//      the chunk's tree nodes safely.
+//   3. Clear head->next; tail_ = &chunk_.
+//
+// Re-checks needs_compact() under wrlock to avoid wasted work if a
+// concurrent appender has not yet pushed past threshold.
+void LSet::compact() {
+#ifdef KTHREAD_INSTRUMENT
+  long _t0 = (kt_current_ctx != NULL && kt_current_ctx->stats_enabled)
+              ? kt_now_ns() : 0;
+#endif
+  size_t k = chunk_count_unlocked();
+  last_compact_k_ = k;
+  // Step 1: drop tombstones in head.
+  chunk_.compact();
+  // Step 2: absorb successor chunks one at a time.  We must walk
+  // head->next->...->tail; absorb_live moves polys into head and
+  // empties each successor.  After each absorb, we can free the
+  // successor.
+  LSetChunk* succ = chunk_.next.load(std::memory_order_acquire);
+  while (succ != nullptr) {
+    LSetChunk* nxt = succ->next.load(std::memory_order_acquire);
+    chunk_.absorb_live(*succ);
+    delete succ;
+    succ = nxt;
+  }
+  chunk_.next.store(nullptr, std::memory_order_release);
+  tail_.store(&chunk_, std::memory_order_release);
+  // Step 3: another in-place compact in case absorb pushed under
+  // tombstones somehow (it shouldn't — push only inserts live).
+  // Skipped: absorb only inserts live entries, no tombstones added.
+
+  ++compact_call_count_wrapper_;
+#ifdef KTHREAD_INSTRUMENT
+  if (_t0 != 0) {
+    long dt = kt_now_ns() - _t0;
+    compact_total_ns_ += dt;
+    if (dt > compact_max_ns_) compact_max_ns_ = dt;
+  }
+#endif
 }
 
 /*2
@@ -3382,15 +3516,41 @@ void enterOnePairSpecial (const SElement &si,poly p,int ecart,kStrategy strat, i
 
 /*2
 * merge set B into L
+*
+* Task 360, step 6b: in parallel mode (t_local_B_override is set —
+* the per-survivor drainer's local_B), B is move-appended into L as
+* a single new chunk via the wrapper's lock-free CAS-append.  In
+* serial mode (strat->B), B is push-into-head one element at a
+* time (preserves single-chunk semantics for serial paths that
+* don't tolerate chunk accumulation).
+*
+* The caller is expected to hold the wrapper's read-lock for the
+* duration of this call (worker phase 1 in kthread.cc takes the
+* read-lock at block scope).  In serial mode there is no concurrency,
+* so the read-lock is uncontended.
 */
 void kMergeBintoL(kStrategy strat)
 {
-  while (!strat_B(strat).empty()) {
-    auto Lobj = strat_B(strat).top();
-    strat_B(strat).pop();
-    strat->L.push(Lobj);
+  if (t_local_B_override != NULL) {
+    // Parallel mode: move-append the local_B chunk into L's chain.
+    // append_chunk takes ownership via std::move; local_B is left
+    // empty afterwards and ready for reuse (serial code paths inside
+    // the same survivor never re-fill it after this call).
+    strat->L.append_chunk(std::move(*t_local_B_override));
+    // After the move, local_B is empty; clear to reset any residual
+    // tombstone/state and the flat_ array (move ctor preserves seq).
+    t_local_B_override->clear();
+  } else {
+    // Serial mode: push-into-head one at a time.  This keeps L
+    // single-chunk in serial paths (no chunked compaction needed).
+    LSetChunk& B = strat_B(strat);
+    while (!B.empty()) {
+      auto Lobj = B.top();
+      B.pop();
+      strat->L.push(Lobj);
+    }
+    B.clear();  // reset flat_ array to prevent unbounded growth
   }
-  strat_B(strat).clear();  // reset flat_ array to prevent unbounded growth
 }
 
 /* merge set B into L, and return a vector of iterators pointing to the new
@@ -3399,23 +3559,45 @@ void kMergeBintoL(kStrategy strat)
  * The ordering is done to mimic previous versions of Singular so as
  * to ensure that regression tests pass.  I know of no other reason to
  * sort these iterators.
+ *
+ * Task 360, step 6b: parallel mode appends a fresh chunk and returns
+ * wrapper iterators into that chunk.  Iterators stay valid for the
+ * caller's read-lock window — compact (writer) cannot run while the
+ * caller holds rdlock.  Serial mode falls through to push-into-head.
  */
 
-std::vector<LSetChunk::iterator> kMergeBintoL_and_return_iterators(kStrategy strat)
+std::vector<LSet::iterator> kMergeBintoL_and_return_iterators(kStrategy strat)
 {
-  std::vector<LSetChunk::iterator> iterators;
+  std::vector<LSet::iterator> iterators;
   iterators.reserve(strat_B(strat).size());
-  while (!strat_B(strat).empty()) {
-    auto Lobj = strat_B(strat).top();
-    strat_B(strat).pop();
-    iterators.push_back(strat->L.push(Lobj));
+  if (t_local_B_override != NULL) {
+    // Parallel mode: append local_B as a single new chunk; iterate
+    // the published chunk to build wrapper iterators.  After
+    // append_chunk returns, the chunk is linked into L's chain and
+    // its contents are stable (compact excluded by caller's rdlock).
+    LSetChunk* fresh = strat->L.append_chunk(std::move(*t_local_B_override));
+    t_local_B_override->clear();   // restore to fresh state
+    if (fresh == nullptr) {
+      return iterators;            // B was empty — nothing published
+    }
+    for (auto it = fresh->begin(); it != fresh->end(); ++it) {
+      iterators.push_back(LSet::iterator(fresh, it));
+    }
+  } else {
+    // Serial mode: push-into-head one at a time.
+    LSetChunk& B = strat_B(strat);
+    while (!B.empty()) {
+      auto Lobj = B.top();
+      B.pop();
+      iterators.push_back(strat->L.push(Lobj));
+    }
+    B.clear();  // reset flat_ array to prevent unbounded growth
   }
   // Sort iterators to match the ordering of their objects in L
   std::sort(iterators.begin(), iterators.end(),
-    [&strat](LSetChunk::iterator a, LSetChunk::iterator b) {
+    [&strat](LSet::iterator a, LSet::iterator b) {
       return strat->L.key_comp()(*a, *b);
     });
-  strat_B(strat).clear();  // reset flat_ array to prevent unbounded growth
   return iterators;
 }
 
@@ -3694,12 +3876,12 @@ void chainCritNormal (poly p,int ecart,kStrategy strat)
     *gives us iterators to the new elements in L-order, avoiding a full
     *scan of L.
     */
-    std::vector<LSetChunk::iterator> bvec = kMergeBintoL_and_return_iterators(strat);
+    std::vector<LSet::iterator> bvec = kMergeBintoL_and_return_iterators(strat);
     /* Deduplicate: for each pair of B-origin elements with the same lcm,
      * do the triangle check via isInPairsetL (O(1) pair_index lookup).
      * Elements removed from consideration are nulled out (set to end())
      * in bvec rather than erased, to avoid memmove. */
-    LSetChunk::iterator endL = strat->L.end();
+    LSet::iterator endL = strat->L.end();
     for (size_t ji = 0; ji < bvec.size(); ji++)
     {
       if (bvec[ji] == endL) continue;
@@ -3783,8 +3965,8 @@ void chainCritSig (poly p,int /*ecart*/,kStrategy strat)
   *Only B-origin elements have p2==p; no tail-marking needed since bvec
   *nulling (bvec[ii]=endL) prevents re-processing.
   */
-  std::vector<LSetChunk::iterator> bvec = kMergeBintoL_and_return_iterators(strat);
-  LSetChunk::iterator endL = strat->L.end();
+  std::vector<LSet::iterator> bvec = kMergeBintoL_and_return_iterators(strat);
+  LSet::iterator endL = strat->L.end();
   for (size_t ji = 0; ji < bvec.size(); ji++)
   {
     if (bvec[ji] == endL) continue;
@@ -4081,8 +4263,8 @@ void chainCritPart (poly p,int ecart,kStrategy strat)
     *pair_index for O(1) triangle checks via bvec.
     *Uses _p_LmDivisibleByPart instead of pDivisibleBy.
     */
-    std::vector<LSetChunk::iterator> bvec = kMergeBintoL_and_return_iterators(strat);
-    LSetChunk::iterator endL = strat->L.end();
+    std::vector<LSet::iterator> bvec = kMergeBintoL_and_return_iterators(strat);
+    LSet::iterator endL = strat->L.end();
     for (size_t ji = 0; ji < bvec.size(); ji++)
     {
       if (bvec[ji] == endL) continue;
@@ -4437,8 +4619,8 @@ void chainCritRing (poly p,int, kStrategy strat)
   *gets canceled, matching the original Ring semantics where the worse-
   *positioned element survives.  The n_DivBy coefficient check is preserved.
   */
-  std::vector<LSetChunk::iterator> bvec = kMergeBintoL_and_return_iterators(strat);
-  LSetChunk::iterator endL = strat->L.end();
+  std::vector<LSet::iterator> bvec = kMergeBintoL_and_return_iterators(strat);
+  LSet::iterator endL = strat->L.end();
   /* Iterate worst-to-first: bvec is sorted best(0) to worst(size-1),
    * so ji starts at the end and works backward */
   for (int ji = (int)bvec.size() - 1; ji >= 0; ji--)

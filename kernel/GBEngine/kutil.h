@@ -1302,6 +1302,21 @@ struct PolyPairHash {
 };
 
 class LSetChunk : public writable_set<LObject, CompareLObject> {
+public:
+  // Intrusive linked-list link, used by the LSet wrapper to chain
+  // chunks together (task 360, step 6).  `next` is an atomic pointer
+  // because workers under the wrapper's read-lock CAS-append new
+  // chunks concurrently; readers walk the chain via
+  // next.load(memory_order_acquire) and observe a published chunk's
+  // contents via release/acquire pairing on next.
+  //
+  // Lifetime: chunks are heap-allocated by the wrapper and freed
+  // either at compact time (under the wrapper's writer lock) or at
+  // wrapper-destructor time.  The wrapper owns the head chunk by
+  // value (chunk_); successor chunks live on the heap and are linked
+  // through this pointer.
+  std::atomic<LSetChunk*> next{nullptr};
+
 private:
   unsigned seq = 0;   // increments by one on every insertion; used to determine ordering
   // Parallel flat array of sev_lcm values for cache-friendly scanning.
@@ -1481,6 +1496,8 @@ public:
   // so we must rebuild sev_flat_, sevSig_flat_, and pair_index to match.
   // The copy ctor uses insert() for each element, so no tombstones are
   // carried over; live_count_ will match the iterated count.
+  // `next` is NOT copied — copies are independent chunks; the wrapper
+  // re-establishes the chain via append.
   LSetChunk(const LSetChunk& other)
     : writable_set<LObject, CompareLObject>(other), seq(other.seq),
       live_count_(0), deleted_count_(0), peak_deleted_count_(0),
@@ -1490,9 +1507,13 @@ public:
     rebuild_pair_index();
     // Base class ::insert copies only live entries on construction; count.
     live_count_ = static_cast<int>(physical_size());
+    next.store(nullptr, std::memory_order_relaxed);
   }
 
   // Move constructor: base class move rebuilds flat_ with new indices.
+  // `next` is move-loaded from the source so that move-construction
+  // preserves the chain link if the source had one.  The source's
+  // `next` is reset to nullptr.
   LSetChunk(LSetChunk&& other) noexcept
     : writable_set<LObject, CompareLObject>(std::move(other)), seq(other.seq),
       live_count_(other.live_count_), deleted_count_(other.deleted_count_),
@@ -1505,9 +1526,14 @@ public:
     rebuild_pair_index();
     other.live_count_ = 0;
     other.deleted_count_ = 0;
+    LSetChunk* n = other.next.load(std::memory_order_relaxed);
+    other.next.store(nullptr, std::memory_order_relaxed);
+    next.store(n, std::memory_order_relaxed);
   }
 
   // Copy assignment: same issue — base class rebuilds flat_ from scratch.
+  // `next` is NOT touched: copy-assignment leaves *this's existing chain
+  // intact (a copy creates an independent chunk).
   LSetChunk& operator=(const LSetChunk& other) {
     if (this != &other) {
       writable_set<LObject, CompareLObject>::operator=(other);
@@ -1525,7 +1551,9 @@ public:
     return *this;
   }
 
-  // Move assignment
+  // Move assignment: data members are moved; `next` is taken over from
+  // the source (and the source's reset to nullptr) so move-assigned
+  // objects preserve the chain.
   LSetChunk& operator=(LSetChunk&& other) noexcept {
     if (this != &other) {
       writable_set<LObject, CompareLObject>::operator=(std::move(other));
@@ -1541,6 +1569,9 @@ public:
       rebuild_sev_flat();
       rebuild_sevSig_flat();
       rebuild_pair_index();
+      LSetChunk* n = other.next.load(std::memory_order_relaxed);
+      other.next.store(nullptr, std::memory_order_relaxed);
+      next.store(n, std::memory_order_relaxed);
     }
     return *this;
   }
@@ -1624,69 +1655,296 @@ public:
   KINLINE const LObject& top(void);
   iterator erase(iterator it);
   unordered_iterator erase(unordered_iterator it);
+
+  // Read the chunk's `seq` counter (for LSet::would_be_top to stamp
+  // a probe LObject without a full push).  Task 360, step 6c.
+  unsigned peek_seq() const { return seq; }
+
+  // Absorb all live entries from `src` into `*this` (task 360, step 6e).
+  // Used by LSet::compact to coalesce chunks.  Walks src's live entries
+  // (skipping tombstones) and pushes each into *this via the regular
+  // insert path, which maintains pair_index, sev_flat_, sevSig_flat_.
+  // After the call, `src` is emptied via clear() (its polys have been
+  // transferred by-value into *this through the LObject struct copy
+  // during insert).
+  //
+  // Note: this is NOT std::multiset::merge — that would be a node
+  // splice but data_ is private to writable_set and the splice would
+  // not update flat_/sev_flat_/sevSig_flat_/pair_index either way.
+  // Iterate-and-insert at compact time costs O(n log n) which is
+  // acceptable inside the brief writer-lock window.  See report.
+  void absorb_live(LSetChunk& src);
 };
 
 /** @class LSet
  *
- * Wrapper around a linked-list of LSetChunk instances.  The intent
- * (full design at ~/project/docs/parallel-bba-chunked-lsets.md and
- * the task 360 prompt) is for steady-state operations
- * (chainCritNormal scans, B-merge appends, pop) to run concurrently
- * under a shared (reader) lock on the wrapper, with periodic
- * compaction taking the exclusive (writer) lock to coalesce chunks
- * back into one.
+ * Wrapper around a linked list of LSetChunk instances (task 360,
+ * step 6).  The head chunk is owned by value (`chunk_`); successor
+ * chunks live on the heap and are linked via the atomic
+ * `LSetChunk::next` pointer.
  *
- * Step 4 status (this commit): wrapper is a no-op single-chunk
- * indirection.  Every public method dispatches directly to a single
- * owned LSetChunk.  rwlock_ is initialized but NOT acquired by any
- * wrapper method yet — the existing kt_L_lock_* mutex
- * infrastructure on SweepContext continues to provide all
- * concurrency control, unchanged.  Behavior is bit-identical to a
- * bare LSetChunk.
+ * Concurrency model (steady state under parallel-bba):
  *
- * Steps 5+6 (deferred to a later commit):
- *  - 5: every wrapper method takes/releases rwlock_ shared; compact
- *    takes it exclusive.  The kt_L_lock_* mutex on SweepContext can
- *    then be dropped from the L data path.
- *  - 6: the single chunk_ becomes a head + tail of an intrusive
- *    linked list of chunks; B-merge CAS-appends a new chunk; pop
- *    walks chunks to find global min; compact uses
- *    std::multiset::merge to coalesce.
+ *   - Read-lock (`rdlock`): held by chainCritNormal scans, B-merge
+ *     CAS-appends, pop, and the wrapper's own queries (size, empty,
+ *     etc.).  Multiple readers run concurrently.  CAS on the tail
+ *     chunk's `next` pointer admits new chunks while readers walk
+ *     the chain.
+ *   - Write-lock (`wrlock`): held only by `compact()`, which
+ *     coalesces all chunks back into the head and trims tombstones.
+ *     Compact runs ~once or twice per second on staging-9454; the
+ *     window is brief (~5 ms estimated).
  *
- * Type aliases (iterator, size_type, etc.) are forwarded from
- * LSetChunk so callers that say "LSetChunk::iterator endL =
- * strat->L.end()" continue to compile.  When step 6 lands, the
- * wrapper iterator becomes its own (chunk_ptr, inner_iterator)
- * tuple type — that's the boundary at which call sites switch
- * from LSetChunk:: type names to LSet:: type names.
+ * The wrapper's `iterator` and `filtered_iterator` types span chunks
+ * — `++` advances within the current chunk and crosses to
+ * `chunk->next` when at chunk end.  `end()` is the sentinel past
+ * the last chunk.  Iterator validity is bounded by the read-lock:
+ * compact (writer) frees successor chunks, so callers must not hold
+ * a wrapper iterator past the read-lock-release.  The read-lock
+ * window is held by the caller side (worker phase 1: chainCritNormal
+ * scan + erases + kMergeBintoL all under one rdlock window in
+ * kthread.cc); single-call ops (pop, empty, ...) acquire internally.
+ *
+ * Memory ownership: head chunk is `chunk_` (by value).  Successor
+ * chunks are raw `LSetChunk*` allocated by `new` and freed either
+ * during `compact()` (after their contents are absorbed into head)
+ * or in `~LSet()`.
+ *
+ * Public interface mirrors what the single-chunk LSet exposed;
+ * callers in kthread.cc / kstdfac.cc / kutil.cc need no change.
+ * The wrapper-level `iterator` type is distinct from
+ * `LSetChunk::iterator` (it carries a chunk pointer); call sites
+ * that took `LSetChunk::iterator` typed bvecs / lt locals had their
+ * types updated to `LSet::iterator` in step 6a.
  */
 class LSet {
+public:
+  // Compact-policy thresholds (task 360, step 6f).
+  // - tomb-fraction trigger preserves the pre-step-6 policy:
+  //   tombstones > live AND tombstones > 1024.
+  // - chunk-count trigger bounds the O(k) pop scan and per_chunk
+  //   pair_index walk.  Picked from the prompt.
+  static constexpr int COMPACT_TOMB_MIN_ABS = 1024;
+  static constexpr size_t COMPACT_CHUNK_COUNT_THRESHOLD = 256;
+
+  // ----- Wrapper iterator type (task 360, step 6a) ---------------
+  //
+  // Spans chunks: holds a chunk pointer + an in-chunk iterator.
+  // operator++ advances within the chunk; on inner==chunk->end()
+  // jumps to the next chunk's begin (which is tombstone-aware) and
+  // skips empty chunks.  end() is the (nullptr, default) sentinel.
+  //
+  // operator+ and operator+= are forwarded to repeated ++ — same
+  // semantics as the underlying writable_set iterator, but
+  // chunk-aware.
+  //
+  // Validity: a wrapper iterator is invalidated when the chunk it
+  // points into is freed by compact().  The read-lock excludes
+  // compact, so iterators are stable for the duration of any
+  // caller's read-lock window.
+  class iterator {
+    friend class LSet;
+    LSetChunk*           chunk_ = nullptr;
+    LSetChunk::iterator  inner_;
+    // Skip past empty/end chunks: if inner_ is at chunk_->end(),
+    // walk forward through the chain until either inner_ points at
+    // a live entry or chunk_ becomes nullptr (end of wrapper).
+    void cross_chunk_advance() {
+      while (chunk_ != nullptr && inner_ == chunk_->end()) {
+        chunk_ = chunk_->next.load(std::memory_order_acquire);
+        if (chunk_ != nullptr) inner_ = chunk_->begin();
+      }
+    }
+  public:
+    using iterator_category = std::forward_iterator_tag;
+    using value_type        = LObject;
+    using difference_type   = std::ptrdiff_t;
+    using pointer           = LObject*;
+    using reference         = LObject&;
+    iterator() = default;
+    iterator(LSetChunk* chunk, LSetChunk::iterator inner)
+      : chunk_(chunk), inner_(inner) {
+      cross_chunk_advance();
+    }
+    LSetChunk* chunk() const { return chunk_; }
+    LSetChunk::iterator inner() const { return inner_; }
+    reference operator*()  const { return *inner_; }
+    pointer   operator->() const { return inner_.operator->(); }
+    iterator& operator++() {
+      ++inner_;
+      cross_chunk_advance();
+      return *this;
+    }
+    iterator operator++(int) { iterator tmp = *this; ++(*this); return tmp; }
+    iterator operator+(difference_type n) const {
+      iterator r = *this;
+      for (difference_type i = 0; i < n; ++i) ++r;
+      return r;
+    }
+    iterator& operator+=(difference_type n) {
+      for (difference_type i = 0; i < n; ++i) ++(*this);
+      return *this;
+    }
+    bool operator==(const iterator& o) const {
+      // end() vs end() compare equal regardless of inner.  Two
+      // non-end iterators must be in the same chunk and the same
+      // inner position.
+      if (chunk_ == nullptr && o.chunk_ == nullptr) return true;
+      if (chunk_ != o.chunk_) return false;
+      return inner_ == o.inner_;
+    }
+    bool operator!=(const iterator& o) const { return !(*this == o); }
+  };
+
+  // ----- Wrapper filtered_iterator (task 360, step 6a) -----------
+  //
+  // Crosses chunks like `iterator`.  Each chunk has its own
+  // sev_flat_/sevSig_flat_ array; the wrapper iterator advances
+  // within a chunk via the per-chunk filtered_iterator and crosses
+  // at chunk boundary.  Erase dispatches into the underlying chunk.
+  class filtered_iterator {
+    friend class LSet;
+    LSetChunk*                   chunk_     = nullptr;
+    LSetChunk::filtered_iterator inner_;
+    // Filter parameters (so we can build a fresh inner when
+    // crossing into a new chunk): mode is encoded by sev2_==0 vs !=0.
+    unsigned long                sev1_      = 0;
+    unsigned long                sev2_      = 0;
+    bool                         use_sig_   = false;  // false: sev_lcm; true: sevSig
+    // Cross-chunk advance: inner_ has reached its chunk's end (per
+    // pos_ == sev_array_->size()), advance to next chunk's begin
+    // with the same filter, skip empty chunks.
+    void cross_chunk_advance() {
+      while (chunk_ != nullptr && inner_ == chunk_end_iter()) {
+        chunk_ = chunk_->next.load(std::memory_order_acquire);
+        if (chunk_ != nullptr) {
+          inner_ = chunk_begin_iter();
+        }
+      }
+    }
+    LSetChunk::filtered_iterator chunk_begin_iter() const {
+      if (use_sig_)         return chunk_->ufbegin_sig(sev1_);
+      if (sev2_ == 0)       return chunk_->ufbegin_lcm(sev1_);
+      return                       chunk_->ufbegin_lcm(sev1_, sev2_);
+    }
+    LSetChunk::filtered_iterator chunk_end_iter() const {
+      return use_sig_ ? chunk_->ufend_sig() : chunk_->ufend_lcm();
+    }
+  public:
+    using iterator_category = std::forward_iterator_tag;
+    using value_type        = LObject;
+    using difference_type   = std::ptrdiff_t;
+    using pointer           = LObject*;
+    using reference         = LObject&;
+    filtered_iterator() = default;
+    filtered_iterator(LSetChunk* chunk, LSetChunk::filtered_iterator inner,
+                      unsigned long sev1, unsigned long sev2, bool use_sig)
+      : chunk_(chunk), inner_(inner), sev1_(sev1), sev2_(sev2),
+        use_sig_(use_sig) {
+      cross_chunk_advance();
+    }
+    LSetChunk* chunk() const { return chunk_; }
+    LSetChunk::filtered_iterator inner() const { return inner_; }
+    reference operator*()  const { return *inner_; }
+    pointer   operator->() const { return inner_.operator->(); }
+    filtered_iterator& operator++() {
+      ++inner_;
+      cross_chunk_advance();
+      return *this;
+    }
+    filtered_iterator operator++(int) {
+      filtered_iterator tmp = *this; ++(*this); return tmp;
+    }
+    bool operator==(const filtered_iterator& o) const {
+      if (chunk_ == nullptr && o.chunk_ == nullptr) return true;
+      if (chunk_ != o.chunk_) return false;
+      return inner_ == o.inner_;
+    }
+    bool operator!=(const filtered_iterator& o) const { return !(*this == o); }
+  };
+
 private:
-  // The single owned chunk (step 4).  Step 6 turns this into a
-  // linked-list head with an atomic next chain.
+  // Head chunk: owned by value.  Successor chunks (if any) live on
+  // the heap and are reached via head_chunk_.next, ...->next, etc.
+  // After every compact(), only chunk_ (head) holds entries; all
+  // successor chunks have been freed.
   LSetChunk chunk_;
 
-  // Reader-writer lock guarding the chunk(s).  Initialized
-  // writer-preferring at construction.  Step 5 wires it into every
-  // public method; step 4 leaves it idle.
+  // Tail-pointer hint for CAS-append.  Updated best-effort by
+  // appenders; readers that need the precise tail walk the chain.
+  // After compact(): tail_ == &chunk_.
+  std::atomic<LSetChunk*> tail_{&chunk_};
+
+  // Reader-writer lock guarding the chain.  Initialized
+  // writer-preferring at construction so that compact (a writer)
+  // doesn't get starved by a steady stream of readers.
   pthread_rwlock_t rwlock_;
 
+  // Compact statistics (wrapper-level, task 360, step 6e).
+  long compact_total_ns_ = 0;
+  long compact_max_ns_   = 0;
+  long compact_call_count_wrapper_ = 0;
+  size_t last_compact_k_ = 1;
+
+  // Helpers -----------------------------------------------------------
+
+  // Walk the chunk chain starting at &chunk_, count the chunks.
+  size_t chunk_count_unlocked() const {
+    size_t k = 0;
+    for (const LSetChunk* c = &chunk_; c != nullptr;
+         c = c->next.load(std::memory_order_acquire)) {
+      ++k;
+    }
+    return k;
+  }
+
+  // Free all successor chunks (everything after head).  After this
+  // call, chunk_.next == nullptr and tail_ == &chunk_.  Caller must
+  // ensure chunks have been emptied (their polys absorbed into
+  // head) before calling — otherwise polys leak.  Used only by
+  // compact() under wrlock.
+  void free_successors_unlocked() {
+    LSetChunk* c = chunk_.next.load(std::memory_order_acquire);
+    chunk_.next.store(nullptr, std::memory_order_release);
+    while (c != nullptr) {
+      LSetChunk* nxt = c->next.load(std::memory_order_acquire);
+      delete c;
+      c = nxt;
+    }
+    tail_.store(&chunk_, std::memory_order_release);
+  }
+
+  // O(k) global-min scan over chunk tops (task 360, step 6c).
+  // Returns wrapper iterator to the global minimum, or end() if
+  // empty.  Caller must hold rdlock or wrlock.
+  iterator find_global_min_unlocked() {
+    LSetChunk*           winner = nullptr;
+    LSetChunk::iterator  winner_it;
+    for (LSetChunk* c = &chunk_; c != nullptr;
+         c = c->next.load(std::memory_order_acquire)) {
+      auto it = c->begin();           // tombstone-skipping
+      if (it == c->end()) continue;   // empty chunk
+      if (winner == nullptr ||
+          chunk_.key_comp()(*it, *winner_it)) {
+        winner = c; winner_it = it;
+      }
+    }
+    return iterator(winner, winner ? winner_it : LSetChunk::iterator());
+  }
+
 public:
-  // Forward LSetChunk's nested types so existing call sites that
-  // say "LSetChunk::iterator endL = strat->L.end()" continue to
-  // compile against either side of the wrapper transition.
-  using iterator           = LSetChunk::iterator;
-  using const_iterator     = LSetChunk::const_iterator;
+  using iterator_t         = iterator;       // disambiguate inner alias
+  using const_iterator     = iterator;       // const reads use the same wrapper
   using reverse_iterator   = LSetChunk::reverse_iterator;
   using unordered_iterator = LSetChunk::unordered_iterator;
-  using filtered_iterator  = LSetChunk::filtered_iterator;
   using size_type          = LSetChunk::size_type;
   using value_type         = LSetChunk::value_type;
   using difference_type    = LSetChunk::difference_type;
 
-  // Pair-index map type forwarded for cleanTSbaRing's direct access
-  // (see kutil.cc:735).  Step 6 replaces this with a wrapper-level
-  // pair_index_find(key) helper.
+  // Pair-index map type forwarded for cleanTSbaRing's direct
+  // wrapper-level access.  After step 6d cleanTSbaRing uses
+  // pair_index_find() / pair_index_walk_size() instead of indexing
+  // a single chunk.
   using pair_index_t = decltype(LSetChunk::pair_index);
 
   // ----- Construction / destruction -----
@@ -1701,6 +1959,16 @@ public:
     pthread_rwlockattr_destroy(&attr);
   }
   ~LSet() {
+    // Free any successor chunks that survived past last compact (if
+    // we shut down before compact ran).  Each LSetChunk destructor
+    // frees its multiset's polys via the writable_set destructor's
+    // clear() call; we don't re-call free here.
+    LSetChunk* c = chunk_.next.load(std::memory_order_relaxed);
+    while (c != nullptr) {
+      LSetChunk* nxt = c->next.load(std::memory_order_relaxed);
+      delete c;
+      c = nxt;
+    }
     pthread_rwlock_destroy(&rwlock_);
   }
   // Non-copyable / non-movable: pthread_rwlock_t is not movable, and
@@ -1714,86 +1982,332 @@ public:
 
   // Copy chunk contents from another LSet, preserving rwlock_
   // identity.  Used by kstdfac.cc:copyL to clone a strategy's L.
+  // Only the head chunk is copied — the source must have been
+  // compacted (single chunk) for this to be a complete copy.
+  // Serial code paths only.
   void copy_contents_from(const LSet& other) {
     chunk_ = other.chunk_;
+    chunk_.next.store(nullptr, std::memory_order_relaxed);
+    tail_.store(&chunk_, std::memory_order_relaxed);
   }
 
-  // ----- Direct access to the wrapped chunk for legacy reach-ins -----
-  // Step 4 only.  cleanTSbaRing (kutil.cc:735) directly indexes
-  // pair_index; expose the chunk's pair_index map until step 6
-  // replaces it with a wrapper-level pair_index_find().
-  pair_index_t& pair_index() { return chunk_.pair_index; }
-  const pair_index_t& pair_index() const { return chunk_.pair_index; }
+  // ----- Pair-index lookup (task 360, step 6d) ---------------------
+  //
+  // Walk the chunk chain, returning a per-chunk iterator + chunk
+  // pointer for the first hit.  Returns (nullptr, default) if no
+  // chunk has the key.  Caller must hold rdlock or wrlock.
+  // Wrapped to bump pair_index_lookup_ns under KTHREAD_INSTRUMENT
+  // (see kutil.cc:isInPairsetL / cleanTSbaRing).
+  iterator pair_index_find(const std::pair<poly, poly>& key) {
+    for (LSetChunk* c = &chunk_; c != nullptr;
+         c = c->next.load(std::memory_order_acquire)) {
+      auto found = c->pair_index.find(key);
+      if (found != c->pair_index.end())
+        return iterator(c, found->second);
+    }
+    return iterator();  // end()
+  }
 
-  // ----- Forwarding interface (single-chunk dispatch in step 4) -----
-  iterator           begin()        { return chunk_.begin(); }
-  iterator           end()          { return chunk_.end(); }
-  const_iterator     begin()  const { return chunk_.begin(); }
-  const_iterator     end()    const { return chunk_.end(); }
-  const_iterator     cbegin() const { return chunk_.cbegin(); }
-  const_iterator     cend()   const { return chunk_.cend(); }
-  reverse_iterator   rbegin()       { return chunk_.rbegin(); }
-  reverse_iterator   rend()         { return chunk_.rend(); }
-  unordered_iterator ubegin()       { return chunk_.ubegin(); }
-  unordered_iterator uend()         { return chunk_.uend(); }
+  // Erase a pair_index entry under wrapper, dispatching to the
+  // owning chunk.  Used by cleanTSbaRing after it has identified
+  // a key to forget.
+  void pair_index_erase(const std::pair<poly, poly>& key) {
+    for (LSetChunk* c = &chunk_; c != nullptr;
+         c = c->next.load(std::memory_order_acquire)) {
+      auto found = c->pair_index.find(key);
+      if (found != c->pair_index.end()) {
+        c->pair_index.erase(found);
+        return;
+      }
+    }
+  }
 
+  // Aggregate pair_index size (sum across chunks).  Diagnostic.
+  size_t pair_index_walk_size() const {
+    size_t n = 0;
+    for (const LSetChunk* c = &chunk_; c != nullptr;
+         c = c->next.load(std::memory_order_acquire)) {
+      n += c->pair_index.size();
+    }
+    return n;
+  }
+
+  // ----- Iterator factories ----------------------------------------
+  iterator begin() { return iterator(&chunk_, chunk_.begin()); }
+  iterator end()   { return iterator(); }   // (nullptr, default)
+  // Const begin/end use the same wrapper (read-only deref).
+  const_iterator cbegin() const {
+    // const-correctness: chunk_'s next.load is allowed; we cast away
+    // const for the wrapper iterator since LObject reads still go
+    // through a non-const path internally (legacy behaviour).
+    return const_cast<LSet*>(this)->begin();
+  }
+  const_iterator cend() const { return const_iterator(); }
+
+  // Filtered iteration (lcm divisibility / incomparability and
+  // signature divisibility) — wrapper-level, crosses chunks.
   filtered_iterator ufbegin_lcm(unsigned long sev) {
-    return chunk_.ufbegin_lcm(sev);
+    return filtered_iterator(&chunk_, chunk_.ufbegin_lcm(sev),
+                             sev, 0, /*use_sig=*/false);
   }
   filtered_iterator ufbegin_lcm(unsigned long sev1, unsigned long sev2) {
-    return chunk_.ufbegin_lcm(sev1, sev2);
+    return filtered_iterator(&chunk_, chunk_.ufbegin_lcm(sev1, sev2),
+                             sev1, sev2, /*use_sig=*/false);
   }
-  filtered_iterator ufend_lcm()  { return chunk_.ufend_lcm(); }
+  filtered_iterator ufend_lcm() { return filtered_iterator(); }
   filtered_iterator ufbegin_sig(unsigned long sev) {
-    return chunk_.ufbegin_sig(sev);
+    return filtered_iterator(&chunk_, chunk_.ufbegin_sig(sev),
+                             sev, 0, /*use_sig=*/true);
   }
-  filtered_iterator ufend_sig()  { return chunk_.ufend_sig(); }
+  filtered_iterator ufend_sig() { return filtered_iterator(); }
 
-  iterator           push(LObject& lobject)         { return chunk_.push(lobject); }
-  bool               would_be_top(LObject& lobject) { return chunk_.would_be_top(lobject); }
-  void               pop(void)                      { chunk_.pop(); }
-  void               pop_and_erase(void)            { chunk_.pop_and_erase(); }
-  const LObject&     top(void)                      { return chunk_.top(); }
+  // ----- Push (single-element insert into head) -------------------
+  //
+  // Used by serial code paths and by ring strategies (enterOneStrongPoly
+  // etc.) that push one entry at a time into L.  Always goes into
+  // the head chunk to keep the wrapper interface intact.  In
+  // parallel mode the worker phase-1 path uses the move-append
+  // (`append_chunk`) instead.
+  iterator push(LObject& lobject) {
+    auto inner = chunk_.push(lobject);
+    return iterator(&chunk_, inner);
+  }
 
-  iterator           erase(iterator it)             { return chunk_.erase(it); }
-  unordered_iterator erase(unordered_iterator it)   { return chunk_.erase(it); }
-  filtered_iterator  erase(filtered_iterator it)    { return chunk_.erase(it); }
+  // would_be_top: would `lobject` be at the global minimum if
+  // pushed?  Compute by: if any existing entry is smaller than
+  // `lobject` under the comparator, the answer is no.  The check
+  // mutates lobject.seq (matches LSetChunk::would_be_top semantics).
+  bool would_be_top(LObject& lobject) {
+    if (empty()) {
+      // Defer to chunk's would_be_top so seq is bumped consistently.
+      return chunk_.would_be_top(lobject);
+    }
+    // Find the global min top, compare against lobject.
+    iterator min_it = find_global_min_unlocked();
+    // mimic chunk's seq stamping (LSetChunk::would_be_top sets seq).
+    lobject.seq = chunk_.peek_seq();
+    return chunk_.key_comp()(lobject, *min_it);
+  }
 
-  void               clear()                        { chunk_.clear(); }
-  void               compact()                      { chunk_.compact(); }
-  void               reorder()                      { chunk_.reorder(); }
+  // ----- Top / Pop -------------------------------------------------
+  const LObject& top(void) {
+    iterator it = find_global_min_unlocked();
+    return *it;
+  }
 
-  size_type          size() const                   { return chunk_.size(); }
-  bool               empty() const                  { return chunk_.empty(); }
-  size_type          physical_size() const          { return chunk_.physical_size(); }
-  size_t             sev_flat_size() const          { return chunk_.sev_flat_size(); }
+  void pop(void) {
+    // Pop the global minimum.  Walk to find which chunk hosts it,
+    // then call that chunk's pop() to physically remove.
+    LSetChunk*           winner = nullptr;
+    LSetChunk::iterator  winner_it;
+    for (LSetChunk* c = &chunk_; c != nullptr;
+         c = c->next.load(std::memory_order_acquire)) {
+      auto it = c->begin();
+      if (it == c->end()) continue;
+      if (winner == nullptr || chunk_.key_comp()(*it, *winner_it)) {
+        winner = c; winner_it = it;
+      }
+    }
+    if (winner != nullptr) winner->pop();
+  }
 
-  // Comparator access — used by isInPairsetL (kutil.cc:739) and
-  // kMergeBintoL_and_return_iterators (kutil.cc:3416).
-  CompareLObject&    key_comp()                     { return chunk_.key_comp(); }
-  const CompareLObject& key_comp() const            { return chunk_.key_comp(); }
+  void pop_and_erase(void) {
+    // Tombstone-erase the global minimum: same as pop but uses
+    // erase() so polys are freed at compact time (vs immediately
+    // by pop, which transfers them to the caller).  Used at error-
+    // path L-clear (kthread.cc parallel_shutdown).
+    LSetChunk*           winner = nullptr;
+    LSetChunk::iterator  winner_it;
+    for (LSetChunk* c = &chunk_; c != nullptr;
+         c = c->next.load(std::memory_order_acquire)) {
+      auto it = c->begin();
+      if (it == c->end()) continue;
+      if (winner == nullptr || chunk_.key_comp()(*it, *winner_it)) {
+        winner = c; winner_it = it;
+      }
+    }
+    if (winner != nullptr) winner->pop_and_erase();
+  }
 
-  // Tombstone diagnostics
-  int  deleted_count() const                        { return chunk_.deleted_count(); }
-  int  peak_deleted_count() const                   { return chunk_.peak_deleted_count(); }
-  long erase_call_count() const                     { return chunk_.erase_call_count(); }
-  long compact_call_count() const                   { return chunk_.compact_call_count(); }
-  long pop_skip_count() const                       { return chunk_.pop_skip_count(); }
+  // ----- Erase via wrapper iterator -------------------------------
+  iterator erase(iterator it) {
+    if (it.chunk_ == nullptr) return it;
+    LSetChunk* c = it.chunk_;
+    auto next_inner = c->erase(it.inner_);
+    // The new wrapper iterator points at the next entry in the
+    // SAME chunk; if that's chunk-end, cross_chunk_advance moves
+    // forward through the chain.
+    return iterator(c, next_inner);
+  }
+
+  // erase via wrapper filtered_iterator.
+  filtered_iterator erase(filtered_iterator fit) {
+    if (fit.chunk_ == nullptr) return fit;
+    LSetChunk* c = fit.chunk_;
+    auto next_inner = c->erase(fit.inner_);
+    fit.inner_ = next_inner;
+    fit.cross_chunk_advance();
+    return fit;
+  }
+
+  // ----- Clear / compact / reorder --------------------------------
+  void clear() {
+    // Free successor chunks then clear the head.
+    free_successors_unlocked();
+    chunk_.clear();
+  }
+
+  // compact(): coalesce all chunks into the head chunk and drop
+  // tombstones.  Caller must hold the writer lock.
+  // Implementation in kutil.cc.
+  void compact();
+
+  void reorder() {
+    // reorder() can only sensibly run when there's a single chunk
+    // (its semantics rebuild flat_index for one set).  If we have
+    // multiple chunks, compact first.
+    if (chunk_.next.load(std::memory_order_acquire) != nullptr) compact();
+    chunk_.reorder();
+  }
+
+  // ----- Append a finalized chunk (task 360, step 6b) -------------
+  //
+  // Take ownership of `src` (move-from) and link it at the tail
+  // via CAS.  Returns the heap pointer of the newly-published
+  // chunk (or nullptr if src was empty so nothing was published).
+  // Caller must hold rdlock; the rdlock excludes only compact,
+  // not other appenders, so the CAS handles appender-vs-appender
+  // races.
+  LSetChunk* append_chunk(LSetChunk&& src) {
+    if (src.size() == 0) {
+      // Even if empty, src may carry tombstones; reset for caller's
+      // convenience.
+      src.clear();
+      return nullptr;
+    }
+    // Heap-allocate via move.  `src` is left empty after the move.
+    LSetChunk* fresh = new LSetChunk(std::move(src));
+    fresh->next.store(nullptr, std::memory_order_relaxed);
+    // CAS the tail-chunk's next.  If a peer appended ahead of us,
+    // walk forward to a chunk whose `next` is null and CAS there.
+    LSetChunk* cur = tail_.load(std::memory_order_acquire);
+    while (true) {
+      // Walk to a chunk with next==nullptr (the actual tail; the
+      // tail_ hint may be stale).
+      while (true) {
+        LSetChunk* nx = cur->next.load(std::memory_order_acquire);
+        if (nx == nullptr) break;
+        cur = nx;
+      }
+      LSetChunk* expected = nullptr;
+      if (cur->next.compare_exchange_weak(
+            expected, fresh,
+            std::memory_order_release,
+            std::memory_order_acquire)) {
+        // Successfully linked.  Update the hint best-effort —
+        // readers tolerate a stale hint (they walk the chain).
+        tail_.store(fresh, std::memory_order_release);
+        return fresh;
+      }
+      // CAS failed: another appender beat us.  cur stays the same
+      // — the next iteration's inner loop walks past the new
+      // successor before retrying.
+    }
+  }
+
+  // ----- Aggregate counters (walk-on-demand) ----------------------
+  //
+  // For all the "size-like" queries we walk the chunk chain and sum
+  // per-chunk values.  k bounded to 256 by compact policy, so each
+  // query is O(k) atomic loads — under 1 µs on modern CPU.
+  size_type size() const {
+    size_type s = 0;
+    for (const LSetChunk* c = &chunk_; c != nullptr;
+         c = c->next.load(std::memory_order_acquire)) {
+      s += c->size();
+    }
+    return s;
+  }
+  bool empty() const {
+    for (const LSetChunk* c = &chunk_; c != nullptr;
+         c = c->next.load(std::memory_order_acquire)) {
+      if (!c->empty()) return false;
+    }
+    return true;
+  }
+  size_type physical_size() const {
+    size_type s = 0;
+    for (const LSetChunk* c = &chunk_; c != nullptr;
+         c = c->next.load(std::memory_order_acquire)) {
+      s += c->physical_size();
+    }
+    return s;
+  }
+  size_t sev_flat_size() const {
+    size_t s = 0;
+    for (const LSetChunk* c = &chunk_; c != nullptr;
+         c = c->next.load(std::memory_order_acquire)) {
+      s += c->sev_flat_size();
+    }
+    return s;
+  }
+
+  // Comparator access — used by callers in chainCritNormal /
+  // kMergeBintoL_and_return_iterators.  All chunks share the same
+  // comparator (CompareLObject::strat == strat), so head's
+  // key_comp is representative.  Note: const overload of
+  // writable_set::key_comp returns by value (matches std::set), so
+  // we mirror that here.
+  CompareLObject&  key_comp()        { return chunk_.key_comp(); }
+  CompareLObject   key_comp() const  { return chunk_.key_comp(); }
+
+  // Tombstone diagnostics (aggregates across chunks).
+  int  deleted_count() const {
+    int d = 0;
+    for (const LSetChunk* c = &chunk_; c != nullptr;
+         c = c->next.load(std::memory_order_acquire)) {
+      d += c->deleted_count();
+    }
+    return d;
+  }
+  int  peak_deleted_count() const  { return chunk_.peak_deleted_count(); }
+  long erase_call_count() const {
+    long e = 0;
+    for (const LSetChunk* c = &chunk_; c != nullptr;
+         c = c->next.load(std::memory_order_acquire)) {
+      e += c->erase_call_count();
+    }
+    return e;
+  }
+  long compact_call_count() const  { return compact_call_count_wrapper_; }
+  long compact_total_ns() const    { return compact_total_ns_; }
+  long compact_max_ns() const      { return compact_max_ns_; }
+  size_t last_compact_k() const    { return last_compact_k_; }
+  long pop_skip_count() const {
+    long p = 0;
+    for (const LSetChunk* c = &chunk_; c != nullptr;
+         c = c->next.load(std::memory_order_acquire)) {
+      p += c->pop_skip_count();
+    }
+    return p;
+  }
   void debug_print_stats(const char *tag = NULL) const { chunk_.debug_print_stats(tag); }
 
-  // ----- Compact threshold -----
-  // Step 5: callers driving the rdlock-pop / wrlock-compact dance check
-  // this AFTER releasing the rdlock; if true, take the wrlock and call
-  // compact().  Pre-step-5 the equivalent check lived inline in
-  // LSetChunk::pop, where it ran under the global L_lock — but that
-  // shape doesn't survive the read/write split because compact() must
-  // not run under a reader lock.  Threshold matches the prior policy:
-  // tombstones > live AND tombstones > 1024.  Step 6 will broaden to
-  // include a chunk-count threshold (k > 256).
+  // Chunk count (for the diagnostic dump).  O(k) walk.
+  size_t chunk_count() const { return chunk_count_unlocked(); }
+
+  // ----- Compact threshold ----------------------------------------
+  // (task 360, step 6f).  Two trigger conditions, OR'd:
+  //   - tomb-fraction:  tombstones > live  AND tombstones > 1024
+  //   - chunk-count:    k > COMPACT_CHUNK_COUNT_THRESHOLD
+  // Caller checks this AFTER releasing the rdlock; on true, takes
+  // wrlock and calls compact() (which re-checks under wrlock).
   bool needs_compact() const {
-    int d = chunk_.deleted_count();
-    int l = (int)chunk_.size();
-    return d > l && d > 1024;
+    int d = deleted_count();
+    int l = (int)size();
+    if (d > l && d > COMPACT_TOMB_MIN_ABS) return true;
+    if (chunk_count_unlocked() > COMPACT_CHUNK_COUNT_THRESHOLD) return true;
+    return false;
   }
 
   // ----- Reader-writer lock interface -----

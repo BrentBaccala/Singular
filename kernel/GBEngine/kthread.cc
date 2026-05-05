@@ -83,24 +83,39 @@ __thread int kt_my_thread_id = -1;
 // In step 5, every site that took L_lock now takes the **writer** lock
 // — full mutual exclusion is preserved because the underlying chunk is
 // still a single, non-thread-safe std::multiset / std::vector pair.
-// Step 6 will introduce the multi-chunk linked list, at which point
-// individual sites that only do CAS-append (B-merge) or stale-tolerant
-// reads (chainCritNormal scan) can be promoted to rdlock.  Compact
-// always takes wrlock.  See ~/project/docs/parallel-bba-chunked-lsets.md.
+// Step 6 (this commit, task 360) introduces the multi-chunk linked
+// list.  The hot-path sites take rdlock instead of wrlock:
+//
+//   - kt_L_lock_drain  : pthread_cond_broadcast hints, no L mutation;
+//                        rdlock suffices.
+//   - kt_L_lock_term   : main's L.empty() probe — read-only; rdlock.
+//   - kt_L_lock_refill : main's pop_and_prepare (top + pop + chunk
+//                        traversal); pop is per-chunk and the chain
+//                        walk is read-only against compact, so rdlock.
+//   - kt_L_lock_phase2 : worker phase-1 chainCritNormal scan +
+//                        erases + kMergeBintoL — chainCritNormal is
+//                        a read-only scan + tombstone erases (which
+//                        are per-element CAS, no chain mutation),
+//                        kMergeBintoL is a CAS-append on the tail
+//                        chunk's `next`.  All three of these admit
+//                        concurrent readers, so rdlock.
+//
+// Compact (LSet::compact, called from refill_and_publish) is the
+// only writer-lock holder; it takes wrlock via a drop-and-reacquire
+// pattern: rdlock-pop-unlock, then wrlock-compact-unlock.
 //
 // The helper functions retain their existing names and bucketing
 // (L_lock_*_wait_ns) so the kthread-stats dump format is preserved.
-// What they record is wrlock acquire wait time — equivalent to the
-// pre-step-5 L_lock acquire wait time (rwlock writer-preferring,
-// uncontended writers acquire in ~ns, contended writers wait for
-// readers and writers ahead).
+// What they record is rdlock acquire wait time — typically near-zero
+// because rdlock has no contention with other rdlock holders;
+// non-zero only when compact (wrlock) is in flight.
 static inline void kt_L_lock_drain(SweepContext *ctx, int thread_id)
 {
   kStrategy strat = ctx->strat;
   if (KT_STATS(ctx))
   {
     long t0 = kt_now_ns();
-    strat->L.wrlock();
+    strat->L.rdlock();
     long dt = kt_now_ns() - t0;
     ThreadStats &ts = KT_TS(ctx, thread_id);
     ts.L_lock_drain_wait_ns += dt;
@@ -108,7 +123,7 @@ static inline void kt_L_lock_drain(SweepContext *ctx, int thread_id)
   }
   else
   {
-    strat->L.wrlock();
+    strat->L.rdlock();
   }
 }
 
@@ -118,7 +133,7 @@ static inline void kt_L_lock_term(SweepContext *ctx, int thread_id)
   if (KT_STATS(ctx))
   {
     long t0 = kt_now_ns();
-    strat->L.wrlock();
+    strat->L.rdlock();
     long dt = kt_now_ns() - t0;
     ThreadStats &ts = KT_TS(ctx, thread_id);
     ts.L_lock_term_wait_ns += dt;
@@ -126,7 +141,7 @@ static inline void kt_L_lock_term(SweepContext *ctx, int thread_id)
   }
   else
   {
-    strat->L.wrlock();
+    strat->L.rdlock();
   }
 }
 
@@ -136,7 +151,7 @@ static inline void kt_L_lock_refill(SweepContext *ctx, int thread_id)
   if (KT_STATS(ctx))
   {
     long t0 = kt_now_ns();
-    strat->L.wrlock();
+    strat->L.rdlock();
     long dt = kt_now_ns() - t0;
     ThreadStats &ts = KT_TS(ctx, thread_id);
     ts.L_lock_refill_wait_ns += dt;
@@ -144,7 +159,7 @@ static inline void kt_L_lock_refill(SweepContext *ctx, int thread_id)
   }
   else
   {
-    strat->L.wrlock();
+    strat->L.rdlock();
   }
 }
 
@@ -231,46 +246,49 @@ static inline void kt_S_lock_shared_phase0(SweepContext *ctx, int thread_id)
   }
 }
 
-/* L rwlock writer acquire used during worker phase 1 (chainCritNormal
- * scan + erases + kMergeBintoL).  Pre-step-5 this was an L_lock mutex
- * acquire (full exclusion across the phase-1 block).  Step 5 (task 360)
- * replaces it with a writer lock on strat->L::rwlock_ — semantically
- * equivalent to the mutex (full exclusion, preserves correctness of
- * the existing single-chunk std::multiset / std::vector storage).
- * Step 6 will refactor B-merge to a CAS-append on a per-survivor
- * chunk's `next` pointer, at which point this acquire can be
- * downgraded to rdlock and chainCritNormal scans run concurrently.
- * Records wait time in phase1_l_wait_ns (renamed from phase2_wait_ns
- * in task 301 (run 508) — phase 2 no longer exists). */
+/* L rwlock READER acquire used during worker phase 1 (chainCritNormal
+ * scan + erases + kMergeBintoL).
+ *
+ * Step 6 (task 360): downgraded from wrlock to rdlock.  Concurrent
+ * worker phase-1 blocks all run as readers; their B-merge is a
+ * CAS-append on the tail chunk's `next` pointer; their tombstone
+ * erases are per-element CAS on the LObject->deleted flag.  Compact
+ * is the only writer; it runs from main's refill path on a
+ * drop-and-reacquire dance (rdlock-pop-release, wrlock-compact-release).
+ *
+ * Records wait time in phase1_l_wait_ns — typically near-zero now
+ * since reader-vs-reader is uncontended; non-zero only when compact
+ * (wrlock) is in flight, blocking all readers briefly.
+ */
 static inline void kt_L_lock_phase2(SweepContext *ctx, int thread_id)
 {
   kStrategy strat = ctx->strat;
   if (KT_STATS(ctx))
   {
     long t0 = kt_now_ns();
-    strat->L.wrlock();
+    strat->L.rdlock();
     long dt = kt_now_ns() - t0;
     ThreadStats &ts = KT_TS(ctx, thread_id);
     ts.phase1_l_wait_ns += dt;
   }
   else
   {
-    strat->L.wrlock();
+    strat->L.rdlock();
   }
 }
 #else
 #  define KT_STATS(ctx)       (false)
 #  define KT_TIME_START(var)  ((void)0)
 #  define KT_TIME_DELTA(var)  (0L)
-static inline void kt_L_lock_drain(SweepContext *ctx, int /*tid*/) { ctx->strat->L.wrlock(); }
-static inline void kt_L_lock_term(SweepContext *ctx, int /*tid*/) { ctx->strat->L.wrlock(); }
-static inline void kt_L_lock_refill(SweepContext *ctx, int /*tid*/) { ctx->strat->L.wrlock(); }
+static inline void kt_L_lock_drain(SweepContext *ctx, int /*tid*/) { ctx->strat->L.rdlock(); }
+static inline void kt_L_lock_term(SweepContext *ctx, int /*tid*/) { ctx->strat->L.rdlock(); }
+static inline void kt_L_lock_refill(SweepContext *ctx, int /*tid*/) { ctx->strat->L.rdlock(); }
 static inline void kt_surv_q_lock(SweepContext *ctx, int /*tid*/) { pthread_mutex_lock(&ctx->survivor_queue_mutex); }
 static inline void kt_record_reduce(SweepContext*, int, long, long) {}
 static inline void kt_S_lock_exclusive(SweepContext *ctx, int /*tid*/) { ctx->strat->S.lock_exclusive(); }
 static inline void kt_S_lock_shared(SweepContext *ctx, int /*tid*/) { ctx->strat->S.lock_shared(); }
 static inline void kt_S_lock_shared_phase0(SweepContext *ctx, int /*tid*/) { ctx->strat->S.lock_shared(); }
-static inline void kt_L_lock_phase2(SweepContext *ctx, int /*tid*/) { ctx->strat->L.wrlock(); }
+static inline void kt_L_lock_phase2(SweepContext *ctx, int /*tid*/) { ctx->strat->L.rdlock(); }
 #endif
 
 /* ------------------------------------------------------------------ */
@@ -1099,18 +1117,20 @@ static int refill_and_publish(SweepContext *ctx)
       int sl_snapshot = ctx->strat->T.size() - 1;
       ctx->strat->S.unlock_shared();
 
-      // Try to fill from L.  Caller-side L-lock window: pop_and_prepare
-      // calls top()/pop()/empty()/size() across multiple wrapper methods,
-      // so the lock must span the whole call.  We currently take the
-      // wrlock (step 5: full exclusion preserved while the underlying
-      // multiset is single-chunk).  Step 6 will downgrade to rdlock with
-      // a drop-and-reacquire dance for compact.  Today: just call
-      // compact() inline if the threshold is crossed — we already hold
-      // the wrlock, no extra acquire needed.
-      kt_L_lock_refill(ctx, 0);
+      // Try to fill from L.  Caller-side L-lock window:
+      //   - pop_and_prepare physically removes the popped LObject's
+      //     tree node (writable_set::erase deletes the LObject*); so
+      //     it MUST run under wrlock to avoid UAFs in concurrent
+      //     worker filtered_iterator scans (they dereference flat_
+      //     pointers into the now-freed tree node).
+      //   - After releasing wrlock, if needs_compact() flagged, take
+      //     wrlock again for compact (we re-check under wrlock).
+      // Step 6 (task 360): pop is the ONE write-lock holder besides
+      // compact.  See ~/project/docs/parallel-bba-chunked-lsets.md.
+      ctx->strat->L.wrlock();
       BOOLEAN got = pop_and_prepare(ctx, ap, sl_snapshot);
-      if (ctx->strat->L.needs_compact())
-        ctx->strat->L.compact();
+      bool needs = ctx->strat->L.needs_compact();
+      if (needs) ctx->strat->L.compact();
       ctx->strat->L.unlock();
       if (got)
       {
@@ -1914,14 +1934,37 @@ void kt_dump_stats(SweepContext *ctx)
   //                                        the iterator walks, parallel
   //                                        to writable_set::flat_)
   // tombstone_ratio = (L_flat - L_live) / L_flat.
+  //
+  // Step 6 additions: chunk_count (k) — bounded by COMPACT_CHUNK_COUNT_
+  // THRESHOLD (256), and wrapper-level compact stats.  pair_index_lookup
+  // is shown in the per-thread block below.
   {
     long L_live = (long)ctx->strat->L.physical_size();
     long L_flat = (long)ctx->strat->L.sev_flat_size();
+    long L_size = (long)ctx->strat->L.size();
+    long L_chunks = (long)ctx->strat->L.chunk_count();
     double tombstone_ratio = (L_flat > 0)
         ? (double)(L_flat - L_live) / (double)L_flat : 0.0;
     fprintf(stderr,
-            "[kthread-stats] L_live=%ld L_flat=%ld tombstone_ratio=%.4f\n",
-            L_live, L_flat, tombstone_ratio);
+            "[kthread-stats] L_live=%ld L_flat=%ld tombstone_ratio=%.4f "
+            "L_size=%ld chunks=%ld\n",
+            L_live, L_flat, tombstone_ratio, L_size, L_chunks);
+    fprintf(stderr,
+            "[kthread-stats] compact: calls=%ld total_ms=%.3f max_ms=%.3f "
+            "last_k=%zu\n",
+            ctx->strat->L.compact_call_count(),
+            ctx->strat->L.compact_total_ns() / 1e6,
+            ctx->strat->L.compact_max_ns() / 1e6,
+            ctx->strat->L.last_compact_k());
+  }
+  // pair_index lookup wall (per-thread).  Bumped by isInPairsetL.
+  fprintf(stderr, "[kthread-stats] %-4s %14s %10s\n",
+          "tid", "piX_ns", "piX_count");
+  for (int i = 0; i < tt; i++)
+  {
+    ThreadStats &ts = ctx->tstats[i];
+    fprintf(stderr, "[kthread-stats] x%-3d %14ld %10ld\n",
+            i, ts.pair_index_lookup_ns, ts.pair_index_lookup_count);
   }
 
   // CSV output for per-round records

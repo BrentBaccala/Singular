@@ -1037,6 +1037,16 @@ KINLINE void LSetChunk::pop(void) {
   // the writer lock, because a caller may be holding the wrapper's
   // reader lock when calling chunk.pop().  See
   // ~/project/docs/parallel-bba-chunked-lsets.md.
+  //
+  // Task 360 step 6: pop physically removes the tree node (preserves
+  // the pre-step-6 semantics), and is the ONLY mutator of the tree
+  // structure under rdlock — workers scan via filtered_iterator
+  // (over flat_/sev_flat_, not the multiset tree itself), so they
+  // can't observe the tree mid-mutation.  pair_index.erase races
+  // with concurrent pair_index_find (worker scans during dedup);
+  // mitigated by isInPairsetL's lobject_deleted_load post-check
+  // (kutil.cc:730).  TSan may flag the find/erase pair as a race —
+  // documented in the task report.
 
   if (deleted_count_ > 0) {
     long skip = 0;

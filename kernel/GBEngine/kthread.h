@@ -108,6 +108,16 @@ struct ThreadStats
   long chaincrit_min_ns;          // init to LONG_MAX
   long chaincrit_max_arrival;
 
+  // Wrapper-level pair_index lookup time (task 360, step 6d).
+  // pair_index is now per-chunk; a wrapper-level find walks all chunks
+  // and returns the first hit.  This counter accumulates time inside
+  // strat->L.pair_index_find() / strat->L.pair_index_walk_size() calls.
+  // Populated by isInPairsetL and cleanTSbaRing under
+  // KTHREAD_INSTRUMENT.  If the lookup time becomes a measurable
+  // fraction of wall, switch to a wrapper-level concurrent hashtable.
+  long pair_index_lookup_ns;
+  long pair_index_lookup_count;
+
   // Phase-split instrumentation (task 299 (run 506) /
   // task 301; run 508).
   //   phase0: S-exclusive for setup + enterT + enterS
