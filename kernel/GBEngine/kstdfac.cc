@@ -65,7 +65,7 @@ static void copyT (kStrategy o,kStrategy n)
 */
 static void copyL (kStrategy o,kStrategy n)
 {
-  n->L = o->L;
+  n->L.copy_contents_from(o->L);
 
   // Update references in the copied LSetChunk to point to new T array
   for (auto& Lp : n->L)

@@ -732,8 +732,8 @@ BOOLEAN isInPairsetL(LSetChunk::iterator &it,poly p1,poly p2,kStrategy strat)
   if (it == strat->L.end()) return FALSE;
   if (p1 == NULL || p2 == NULL) return FALSE;
   auto key = LSetChunk::canonicalize_pair(p1, p2);
-  auto found = strat->L.pair_index.find(key);
-  if (found != strat->L.pair_index.end()) {
+  auto found = strat->L.pair_index().find(key);
+  if (found != strat->L.pair_index().end()) {
     LSetChunk::iterator candidate = found->second;
     // Check position constraint: candidate must be at or after 'it'
     if (candidate == it || !strat->L.key_comp()(*candidate, *it)) {

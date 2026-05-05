@@ -1626,6 +1626,171 @@ public:
   unordered_iterator erase(unordered_iterator it);
 };
 
+/** @class LSet
+ *
+ * Wrapper around a linked-list of LSetChunk instances.  The intent
+ * (full design at ~/project/docs/parallel-bba-chunked-lsets.md and
+ * the task 360 prompt) is for steady-state operations
+ * (chainCritNormal scans, B-merge appends, pop) to run concurrently
+ * under a shared (reader) lock on the wrapper, with periodic
+ * compaction taking the exclusive (writer) lock to coalesce chunks
+ * back into one.
+ *
+ * Step 4 status (this commit): wrapper is a no-op single-chunk
+ * indirection.  Every public method dispatches directly to a single
+ * owned LSetChunk.  rwlock_ is initialized but NOT acquired by any
+ * wrapper method yet — the existing kt_L_lock_* mutex
+ * infrastructure on SweepContext continues to provide all
+ * concurrency control, unchanged.  Behavior is bit-identical to a
+ * bare LSetChunk.
+ *
+ * Steps 5+6 (deferred to a later commit):
+ *  - 5: every wrapper method takes/releases rwlock_ shared; compact
+ *    takes it exclusive.  The kt_L_lock_* mutex on SweepContext can
+ *    then be dropped from the L data path.
+ *  - 6: the single chunk_ becomes a head + tail of an intrusive
+ *    linked list of chunks; B-merge CAS-appends a new chunk; pop
+ *    walks chunks to find global min; compact uses
+ *    std::multiset::merge to coalesce.
+ *
+ * Type aliases (iterator, size_type, etc.) are forwarded from
+ * LSetChunk so callers that say "LSetChunk::iterator endL =
+ * strat->L.end()" continue to compile.  When step 6 lands, the
+ * wrapper iterator becomes its own (chunk_ptr, inner_iterator)
+ * tuple type — that's the boundary at which call sites switch
+ * from LSetChunk:: type names to LSet:: type names.
+ */
+class LSet {
+private:
+  // The single owned chunk (step 4).  Step 6 turns this into a
+  // linked-list head with an atomic next chain.
+  LSetChunk chunk_;
+
+  // Reader-writer lock guarding the chunk(s).  Initialized
+  // writer-preferring at construction.  Step 5 wires it into every
+  // public method; step 4 leaves it idle.
+  pthread_rwlock_t rwlock_;
+
+public:
+  // Forward LSetChunk's nested types so existing call sites that
+  // say "LSetChunk::iterator endL = strat->L.end()" continue to
+  // compile against either side of the wrapper transition.
+  using iterator           = LSetChunk::iterator;
+  using const_iterator     = LSetChunk::const_iterator;
+  using reverse_iterator   = LSetChunk::reverse_iterator;
+  using unordered_iterator = LSetChunk::unordered_iterator;
+  using filtered_iterator  = LSetChunk::filtered_iterator;
+  using size_type          = LSetChunk::size_type;
+  using value_type         = LSetChunk::value_type;
+  using difference_type    = LSetChunk::difference_type;
+
+  // Pair-index map type forwarded for cleanTSbaRing's direct access
+  // (see kutil.cc:735).  Step 6 replaces this with a wrapper-level
+  // pair_index_find(key) helper.
+  using pair_index_t = decltype(LSetChunk::pair_index);
+
+  // ----- Construction / destruction -----
+  LSet() {
+    pthread_rwlockattr_t attr;
+    pthread_rwlockattr_init(&attr);
+#if defined(__GLIBC__) && defined(PTHREAD_RWLOCK_PREFER_WRITER_NONRECURSIVE_NP)
+    pthread_rwlockattr_setkind_np(&attr,
+        PTHREAD_RWLOCK_PREFER_WRITER_NONRECURSIVE_NP);
+#endif
+    pthread_rwlock_init(&rwlock_, &attr);
+    pthread_rwlockattr_destroy(&attr);
+  }
+  ~LSet() {
+    pthread_rwlock_destroy(&rwlock_);
+  }
+  // Non-copyable / non-movable: pthread_rwlock_t is not movable, and
+  // strat->L is logically a fixed-position container anyway.  Use
+  // copy_contents_from for the (rare) case that callers want to
+  // duplicate L's contents.
+  LSet(const LSet&)            = delete;
+  LSet& operator=(const LSet&) = delete;
+  LSet(LSet&&)                 = delete;
+  LSet& operator=(LSet&&)      = delete;
+
+  // Copy chunk contents from another LSet, preserving rwlock_
+  // identity.  Used by kstdfac.cc:copyL to clone a strategy's L.
+  void copy_contents_from(const LSet& other) {
+    chunk_ = other.chunk_;
+  }
+
+  // ----- Direct access to the wrapped chunk for legacy reach-ins -----
+  // Step 4 only.  cleanTSbaRing (kutil.cc:735) directly indexes
+  // pair_index; expose the chunk's pair_index map until step 6
+  // replaces it with a wrapper-level pair_index_find().
+  pair_index_t& pair_index() { return chunk_.pair_index; }
+  const pair_index_t& pair_index() const { return chunk_.pair_index; }
+
+  // ----- Forwarding interface (single-chunk dispatch in step 4) -----
+  iterator           begin()        { return chunk_.begin(); }
+  iterator           end()          { return chunk_.end(); }
+  const_iterator     begin()  const { return chunk_.begin(); }
+  const_iterator     end()    const { return chunk_.end(); }
+  const_iterator     cbegin() const { return chunk_.cbegin(); }
+  const_iterator     cend()   const { return chunk_.cend(); }
+  reverse_iterator   rbegin()       { return chunk_.rbegin(); }
+  reverse_iterator   rend()         { return chunk_.rend(); }
+  unordered_iterator ubegin()       { return chunk_.ubegin(); }
+  unordered_iterator uend()         { return chunk_.uend(); }
+
+  filtered_iterator ufbegin_lcm(unsigned long sev) {
+    return chunk_.ufbegin_lcm(sev);
+  }
+  filtered_iterator ufbegin_lcm(unsigned long sev1, unsigned long sev2) {
+    return chunk_.ufbegin_lcm(sev1, sev2);
+  }
+  filtered_iterator ufend_lcm()  { return chunk_.ufend_lcm(); }
+  filtered_iterator ufbegin_sig(unsigned long sev) {
+    return chunk_.ufbegin_sig(sev);
+  }
+  filtered_iterator ufend_sig()  { return chunk_.ufend_sig(); }
+
+  iterator           push(LObject& lobject)         { return chunk_.push(lobject); }
+  bool               would_be_top(LObject& lobject) { return chunk_.would_be_top(lobject); }
+  void               pop(void)                      { chunk_.pop(); }
+  void               pop_and_erase(void)            { chunk_.pop_and_erase(); }
+  const LObject&     top(void)                      { return chunk_.top(); }
+
+  iterator           erase(iterator it)             { return chunk_.erase(it); }
+  unordered_iterator erase(unordered_iterator it)   { return chunk_.erase(it); }
+  filtered_iterator  erase(filtered_iterator it)    { return chunk_.erase(it); }
+
+  void               clear()                        { chunk_.clear(); }
+  void               compact()                      { chunk_.compact(); }
+  void               reorder()                      { chunk_.reorder(); }
+
+  size_type          size() const                   { return chunk_.size(); }
+  bool               empty() const                  { return chunk_.empty(); }
+  size_type          physical_size() const          { return chunk_.physical_size(); }
+  size_t             sev_flat_size() const          { return chunk_.sev_flat_size(); }
+
+  // Comparator access — used by isInPairsetL (kutil.cc:739) and
+  // kMergeBintoL_and_return_iterators (kutil.cc:3416).
+  CompareLObject&    key_comp()                     { return chunk_.key_comp(); }
+  const CompareLObject& key_comp() const            { return chunk_.key_comp(); }
+
+  // Tombstone diagnostics
+  int  deleted_count() const                        { return chunk_.deleted_count(); }
+  int  peak_deleted_count() const                   { return chunk_.peak_deleted_count(); }
+  long erase_call_count() const                     { return chunk_.erase_call_count(); }
+  long compact_call_count() const                   { return chunk_.compact_call_count(); }
+  long pop_skip_count() const                       { return chunk_.pop_skip_count(); }
+  void debug_print_stats(const char *tag = NULL) const { chunk_.debug_print_stats(tag); }
+
+  // ----- Step 5/6 hooks (placeholders, not yet acquired) -----
+  // These will be wired into every dispatching method in step 5.
+  // Exposing them here ahead of time lets a caller take an explicit
+  // read/write lock if needed during the transition (no current
+  // caller does).
+  void rdlock()   { pthread_rwlock_rdlock(&rwlock_); }
+  void wrlock()   { pthread_rwlock_wrlock(&rwlock_); }
+  void unlock()   { pthread_rwlock_unlock(&rwlock_); }
+};
+
 
 class skStrategy
 #ifdef HAVE_OMALLOC
@@ -1687,8 +1852,9 @@ public:
   ideal getShdl();
   BlockArray<unsigned long> sevT;
   BlockArray<TObject> T;
-  LSetChunk L;
-  LSetChunk    B;
+  LSet      L;     // chunked-LSet wrapper (step 4: single-chunk no-op)
+  LSetChunk B;     // serial-only B (kept as bare chunk; phase-1 drainers
+                   // use thread-local local_B via t_local_B_override).
   // arrival_counter: monotonic counter incremented on every successful
   // enterS.  Used by the parallel phase-1 drainer to filter S iteration
   // to entries that arrived before the current survivor h — because
