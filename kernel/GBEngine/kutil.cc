@@ -82,9 +82,9 @@
 VAR denominator_list DENOMINATOR_LIST=NULL;
 
 // Thread-local override for strat->B.  NULL in serial mode; set by the
-// parallel phase-1 drain to a stack-allocated LSet so concurrent drainers
+// parallel phase-1 drain to a stack-allocated LSetChunk so concurrent drainers
 // each build their own B.  See kutil.h for full rationale.
-__thread LSet* t_local_B_override = NULL;
+__thread LSetChunk* t_local_B_override = NULL;
 
 // Thread-local "my arrival" filter for the parallel phase-1 drain.
 // UINT64_MAX in serial mode (no filter); set to the drainer's
@@ -558,7 +558,7 @@ void HEckeTest (poly pp,kStrategy strat)
 }
 
 /*2
-*utilities for TSet, LSet
+*utilities for TSet, LSetChunk
 */
 inline static intset initec (const int maxnr)
 {
@@ -727,14 +727,14 @@ void cleanTSbaRing (kStrategy strat)
 *it returns TRUE if yes and modifies the iterator to point to the match
 *Uses pair_index for O(1) lookup, then checks position constraint
 */
-BOOLEAN isInPairsetL(LSet::iterator &it,poly p1,poly p2,kStrategy strat)
+BOOLEAN isInPairsetL(LSetChunk::iterator &it,poly p1,poly p2,kStrategy strat)
 {
   if (it == strat->L.end()) return FALSE;
   if (p1 == NULL || p2 == NULL) return FALSE;
-  auto key = LSet::canonicalize_pair(p1, p2);
+  auto key = LSetChunk::canonicalize_pair(p1, p2);
   auto found = strat->L.pair_index.find(key);
   if (found != strat->L.pair_index.end()) {
-    LSet::iterator candidate = found->second;
+    LSetChunk::iterator candidate = found->second;
     // Check position constraint: candidate must be at or after 'it'
     if (candidate == it || !strat->L.key_comp()(*candidate, *it)) {
       it = candidate;
@@ -1318,7 +1318,7 @@ static BOOLEAN is_shifted_p1(const kStrategy strat)
 #endif
 
 // Free the polynomials referenced by an LObject (lcm, sig, p) using the
-// same cleanup rules as the legacy LSet::erase: lcm via kDeleteLcm, sig
+// same cleanup rules as the legacy LSetChunk::erase: lcm via kDeleteLcm, sig
 // via pLmDelete/pLmFree depending on coeff, p via pLmDelete/pLmFree when
 // attached to strat->tail or via Lp.Delete() when not found in T.
 // Shared between erase (called at chainCritNormal / tombstone time) and
@@ -1371,7 +1371,7 @@ static void kLSet_free_polys(LObject& Lp, kStrategy strat) {
 // the cache-friendly unordered and filtered scans skip the slot.  Does
 // NOT touch the multiset tree and does NOT free polys — compact() will
 // do both in one pass when the pile-up gets inconvenient.
-LSet::iterator LSet::erase(LSet::iterator it) {
+LSetChunk::iterator LSetChunk::erase(LSetChunk::iterator it) {
   LObject& Lp = *it;
   if (Lp.deleted) {
     // Idempotent: a second erase of the same tombstone is a no-op.
@@ -1398,7 +1398,7 @@ LSet::iterator LSet::erase(LSet::iterator it) {
   return it;
 }
 
-LSet::unordered_iterator LSet::erase(LSet::unordered_iterator it) {
+LSetChunk::unordered_iterator LSetChunk::erase(LSetChunk::unordered_iterator it) {
   LObject& Lp = *it;
   if (Lp.deleted) {
     ++it;  // skip_deleted() inside will advance past it
@@ -1420,7 +1420,7 @@ LSet::unordered_iterator LSet::erase(LSet::unordered_iterator it) {
   return it;
 }
 
-LSet::filtered_iterator LSet::erase(LSet::filtered_iterator fit) {
+LSetChunk::filtered_iterator LSetChunk::erase(LSetChunk::filtered_iterator fit) {
   LObject* lp = flat_ptr(fit.pos_);
   if (lp != nullptr && !lp->deleted) {
     if (lp->p1 != NULL && lp->p2 != NULL) {
@@ -1444,7 +1444,7 @@ LSet::filtered_iterator LSet::erase(LSet::filtered_iterator fit) {
 // tree, free their polys, and rebuild sev_flat_/sevSig_flat_/pair_index
 // / flat_index against the compacted tree.  Invalidates ALL outstanding
 // iterators.  Fast path: if deleted_count_ == 0, update peak and return.
-void LSet::compact() {
+void LSetChunk::compact() {
   ++compact_call_count_;
   if (deleted_count_ > peak_deleted_count_)
     peak_deleted_count_ = deleted_count_;
@@ -3401,9 +3401,9 @@ void kMergeBintoL(kStrategy strat)
  * sort these iterators.
  */
 
-std::vector<LSet::iterator> kMergeBintoL_and_return_iterators(kStrategy strat)
+std::vector<LSetChunk::iterator> kMergeBintoL_and_return_iterators(kStrategy strat)
 {
-  std::vector<LSet::iterator> iterators;
+  std::vector<LSetChunk::iterator> iterators;
   iterators.reserve(strat_B(strat).size());
   while (!strat_B(strat).empty()) {
     auto Lobj = strat_B(strat).top();
@@ -3412,7 +3412,7 @@ std::vector<LSet::iterator> kMergeBintoL_and_return_iterators(kStrategy strat)
   }
   // Sort iterators to match the ordering of their objects in L
   std::sort(iterators.begin(), iterators.end(),
-    [&strat](LSet::iterator a, LSet::iterator b) {
+    [&strat](LSetChunk::iterator a, LSetChunk::iterator b) {
       return strat->L.key_comp()(*a, *b);
     });
   strat_B(strat).clear();  // reset flat_ array to prevent unbounded growth
@@ -3441,7 +3441,7 @@ void chainCritNormal (poly p,int ecart,kStrategy strat)
   int j;
   unsigned long sev_p = p_GetShortExpVector(p, currRing);
 
-  // sev_flat_ is now maintained incrementally by LSet's insert/erase/pop/
+  // sev_flat_ is now maintained incrementally by LSetChunk's insert/erase/pop/
   // reorder/copy/move methods.  No rebuild needed here.
 
   /*
@@ -3694,12 +3694,12 @@ void chainCritNormal (poly p,int ecart,kStrategy strat)
     *gives us iterators to the new elements in L-order, avoiding a full
     *scan of L.
     */
-    std::vector<LSet::iterator> bvec = kMergeBintoL_and_return_iterators(strat);
+    std::vector<LSetChunk::iterator> bvec = kMergeBintoL_and_return_iterators(strat);
     /* Deduplicate: for each pair of B-origin elements with the same lcm,
      * do the triangle check via isInPairsetL (O(1) pair_index lookup).
      * Elements removed from consideration are nulled out (set to end())
      * in bvec rather than erased, to avoid memmove. */
-    LSet::iterator endL = strat->L.end();
+    LSetChunk::iterator endL = strat->L.end();
     for (size_t ji = 0; ji < bvec.size(); ji++)
     {
       if (bvec[ji] == endL) continue;
@@ -3783,8 +3783,8 @@ void chainCritSig (poly p,int /*ecart*/,kStrategy strat)
   *Only B-origin elements have p2==p; no tail-marking needed since bvec
   *nulling (bvec[ii]=endL) prevents re-processing.
   */
-  std::vector<LSet::iterator> bvec = kMergeBintoL_and_return_iterators(strat);
-  LSet::iterator endL = strat->L.end();
+  std::vector<LSetChunk::iterator> bvec = kMergeBintoL_and_return_iterators(strat);
+  LSetChunk::iterator endL = strat->L.end();
   for (size_t ji = 0; ji < bvec.size(); ji++)
   {
     if (bvec[ji] == endL) continue;
@@ -4081,8 +4081,8 @@ void chainCritPart (poly p,int ecart,kStrategy strat)
     *pair_index for O(1) triangle checks via bvec.
     *Uses _p_LmDivisibleByPart instead of pDivisibleBy.
     */
-    std::vector<LSet::iterator> bvec = kMergeBintoL_and_return_iterators(strat);
-    LSet::iterator endL = strat->L.end();
+    std::vector<LSetChunk::iterator> bvec = kMergeBintoL_and_return_iterators(strat);
+    LSetChunk::iterator endL = strat->L.end();
     for (size_t ji = 0; ji < bvec.size(); ji++)
     {
       if (bvec[ji] == endL) continue;
@@ -4437,8 +4437,8 @@ void chainCritRing (poly p,int, kStrategy strat)
   *gets canceled, matching the original Ring semantics where the worse-
   *positioned element survives.  The n_DivBy coefficient check is preserved.
   */
-  std::vector<LSet::iterator> bvec = kMergeBintoL_and_return_iterators(strat);
-  LSet::iterator endL = strat->L.end();
+  std::vector<LSetChunk::iterator> bvec = kMergeBintoL_and_return_iterators(strat);
+  LSetChunk::iterator endL = strat->L.end();
   /* Iterate worst-to-first: bvec is sorted best(0) to worst(size-1),
    * so ji starts at the end and works backward */
   for (int ji = (int)bvec.size() - 1; ji >= 0; ji--)
@@ -7332,7 +7332,7 @@ poly redtailBba_Ring (LObject* L, sBasisSet::const_iterator end, kStrategy strat
 /*2
 *checks the change degree and write progress report
 */
-void message (int i,int* olddeg,LSet::size_type* reduc,kStrategy strat, int red_result)
+void message (int i,int* olddeg,LSetChunk::size_type* reduc,kStrategy strat, int red_result)
 {
   if (i != *olddeg)
   {

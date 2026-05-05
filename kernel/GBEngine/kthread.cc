@@ -1114,7 +1114,7 @@ static int refill_and_publish(SweepContext *ctx)
  * concurrent phase-1 drainers under a SHARED S-lock by introducing
  * thread-local overrides (see kutil.h):
  *
- *   t_local_B_override       — thread-local LSet* replacing strat->B
+ *   t_local_B_override       — thread-local LSetChunk* replacing strat->B
  *   t_local_my_arrival       — filter S iteration by arrival_id
  *   t_local_pairtest_hits    — per-drainer pairtest-hit vector
  *
@@ -1320,17 +1320,17 @@ static void process_survivor_lobject(SweepContext *ctx, LObject *P, int thread_i
 
   if (did_enterS)
   {
-    // Stack-allocate thread-local B and pairtest-hit vector.  LSet's
+    // Stack-allocate thread-local B and pairtest-hit vector.  LSetChunk's
     // comparator indirects through strat->compareL (via its
     // CompareLObject::strat pointer), so we must set strat on the
     // local B exactly as skStrategy::skStrategy() does for strat->B.
-    LSet local_B;
+    LSetChunk local_B;
     local_B.key_comp().strat = strat;
     std::vector<SElement*> local_pairtest_hits;
 
     // Save any previous thread-local overrides (NULL in practice; the
     // drain does not recurse through enterpairs, but defence in depth).
-    LSet* saved_B_override = t_local_B_override;
+    LSetChunk* saved_B_override = t_local_B_override;
     uint64_t saved_my_arrival = t_local_my_arrival;
     std::vector<SElement*>* saved_pairtest_hits = t_local_pairtest_hits;
 
@@ -1426,10 +1426,10 @@ static void process_survivor_lobject(SweepContext *ctx, LObject *P, int thread_i
 #endif
 
     // Safety: clear any residual local B / pairtest entries before
-    // the LSet / vector destructors run (normally they're empty, but
+    // the LSetChunk / vector destructors run (normally they're empty, but
     // a control-flow short-circuit could leave stragglers).
     //
-    // Restore previous overrides BEFORE the LSet goes out of scope,
+    // Restore previous overrides BEFORE the LSetChunk goes out of scope,
     // so nothing can reference it via the thread-local slot.
     t_local_B_override = saved_B_override;
     t_local_my_arrival = saved_my_arrival;
@@ -1833,8 +1833,8 @@ void kt_dump_stats(SweepContext *ctx)
 
   // L-set tombstone accumulation hypothesis (task 358; run 571):
   // chainCritNormal's slowness is dominated by
-  // LSet::filtered_iterator::advance() linear-scanning sev_flat_ from
-  // 0 to flat_size, which includes tombstones.  LSet::compact() runs
+  // LSetChunk::filtered_iterator::advance() linear-scanning sev_flat_ from
+  // 0 to flat_size, which includes tombstones.  LSetChunk::compact() runs
   // exactly once per GB run (at exitBuchMora), never during the loop.
   // Per-call duration should scale with L_flat (not L_live).
   //

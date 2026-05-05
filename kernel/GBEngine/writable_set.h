@@ -56,7 +56,7 @@
 // writable_set iterators can skip over logically-deleted entries.
 //   template<> inline bool writable_set_is_deleted<MyType>(const MyType& x)
 //     { return x.deleted; }
-// This is the hook used by LSet's lazy-erase (LObject.deleted).
+// This is the hook used by LSetChunk's lazy-erase (LObject.deleted).
 template<typename T>
 inline bool writable_set_is_deleted(const T&) { return false; }
 
@@ -134,7 +134,7 @@ public:
         }
         // Note: operator-- does NOT know the container's begin, so it cannot
         // skip past tombstones in reverse without a caller-supplied bound.
-        // Callers that need reverse iteration through a tombstoned LSet
+        // Callers that need reverse iteration through a tombstoned LSetChunk
         // should use index-based access or iterate forward.  For reverse
         // iteration over a non-tombstoning set, operator-- is the expected
         // "step one back" — same as before.
@@ -335,7 +335,7 @@ public:
 
     // --- Raw underlying-tree iterator access (for tombstone-aware callers) ---
     // raw_begin() returns a non-skipping iterator at the physical tree head.
-    // Used by LSet::pop() to count tombstones skipped before the first live
+    // Used by LSetChunk::pop() to count tombstones skipped before the first live
     // element.  The returned iterator is a plain iterator_wrapper whose
     // end_it_ equals it_, so operator++ does not skip — callers can walk
     // tombstones one by one.
@@ -423,7 +423,7 @@ public:
     }
 
     // Erase by raw flat-array index, no iterator / no skip_deleted.
-    // Used by LSet::compact() to physically remove a tombstoned slot;
+    // Used by LSetChunk::compact() to physically remove a tombstoned slot;
     // the slot's LObject may be deleted==true, in which case we must NOT
     // skip it (skip_deleted would advance past it and we'd erase the
     // wrong slot).

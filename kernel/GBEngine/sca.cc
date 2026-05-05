@@ -152,7 +152,7 @@ ideal k_sca_gr_bba(const ideal F, const ideal Q, const intvec *, const bigintmat
 #endif
 
   int olddeg;
-  LSet::size_type reduc;
+  LSetChunk::size_type reduc;
   int red_result = 1;
 //  int hilbeledeg = 1, minimcnt = 0;
   int hilbcount = 0;
@@ -432,7 +432,7 @@ ideal k_sca_bba (const ideal F, const ideal Q, const intvec */*w*/, const bigint
 
   int   red_result = 1;
   int   olddeg;
-  LSet::size_type reduc;
+  LSetChunk::size_type reduc;
 
 //  int hilbeledeg = 1, minimcnt = 0;
   int hilbcount = 0;
@@ -921,7 +921,7 @@ ideal k_sca_mora(const ideal F, const ideal Q, const intvec */*w*/, const bigint
 
 
   int olddeg = 0;
-  LSet::size_type reduc = 0;
+  LSetChunk::size_type reduc = 0;
   int red_result = 1;
 //  int hilbeledeg=1;
   int hilbcount=0;

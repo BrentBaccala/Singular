@@ -93,7 +93,7 @@ VAR clock_t xftostd, xtextra, xftinput, to;
 #endif
 
 /****************************
- * utilities for TSet, LSet *
+ * utilities for TSet, LSetChunk *
  ****************************/
 inline static intset initec (int maxnr)
 {

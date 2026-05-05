@@ -1055,7 +1055,7 @@ ideal k_gnc_gr_bba(const ideal F, const ideal Q, const intvec *, const bigintmat
   // intvec *w=NULL;
   // intvec *hilb=NULL;
   int   olddeg;
-  LSet::size_type reduc;
+  LSetChunk::size_type reduc;
   int red_result=1;
   int /*hilbeledeg=1,*/hilbcount=0/*,minimcnt=0*/;
 

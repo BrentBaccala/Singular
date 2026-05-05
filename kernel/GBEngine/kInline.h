@@ -935,7 +935,7 @@ KINLINE bool CompareLObject::operator()(const LObject &lhs, const LObject &rhs) 
   int (*comparator) (const LObject &lhs, const LObject &rhs, const kStrategy strat);
 
   if (compareL != NULL) {
-    /* A special case used only in f5c() to construct a local LSet with a different comparator */
+    /* A special case used only in f5c() to construct a local LSetChunk with a different comparator */
     comparator = compareL;
   } else {
     comparator = strat->compareL;
@@ -963,7 +963,7 @@ KINLINE bool CompareLObject::operator()(const LObject &lhs, const LObject &rhs) 
   }
 };
 
-KINLINE LSet::iterator LSet::push(LObject& lobject) {
+KINLINE LSetChunk::iterator LSetChunk::push(LObject& lobject) {
   /* We track a sequence number to allow FIFO or LIFO ordering to be selected for equal objects */
   lobject.seq = seq;
   seq ++;
@@ -983,10 +983,10 @@ KINLINE LSet::iterator LSet::push(LObject& lobject) {
     if (lobject.t_p != NULL)
       pSetCoeff0(lobject.t_p, pGetCoeff(lobject.p));
   }
-  return insert(lobject);  // calls LSet::insert which maintains pair_index
+  return insert(lobject);  // calls LSetChunk::insert which maintains pair_index
 }
 
-KINLINE bool LSet::would_be_top(LObject& lobject) {
+KINLINE bool LSetChunk::would_be_top(LObject& lobject) {
   /* Would lobject be the top object in the queue if it were pushed?
    * Yes if either the queue is empty or lobject is less than the first object.
    *
@@ -998,13 +998,13 @@ KINLINE bool LSet::would_be_top(LObject& lobject) {
   return (empty() || key_comp()(lobject, top()));
 }
 
-KINLINE const LObject& LSet::top(void) {
+KINLINE const LObject& LSetChunk::top(void) {
   /* begin() is tombstone-aware — it skips leading tombstones to the
    * first live element. */
   return *begin();
 }
 
-KINLINE void LSet::pop(void) {
+KINLINE void LSetChunk::pop(void) {
   /* pop() physically removes the first live element from L.  Under
    * tombstone-on-erase, there may be tombstoned entries at the head
    * of the tree that begin() has skipped over; we still need to pop
@@ -1064,7 +1064,7 @@ KINLINE void LSet::pop(void) {
   --live_count_;
 }
 
-KINLINE void LSet::pop_and_erase(void) {
+KINLINE void LSetChunk::pop_and_erase(void) {
   /* Tombstone-erase the first live element (polys freed at compact time). */
   erase(begin());
 }

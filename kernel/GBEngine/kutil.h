@@ -228,20 +228,20 @@ struct SElement {
 // write into *t_local_B_override instead of strat->B.  Serial code leaves
 // this NULL throughout, so the helper strat_B(strat) is a single-pointer
 // compare + branch and falls through to strat->B with no behavioural
-// change.  Using a thread-local pointer (rather than threading an LSet*
+// change.  Using a thread-local pointer (rather than threading an LSetChunk*
 // parameter through ~10 call signatures) keeps the diff surgical while
 // giving phase-1 drainers their own private B.
 //
-// Safety: the pointed-to LSet must outlive every call into enterpairs made
-// while the pointer is set.  The drain allocates the LSet on its own stack
+// Safety: the pointed-to LSetChunk must outlive every call into enterpairs made
+// while the pointer is set.  The drain allocates the LSetChunk on its own stack
 // in process_survivor_lobject and restores the pointer (to NULL or the
 // previous value) on exit.
-class LSet;  // forward declare (defined later in this header)
-extern __thread LSet* t_local_B_override;
+class LSetChunk;  // forward declare (defined later in this header)
+extern __thread LSetChunk* t_local_B_override;
 
-// strat_B(strat) is the LSet enterOnePair/chainCrit should write into.
+// strat_B(strat) is the LSetChunk enterOnePair/chainCrit should write into.
 // Returns *t_local_B_override if set, else strat->B.  Defined after
-// skStrategy as an inline function (needs both LSet and skStrategy
+// skStrategy as an inline function (needs both LSetChunk and skStrategy
 // complete).
 
 // Thread-local "my arrival" for the parallel phase-1 drain
@@ -1132,8 +1132,8 @@ public:
   poly  lcm;   /*- the lcm of p1,p2 -*/
   kBucket_pt bucket;
   int   i_r1, i_r2;
-  unsigned seq;       // the sequence number of the LSet when this LObject was inserted
-                      // used to determine LSet ordering for equal LObjects
+  unsigned seq;       // the sequence number of the LSetChunk when this LObject was inserted
+                      // used to determine LSetChunk ordering for equal LObjects
   size_t flat_index;      // index in writable_set's flat array for unordered iteration
   // Iterator pointing "one past the last S element against which this
   // pair was already checked" at creation time.  When the pair is later
@@ -1160,8 +1160,8 @@ public:
                       // deleted
   int fromQ = 0;      // from quotient ideal; copied into SElement.fromQ by
                       // sBasisSet::enter_bba / enter_sba.
-  bool deleted = false; // Lazy-erase tombstone flag (LSet tombstone-on-erase).
-                      // Set by LSet::erase(); LSet iterators (ordered,
+  bool deleted = false; // Lazy-erase tombstone flag (LSetChunk tombstone-on-erase).
+                      // Set by LSetChunk::erase(); LSetChunk iterators (ordered,
                       // unordered, filtered) skip entries with deleted==true.
                       // Cleanup of the LObject's polys (lcm/sig/p), pair_index
                       // and sev_flat_ sentinels all happen at erase time;
@@ -1271,7 +1271,7 @@ inline bool writable_set_is_deleted<LObject>(const LObject& o) {
 
 EXTERN_VAR int HCord;
 
-/** @class LSet
+/** @class LSetChunk
  *
  * "L" is the sorted set of critical pairs, and we wish to regularly
  * pop the top item from the queue.  However, we also wish to iterate
@@ -1290,7 +1290,7 @@ public:
   KINLINE bool operator() (const LObject &lhs, const LObject &rhs) const;
 };
 
-// Hash function for (poly, poly) pairs used in LSet pair index
+// Hash function for (poly, poly) pairs used in LSetChunk pair index
 struct PolyPairHash {
   std::size_t operator()(const std::pair<poly, poly>& p) const {
     // Combine the two pointer hashes
@@ -1301,7 +1301,7 @@ struct PolyPairHash {
   }
 };
 
-class LSet : public writable_set<LObject, CompareLObject> {
+class LSetChunk : public writable_set<LObject, CompareLObject> {
 private:
   unsigned seq = 0;   // increments by one on every insertion; used to determine ordering
   // Parallel flat array of sev_lcm values for cache-friendly scanning.
@@ -1365,7 +1365,7 @@ public:
   }
   void debug_print_stats(const char *tag = NULL) const {
     fprintf(stderr,
-            "LSet[%s] live=%d physical=%zu deleted=%d peak_deleted=%d "
+            "LSetChunk[%s] live=%d physical=%zu deleted=%d peak_deleted=%d "
             "erase_calls=%ld compact_calls=%ld pop_skips=%ld\n",
             tag ? tag : "", live_count_, physical_size(),
             deleted_count_, peak_deleted_count_,
@@ -1388,12 +1388,12 @@ public:
   // The same iterator type is used for both sev_flat_ (lcm) and
   // sevSig_flat_ (signature) scans — only the array pointer differs.
   class filtered_iterator {
-    LSet* owner_;
+    LSetChunk* owner_;
     size_t pos_;
     unsigned long sev1_;
     unsigned long sev2_;
     const std::vector<unsigned long>* sev_array_;
-    friend class LSet;
+    friend class LSetChunk;
 
     void advance() {
       // Always use sev_flat_ to detect deleted entries (sev_lcm sentinel 0).
@@ -1427,7 +1427,7 @@ public:
     using reference = LObject&;
 
     filtered_iterator() : owner_(nullptr), pos_(0), sev1_(0), sev2_(0), sev_array_(nullptr) {}
-    filtered_iterator(LSet* owner, size_t pos, unsigned long sev1, unsigned long sev2,
+    filtered_iterator(LSetChunk* owner, size_t pos, unsigned long sev1, unsigned long sev2,
                       const std::vector<unsigned long>* sev_array)
       : owner_(owner), pos_(pos), sev1_(sev1), sev2_(sev2), sev_array_(sev_array) {
       advance();
@@ -1475,13 +1475,13 @@ public:
   size_t sev_flat_size() const { return sev_flat_.size(); }
 
   // Default constructor
-  LSet() = default;
+  LSetChunk() = default;
 
   // Copy constructor: base class copy rebuilds flat_ with new indices,
   // so we must rebuild sev_flat_, sevSig_flat_, and pair_index to match.
   // The copy ctor uses insert() for each element, so no tombstones are
   // carried over; live_count_ will match the iterated count.
-  LSet(const LSet& other)
+  LSetChunk(const LSetChunk& other)
     : writable_set<LObject, CompareLObject>(other), seq(other.seq),
       live_count_(0), deleted_count_(0), peak_deleted_count_(0),
       erase_call_count_(0), compact_call_count_(0), pop_skip_count_(0) {
@@ -1493,7 +1493,7 @@ public:
   }
 
   // Move constructor: base class move rebuilds flat_ with new indices.
-  LSet(LSet&& other) noexcept
+  LSetChunk(LSetChunk&& other) noexcept
     : writable_set<LObject, CompareLObject>(std::move(other)), seq(other.seq),
       live_count_(other.live_count_), deleted_count_(other.deleted_count_),
       peak_deleted_count_(other.peak_deleted_count_),
@@ -1508,7 +1508,7 @@ public:
   }
 
   // Copy assignment: same issue — base class rebuilds flat_ from scratch.
-  LSet& operator=(const LSet& other) {
+  LSetChunk& operator=(const LSetChunk& other) {
     if (this != &other) {
       writable_set<LObject, CompareLObject>::operator=(other);
       seq = other.seq;
@@ -1526,7 +1526,7 @@ public:
   }
 
   // Move assignment
-  LSet& operator=(LSet&& other) noexcept {
+  LSetChunk& operator=(LSetChunk&& other) noexcept {
     if (this != &other) {
       writable_set<LObject, CompareLObject>::operator=(std::move(other));
       seq = other.seq;
@@ -1687,8 +1687,8 @@ public:
   ideal getShdl();
   BlockArray<unsigned long> sevT;
   BlockArray<TObject> T;
-  LSet L;
-  LSet    B;
+  LSetChunk L;
+  LSetChunk    B;
   // arrival_counter: monotonic counter incremented on every successful
   // enterS.  Used by the parallel phase-1 drainer to filter S iteration
   // to entries that arrived before the current survivor h — because
@@ -1780,7 +1780,7 @@ public:
 
 // Inline definition of strat_B.  Returns the thread-local override B if
 // set (parallel phase-1 drain), else the shared strat->B (serial path).
-static inline LSet& strat_B(kStrategy strat) {
+static inline LSetChunk& strat_B(kStrategy strat) {
   return t_local_B_override ? *t_local_B_override : strat->B;
 }
 
@@ -1884,7 +1884,7 @@ void enterpairs (poly h, int k, int ec, sBasisSet::iterator pos,kStrategy strat,
 void entersets (LObject h);
 void pairs ();
 BOOLEAN sbaCheckGcdPair (LObject* h,kStrategy strat);
-void message (int i,int* olddeg,LSet::size_type* reduc,kStrategy strat,int red_result);
+void message (int i,int* olddeg,LSetChunk::size_type* reduc,kStrategy strat,int red_result);
 void messageStat (int hilbcount,kStrategy strat);
 void messageStatSBA (int hilbcount,kStrategy strat);
 #ifdef KDEBUG
@@ -2040,7 +2040,7 @@ ideal kNF2Bound (ideal F,ideal Q,ideal q,int bound, kStrategy strat, int lazyRed
 void initBba(kStrategy strat);
 void initSba(ideal F,kStrategy strat);
 void f5c (kStrategy strat, int& olddeg, int& minimcnt, int& hilbeledeg,
-          int& hilbcount, int& srmax, LSet::size_type& reduc, ideal Q,
+          int& hilbcount, int& srmax, LSetChunk::size_type& reduc, ideal Q,
           intvec *w,bigintmat *hilb );
 
 /***************************************************************

@@ -67,7 +67,7 @@ static void copyL (kStrategy o,kStrategy n)
 {
   n->L = o->L;
 
-  // Update references in the copied LSet to point to new T array
+  // Update references in the copied LSetChunk to point to new T array
   for (auto& Lp : n->L)
   {
     poly p;
@@ -476,7 +476,7 @@ static void completeReduceFac (kStrategy strat, ideal_list FL)
 ideal bbafac (ideal /*F*/, ideal Q,intvec* /*w*/,kStrategy strat, ideal_list FL)
 {
   int   olddeg;
-  LSet::size_type reduc;
+  LSetChunk::size_type reduc;
   int red_result = 1;
   reduc = olddeg = 0;
   /* compute------------------------------------------------------- */

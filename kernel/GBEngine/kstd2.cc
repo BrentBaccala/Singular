@@ -2796,7 +2796,7 @@ ideal bba (ideal F, ideal Q,intvec *w,bigintmat *hilb,kStrategy strat)
 {
   int   red_result = 1;
   int   olddeg;
-  LSet::size_type reduc;
+  LSetChunk::size_type reduc;
   int hilbeledeg=1,hilbcount=0,minimcnt=0;
   BOOLEAN withT = FALSE;
   BITSET save;
@@ -3374,7 +3374,7 @@ ideal sba (ideal F0, ideal Q,intvec *w,bigintmat *hilb,kStrategy strat)
 #endif
   int   srmax, red_result = 1;
   int   olddeg;
-  LSet::size_type reduc;
+  LSetChunk::size_type reduc;
   int hilbeledeg=1,hilbcount=0,minimcnt=0;
   LObject L;
   BOOLEAN withT     = TRUE;
@@ -4495,11 +4495,11 @@ ideal kNF2Bound (ideal F,ideal Q,ideal q,int bound,kStrategy strat, int lazyRedu
 * 3. strat->S and strat->T are completely new computed in these steps
 ********************************************************************/
 void f5c (kStrategy strat, int& olddeg, int& minimcnt, int& hilbeledeg,
-          int& hilbcount, int& srmax, LSet::size_type& reduc, ideal Q,
+          int& hilbcount, int& srmax, LSetChunk::size_type& reduc, ideal Q,
           intvec *w,bigintmat *hilb )
 {
   int red_result = 1;
-  LSet localL;
+  LSetChunk localL;
   hilbeledeg=1;
   hilbcount=0;
   minimcnt=0;
@@ -4814,7 +4814,7 @@ ideal bbaShift(ideal F, ideal Q,intvec *w,bigintmat *hilb,kStrategy strat)
 {
   int   red_result = 1;
   int   olddeg;
-  LSet::size_type reduc;
+  LSetChunk::size_type reduc;
   int hilbeledeg=1,hilbcount=0,minimcnt=0;
   BOOLEAN withT = TRUE; // currently only T contains the shifts
   BITSET save;
