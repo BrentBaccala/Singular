@@ -2316,7 +2316,7 @@ parallel_shutdown:
   // that critical section any longer.)
   if (clear_L_after_join)
   {
-    while (!strat->L.empty()) strat->L.pop_and_erase();
+    strat->L.clear_and_erase();
   }
   if (clear_slots_after_join)
   {

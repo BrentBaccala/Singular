@@ -2067,7 +2067,7 @@ ideal mora (ideal F, ideal Q,intvec *w,bigintmat *hilb,kStrategy strat)
         *   (multBound)
         *   && multiplicity of the ideal is smaller then a predefined number mu
         */
-        while (! strat->L.empty()) strat->L.pop_and_erase();
+        strat->L.clear_and_erase();
       }
     }
     kTest_TS(strat);

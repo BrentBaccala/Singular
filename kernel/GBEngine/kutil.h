@@ -1656,6 +1656,14 @@ public:
   iterator erase(iterator it);
   unordered_iterator erase(unordered_iterator it);
 
+  // Free polys for every entry (live and tombstoned), then drop the
+  // multiset, flat_, sev_flat_, sevSig_flat_, and pair_index.  O(N) in
+  // chunk size — replaces the O(N^2) loop of repeated tombstone-only
+  // pop_and_erase()s at end-of-bba cleanup paths.  Restores the
+  // poly-free contract that the original (pre-chunked) LSet::erase
+  // provided.  Caller must hold wrlock or be single-threaded.
+  void clear_and_erase();
+
   // Read the chunk's `seq` counter (for LSet::would_be_top to stamp
   // a probe LObject without a full push).  Task 360, step 6c.
   unsigned peek_seq() const { return seq; }
@@ -2156,6 +2164,14 @@ public:
     free_successors_unlocked();
     chunk_.clear();
   }
+
+  // O(N) bulk cleanup: walk every chunk, free each entry's polys via
+  // kLSet_free_polys, drop all multiset / flat_ / sev_flat_ / pair_index
+  // state, then free heap-allocated successor chunks.  Replaces the
+  // O(N^2) `while (!L.empty()) L.pop_and_erase()` end-of-bba loops.
+  // Caller must hold wrlock or be single-threaded (the parallel-bba
+  // post-join cleanup path is single-threaded by construction).
+  void clear_and_erase();
 
   // compact(): coalesce all chunks into the head chunk and drop
   // tombstones.  Caller must hold the writer lock.

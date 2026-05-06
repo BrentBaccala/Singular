@@ -1396,6 +1396,48 @@ static void kLSet_free_polys(LObject& Lp, kStrategy strat) {
   #endif
 }
 
+// LSetChunk::clear_and_erase — bulk cleanup that frees every entry's
+// polys (live AND tombstoned), then drops all chunk state.  Used by
+// end-of-bba cleanup paths via LSet::clear_and_erase.  Restores the
+// poly-free contract of the original (pre-chunked) LSet::erase, but
+// at O(N) per chunk instead of the O(N^2) tombstone-loop the chunked
+// design accidentally created at sites like
+//   while (!strat->L.empty()) strat->L.pop_and_erase();
+// where each pop_and_erase tombstones-only and the next begin() walks
+// past all prior tombstones via skip_deleted_forward.
+//
+// Caller must hold wrlock or be single-threaded.  Cumulative
+// diagnostic counters (peak_deleted_count_, erase_call_count_,
+// compact_call_count_, pop_skip_count_, seq) are NOT reset since they
+// track lifetime stats; live_count_ / deleted_count_ are reset because
+// they describe current contents.
+void LSetChunk::clear_and_erase() {
+  kStrategy strat = this->key_comp().strat;
+  size_t n = flat_size();
+  for (size_t i = 0; i < n; i++) {
+    LObject* lp = flat_ptr(i);
+    if (lp != nullptr) kLSet_free_polys(*lp, strat);
+  }
+  writable_set<LObject, CompareLObject>::clear();   // delete LObject*'s, drop tree + flat_
+  sev_flat_.clear();
+  sevSig_flat_.clear();
+  pair_index.clear();
+  deleted_count_ = 0;
+  live_count_ = 0;
+}
+
+// LSet::clear_and_erase — wrapper-level bulk cleanup.  Walks every
+// chunk in the chain, calls each chunk's clear_and_erase(), then
+// frees the heap-allocated successor chunks via the existing
+// free_successors_unlocked() helper.
+void LSet::clear_and_erase() {
+  for (LSetChunk* c = &chunk_; c != nullptr;
+       c = c->next.load(std::memory_order_acquire)) {
+    c->clear_and_erase();
+  }
+  free_successors_unlocked();
+}
+
 // Tombstone an L entry: record the erase, mark the LObject as deleted,
 // remove from the dedup pair_index, and zero sev_flat_/sevSig_flat_ so
 // the cache-friendly unordered and filtered scans skip the slot.  Does
@@ -7808,7 +7850,7 @@ void initSL (ideal F, ideal Q,kStrategy strat)
     // pop the top LObject, but don't erase it because we're going to put it back
     auto unit = strat->L.top();
     strat->L.pop();
-    while (! strat->L.empty()) strat->L.pop_and_erase();
+    strat->L.clear_and_erase();
     strat->L.push(unit);
   }
 }
@@ -7954,7 +7996,7 @@ void initSLSba (ideal F, ideal Q,kStrategy strat)
     // pop the top LObject, but don't erase it because we're going to put it back
     auto unit = strat->L.top();
     strat->L.pop();
-    while (! strat->L.empty()) strat->L.pop_and_erase();
+    strat->L.clear_and_erase();
     strat->L.push(unit);
   }
 }
