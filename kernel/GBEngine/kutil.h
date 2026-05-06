@@ -61,16 +61,38 @@ typedef int* intset;
 typedef int64  wlen_type;
 typedef wlen_type* wlen_set;
 
-// Block-allocated array: elements are stored in fixed-size blocks.
+// Block-allocated array: elements are stored in fixed-size blocks
+// indexed via a two-level directory.  blocks[b] is a calloc'd block
+// of BLOCK_SIZE elements; operator[](i) returns blocks[i>>SHIFT][i&MASK].
 // Existing blocks never move when new blocks are appended, so pointers
 // to elements (&arr[i]) remain stable across growth.
+//
+// Concurrency: parallel-bba readers (sweep_one_tile, reduce_slot_from_sweep)
+// access strat->T / strat->sevT / strat->R without taking the strat's
+// rwlock; only the strat's `count` atomic, the per-T-entry published
+// release/acquire flag, and the BlockArray directory pointer's atomicity
+// (this class) protect the read path.  Writers (enterT) hold the strat
+// wrlock.
 template<typename Elem, int BLOCK_SHIFT = 10>
 class BlockArray {
   static const int BLOCK_SIZE = 1 << BLOCK_SHIFT;
   static const int BLOCK_MASK = BLOCK_SIZE - 1;
-  Elem **blocks;        // directory of block pointers
-  int num_blocks;       // current number of allocated blocks
-  int dir_capacity;     // allocated directory slots
+  // Directory pointer.  Atomic because the lockless reader path
+  // (operator[], addr()) loads it on every access while ensure_capacity
+  // can replace it from a concurrent writer thread.  See ensure_capacity
+  // for the full memory-ordering story.
+  std::atomic<Elem**> blocks;
+  int num_blocks;       // current number of allocated blocks (writer-only)
+  int dir_capacity;     // allocated directory slots (writer-only)
+  // Old directory pointers retained until free_all().  When the
+  // directory grows we cannot free the old one immediately because
+  // lockless readers may still be dereferencing it (see ensure_capacity
+  // comment).  retained_dirs holds them so the memory stays valid for
+  // the lifetime of the BlockArray; free_all() drops them all at
+  // teardown.  Per-grow size is geometric (4, 8, 16, ...), so total
+  // retained bytes are bounded by ~2× the final directory size — a few
+  // KB for realistic strat->T sizes (200K entries → <2 KB).
+  std::vector<Elem**> retained_dirs;
 protected:
   // Atomic so parallel-bba readers (pop_and_prepare under L_lock,
   // sweep workers without an S-lock) can load the size without
@@ -80,18 +102,21 @@ protected:
   // stable size→entry-content ordering on weakly-ordered hardware.
   std::atomic<int> count;
 public:
-  BlockArray() : blocks(NULL), num_blocks(0), dir_capacity(0), count(0) {}
+  BlockArray() : blocks(nullptr), num_blocks(0), dir_capacity(0), count(0) {}
 
   Elem& operator[](int i) {
-    return blocks[i >> BLOCK_SHIFT][i & BLOCK_MASK];
+    Elem** dir = blocks.load(std::memory_order_acquire);
+    return dir[i >> BLOCK_SHIFT][i & BLOCK_MASK];
   }
   const Elem& operator[](int i) const {
-    return blocks[i >> BLOCK_SHIFT][i & BLOCK_MASK];
+    Elem** dir = blocks.load(std::memory_order_acquire);
+    return dir[i >> BLOCK_SHIFT][i & BLOCK_MASK];
   }
 
-  // Return pointer to element i (stable across growth)
+  // Return pointer to element i (stable across growth — see class comment)
   Elem* addr(int i) {
-    return &blocks[i >> BLOCK_SHIFT][i & BLOCK_MASK];
+    Elem** dir = blocks.load(std::memory_order_acquire);
+    return &dir[i >> BLOCK_SHIFT][i & BLOCK_MASK];
   }
 
   // Number of elements in use
@@ -101,25 +126,75 @@ public:
   // Set the count directly (for migration from external tl/sl counters)
   void setsize(int n) { count.store(n, std::memory_order_release); }
 
-  // Ensure at least n elements are allocated (indices 0..n-1)
+  // Ensure at least n elements are allocated (indices 0..n-1).
+  //
+  // Lock discipline.  Caller must hold the BlockArray's wrlock (in
+  // parallel-bba: skStrategy's S-exclusive rwlock, taken by enterT
+  // and friends).  Concurrent readers may dereference the directory
+  // through operator[] / addr() without holding any lock; the protocol
+  // below makes that safe even across a directory regrow.
+  //
+  // Two-level layout.  `blocks` is a directory of length `dir_capacity`
+  // pointing at calloc'd blocks of BLOCK_SIZE elements each.  Element i
+  // lives at blocks[i >> BLOCK_SHIFT][i & BLOCK_MASK].  Per-block
+  // pointers (the inner allocations) never move once allocated:
+  // ensure_capacity only ever fills new directory slots (b in
+  // [num_blocks, needed_blocks)) with fresh calloc'd blocks, never
+  // touches existing entries 0..num_blocks-1.  Hence Elem* pointers
+  // returned by addr(i) stay valid forever.
+  //
+  // Directory growth is the load-bearing piece for thread safety.
+  // When needed_blocks exceeds dir_capacity we calloc a larger
+  // directory, memcpy the existing block pointers into it, and
+  // publish it via a release-store on `blocks`.  Concurrent readers
+  // either see the old directory (whose contents are unchanged for
+  // their indices — same per-block pointers) or the new one
+  // (everything they need is at the same indices).  Either way the
+  // dereference of dir[i >> BLOCK_SHIFT] is safe.
+  //
+  // We MUST NOT free the old directory here.  A reader may have
+  // already loaded the old `blocks` pointer and be about to
+  // dereference dir[i >> BLOCK_SHIFT] when the writer reaches this
+  // line; calling free() would yank the directory out from under
+  // it.  Instead the old directory is retained in retained_dirs and
+  // freed at free_all() time, when the BlockArray is single-threaded.
+  // Per-grow leak is geometric, so retained_dirs bytes are bounded
+  // by the largest directory size — negligible.
+  //
+  // Memory ordering.  The release-store on `blocks` synchronises
+  // with the acquire-load in operator[] / addr(): a reader that sees
+  // the new directory pointer is guaranteed to see the memcpy'd
+  // contents (the old block pointers in the new directory) and the
+  // newly-allocated block pointers in slots [num_blocks, needed_blocks).
+  // Readers using indices below the writer's current `count` will
+  // pair with `count`'s release/acquire — they only ever load `blocks`
+  // after observing a `count` value that already implies the directory
+  // was sized large enough.
+  //
+  // The relaxed-load of `blocks` at the top is fine because we hold
+  // the wrlock — no other writer can race us — and we only need the
+  // value for our own write.
   void ensure_capacity(int n) {
     int needed_blocks = (n + BLOCK_SIZE - 1) >> BLOCK_SHIFT;
     if (needed_blocks <= num_blocks) return;
-    // Grow directory if needed
+    Elem** cur = blocks.load(std::memory_order_relaxed);
     if (needed_blocks > dir_capacity) {
       int new_cap = dir_capacity == 0 ? 4 : dir_capacity;
       while (new_cap < needed_blocks) new_cap *= 2;
       Elem **new_dir = (Elem **)calloc(new_cap, sizeof(Elem *));
-      if (blocks != NULL) {
-        memcpy(new_dir, blocks, num_blocks * sizeof(Elem *));
-        free(blocks);
+      if (cur != NULL) {
+        memcpy(new_dir, cur, num_blocks * sizeof(Elem *));
+        retained_dirs.push_back(cur);  // can't free — readers may still hold it
       }
-      blocks = new_dir;
+      blocks.store(new_dir, std::memory_order_release);
+      cur = new_dir;
       dir_capacity = new_cap;
     }
-    // Allocate new blocks (zero-initialized)
+    // Allocate new blocks (zero-initialized).  Existing entries
+    // cur[0..num_blocks-1] are untouched, so concurrent readers below
+    // the published count see no change.
     for (int b = num_blocks; b < needed_blocks; b++) {
-      blocks[b] = (Elem *)calloc(BLOCK_SIZE, sizeof(Elem));
+      cur[b] = (Elem *)calloc(BLOCK_SIZE, sizeof(Elem));
     }
     num_blocks = needed_blocks;
   }
@@ -157,13 +232,19 @@ public:
     count.store(c - 1, std::memory_order_release);
   }
 
-  // Free all blocks and the directory, reset count
+  // Free all blocks, the current directory, and any retained old
+  // directories from prior growths.  Resets count.  Single-threaded
+  // by construction (called from skStrategy teardown after workers
+  // are joined).
   void free_all() {
+    Elem** cur = blocks.load(std::memory_order_relaxed);
     for (int b = 0; b < num_blocks; b++) {
-      free(blocks[b]);
+      free(cur[b]);
     }
-    if (blocks != NULL) free(blocks);
-    blocks = NULL;
+    if (cur != NULL) free(cur);
+    for (Elem** old : retained_dirs) free(old);
+    retained_dirs.clear();
+    blocks.store(nullptr, std::memory_order_relaxed);
     num_blocks = 0;
     dir_capacity = 0;
     count.store(0, std::memory_order_relaxed);
