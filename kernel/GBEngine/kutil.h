@@ -2657,9 +2657,20 @@ KINLINE poly redtailBba_Z (poly p,sBasisSet::const_iterator end,kStrategy strat)
 poly redtailBba_NF (poly p, kStrategy strat );
 poly redtailBba_Ring (LObject* L, sBasisSet::const_iterator end, kStrategy strat );
 poly redtailBba_Z (LObject* L, sBasisSet::const_iterator end, kStrategy strat );
-void redtailBbaAlsoLC_Z (LObject* L, kStrategy strat );
+// Task 361 (run 581): the parallel-bba phase-0(b) drain calls these
+// concurrently across worker threads.  The two strat fields below are
+// pure outputs of these calls (not inputs), so we expose them as
+// optional per-call out parameters; when non-null the caller gets a
+// thread-local copy and can avoid the redtail_lock.  When null, the
+// existing serial-caller behaviour is preserved (writes through to
+// strat).  See ~/project/docs/parallel-bba-redtail-decouple.md.
+void redtailBbaAlsoLC_Z (LObject* L, kStrategy strat,
+                         bool *out_redTailChange = nullptr,
+                         bool *out_completeReduce_retry = nullptr);
 poly redtailBba (LObject *L, sBasisSet::const_iterator end,kStrategy strat,
-                 BOOLEAN withT = FALSE,BOOLEAN normalize=FALSE);
+                 BOOLEAN withT = FALSE,BOOLEAN normalize=FALSE,
+                 bool *out_redTailChange = nullptr,
+                 bool *out_completeReduce_retry = nullptr);
 poly redtailBbaBound (LObject *L, sBasisSet::const_iterator end,kStrategy strat,int bound,
                  BOOLEAN withT = FALSE,BOOLEAN normalize=FALSE);
 poly redtailSba (LObject *L, sBasisSet::const_iterator end,kStrategy strat,

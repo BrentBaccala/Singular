@@ -398,7 +398,10 @@ SweepContext *sweep_context_init(kStrategy strat, int nthreads)
 
   // L_lock removed in step 5: strat->L's own rwlock now covers
   // L data protection (LSet::rwlock_, kutil.h).
-  pthread_mutex_init(&ctx->redtail_lock, NULL);
+  // redtail_lock removed in task 361 (run 581): see kthread.cc:1242
+  // — redtailBba / redtailBbaAlsoLC_Z now take per-call out pointers
+  // for redTailChange / completeReduce_retry, so there's no shared
+  // strat write to serialize.
 
   ctx->done.store(false, std::memory_order_relaxed);
   ctx->stat_reductions.store(0, std::memory_order_relaxed);
@@ -445,7 +448,7 @@ void sweep_context_destroy(SweepContext *ctx)
   if (ctx == NULL) return;
   pthread_barrier_destroy(&ctx->startup_barrier);
   // L_lock removed in step 5; LSet's rwlock self-destructs.
-  pthread_mutex_destroy(&ctx->redtail_lock);
+  // redtail_lock removed in task 361 (run 581).
   pthread_mutex_destroy(&ctx->survivor_queue_mutex);
   pthread_mutex_destroy(&ctx->publish_lock);
   pthread_cond_destroy(&ctx->pairs_available);
@@ -1240,11 +1243,11 @@ static void process_survivor_lobject(SweepContext *ctx, LObject *P, int thread_i
 #endif
 
   // ------------------------------------------------------------------
-  // Phase 0 (task 359; run 572) — split between three regions to
-  // shrink the S-exclusive critical section to enterT + enterS only.
+  // Phase 0 (task 359; run 572; task 361 run 581 removed redtail_lock) —
+  // split between three regions to shrink the S-exclusive critical
+  // section to enterT + enterS only.
   //
-  //   (a) Unlocked: GetP / initEcart / PrintS / redTailChange = FALSE.
-  //       Pure LObject mutations.
+  //   (a) Unlocked: GetP / initEcart / PrintS.  Pure LObject mutations.
   //
   //   (b) S-shared: redtailBbaAlsoLC_Z / pCleardenom (or pNorm) /
   //       redtailBba / pCleardenom (INTSTRATEGY post-redtail) /
@@ -1256,6 +1259,13 @@ static void process_survivor_lobject(SweepContext *ctx, LObject *P, int thread_i
   //       kFindDivisibleByInT); in the withT=false (homogeneous) case
   //       kFindDivisibleByInS_T iterates S to end(), with the sev/
   //       pLmCmp prefilter making the divisor search cheap.
+  //
+  //       Task 361 (run 581) decoupled the two output flags
+  //       strat->redTailChange and strat->completeReduce_retry from
+  //       the redtailBba* call sites by adding default-nullptr out
+  //       parameters; the parallel callers below pass thread-local
+  //       pointers, eliminating the cross-thread race that previously
+  //       required redtail_lock.  No mutex needed any more.
   //
   //   (c) S-exclusive: enterT + capture my_arrival + enterS.  enterS
   //       returns the iterator at the inserted position (h's index);
@@ -1276,20 +1286,17 @@ static void process_survivor_lobject(SweepContext *ctx, LObject *P, int thread_i
 
   if (TEST_OPT_PROT) PrintS("s");
 
-  // (b) S-shared.  Hold redtail_lock while running redtailBba: it writes
-  // strat->redTailChange and strat->completeReduce_retry (shared strat
-  // fields), so concurrent calls would race.  redtail_lock serializes
-  // the redtailBba block but does not block S-shared readers (e.g.
-  // main's refill_and_publish), which was the actual bottleneck.
+  // (b) S-shared.  Per-call output flags for redtailBba / redtailBbaAlsoLC_Z;
+  // see the long comment above (task 361 run 581) for the rationale.
+  bool rt_change = false;
+  bool rt_retry = false;
   kt_S_lock_shared_phase0(ctx, thread_id);
-  pthread_mutex_lock(&ctx->redtail_lock);
 #ifdef KTHREAD_INSTRUMENT
   long p0s_t0 = KT_STATS(ctx) ? kt_now_ns() : 0;
 #endif
-  strat->redTailChange = FALSE;
 
   if (rField_is_Z(currRing) && !rHasLocalOrMixedOrdering(currRing))
-    redtailBbaAlsoLC_Z(P, strat);
+    redtailBbaAlsoLC_Z(P, strat, &rt_change, &rt_retry);
 
   if (TEST_OPT_INTSTRATEGY)
   {
@@ -1300,12 +1307,13 @@ static void process_survivor_lobject(SweepContext *ctx, LObject *P, int thread_i
       long rt0 = KT_STATS(ctx) ? kt_now_ns() : 0;
 #endif
       P->p = redtailBba(P, strat->S.end(), strat, withT,
-                        !TEST_OPT_CONTENTSB);
+                        !TEST_OPT_CONTENTSB,
+                        &rt_change, &rt_retry);
 #ifdef KTHREAD_INSTRUMENT
       if (KT_STATS(ctx)) redtail_accum += kt_now_ns() - rt0;
 #endif
       P->pCleardenom();
-      if (strat->redTailChange) P->t_p = NULL;
+      if (rt_change) P->t_p = NULL;
     }
   }
   else
@@ -1316,15 +1324,18 @@ static void process_survivor_lobject(SweepContext *ctx, LObject *P, int thread_i
 #ifdef KTHREAD_INSTRUMENT
       long rt0 = KT_STATS(ctx) ? kt_now_ns() : 0;
 #endif
-      P->p = redtailBba(P, strat->S.end(), strat, withT);
+      P->p = redtailBba(P, strat->S.end(), strat, withT, FALSE,
+                        &rt_change, &rt_retry);
 #ifdef KTHREAD_INSTRUMENT
       if (KT_STATS(ctx)) redtail_accum += kt_now_ns() - rt0;
 #endif
-      if (strat->redTailChange) P->t_p = NULL;
+      if (rt_change) P->t_p = NULL;
     }
   }
-
-  pthread_mutex_unlock(&ctx->redtail_lock);
+  // rt_retry is intentionally not consumed here: the parallel drain
+  // doesn't act on it directly — the existing serial bba path picks up
+  // strat->completeReduce_retry (still OR-merged by redtailBba's
+  // write_back) and triggers the retry from the outer loop.
 
   // SetShortExpVector is a pure LObject mutation but is needed before
   // enterT (which reads p.sev to populate sevT[atT]).  Compute it here

@@ -386,17 +386,13 @@ struct SweepContext
   // reader/writer lock.  See kutil.h's class LSet and
   // ~/project/docs/parallel-bba-chunked-lsets.md.
 
-  // Mutex serializing the phase-0 redtailBba block (task 359; run 572).
-  // The S-exclusive critical section was shrunk to just enterT+enterS;
-  // redtailBba and its surrounding pCleardenom/pNorm now run under the
-  // S-shared lock so they don't block main's S-shared acquire at refill.
-  // But redtailBba writes strat->redTailChange and strat->completeReduce_retry
-  // (shared strat fields), so concurrent redtailBba calls would race on
-  // those writes.  This mutex serializes the redtailBba block — workers
-  // still serialize on it, but other threads can hold S-shared in
-  // parallel (e.g. main's refill_and_publish), which was the actual
-  // bottleneck per the staging-9454 wall-clock attribution.
-  pthread_mutex_t redtail_lock;
+  // redtail_lock removed in task 361 (run 581).  redtailBba /
+  // redtailBbaAlsoLC_Z now accept default-nullptr out pointers for
+  // their two output flags (redTailChange, completeReduce_retry); the
+  // parallel-bba phase-0(b) drain passes thread-local pointers, so
+  // there is no shared strat write to serialize and concurrent
+  // redtailBba calls run with no extra mutex.  See kthread.cc phase-0
+  // comment block and ~/project/docs/parallel-bba-redtail-decouple.md.
 
   // Shutdown flag (per-context, not global static)
   std::atomic<bool> done;

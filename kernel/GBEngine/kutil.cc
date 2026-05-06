@@ -6996,14 +6996,39 @@ poly redtail (poly p, sBasisSet::const_iterator end, kStrategy strat)
 
 // `end` is the exclusive upper-bound iterator: reduction considers
 // S-elements in [strat->S.begin(), end).
-poly redtailBba (LObject* L, sBasisSet::const_iterator end, kStrategy strat, BOOLEAN withT, BOOLEAN normalize)
+poly redtailBba (LObject* L, sBasisSet::const_iterator end, kStrategy strat, BOOLEAN withT, BOOLEAN normalize,
+                 bool *out_redTailChange, bool *out_completeReduce_retry)
 {
-  strat->redTailChange=FALSE;
-  if (strat->noTailReduction) return L->GetLmCurrRing();
+  // Task 361 (run 581): track redTailChange / completeReduce_retry in
+  // local vars; at every return path mirror them to either the strat
+  // fields (serial callers — preserves existing semantics) or the out
+  // pointers (parallel-bba phase-0(b) drain).  The dispatch is on
+  // out_redTailChange != nullptr: when the caller passes a non-null
+  // out pointer, both flags route to the per-call locations only and
+  // strat is left untouched, so concurrent calls race nowhere.
+  bool local_redTailChange = false;
+  bool local_completeReduce_retry = false;
+  auto write_back = [&]() {
+    if (out_redTailChange != nullptr)
+    {
+      *out_redTailChange = local_redTailChange;
+      if (out_completeReduce_retry) *out_completeReduce_retry = local_completeReduce_retry;
+    }
+    else
+    {
+      strat->redTailChange = local_redTailChange ? TRUE : FALSE;
+      // completeReduce_retry is "sticky" across calls in serial bba/sba
+      // (set TRUE inside redtailBba, read at the outer-loop bottom
+      // after completeReduce, then reset).  OR-merge so a prior TRUE
+      // isn't lost.
+      if (local_completeReduce_retry) strat->completeReduce_retry = TRUE;
+    }
+  };
+  if (strat->noTailReduction) { write_back(); return L->GetLmCurrRing(); }
   poly h, p;
   p = h = L->GetLmTailRing();
   if ((h==NULL) || (pNext(h)==NULL))
-    return L->GetLmCurrRing();
+  { write_back(); return L->GetLmCurrRing(); }
 
   TObject* With;
   // placeholder in case strat->T.empty()
@@ -7075,12 +7100,12 @@ poly redtailBba (LObject* L, sBasisSet::const_iterator end, kStrategy strat, BOO
       {
         With->pNorm();
       }
-      strat->redTailChange=TRUE;
+      local_redTailChange = true;
       if (ksReducePolyTail(L, With, &Ln))
       {
         // reducing the tail would violate the exp bound
         //  set a flag and hope for a retry (in bba)
-        strat->completeReduce_retry=TRUE;
+        local_completeReduce_retry = true;
         if ((Ln.p != NULL) && (Ln.t_p != NULL)) Ln.p=NULL;
         do
         {
@@ -7103,7 +7128,7 @@ poly redtailBba (LObject* L, sBasisSet::const_iterator end, kStrategy strat, BOO
   Ln.Delete();
   if (L->p != NULL) pNext(L->p) = pNext(p);
 
-  if (strat->redTailChange)
+  if (local_redTailChange)
   {
     L->length = 0;
     L->pLength = 0;
@@ -7112,6 +7137,7 @@ poly redtailBba (LObject* L, sBasisSet::const_iterator end, kStrategy strat, BOO
   //if (TEST_OPT_PROT) { PrintS("N"); mflush(); }
   //L->Normalize(); // HANNES: should have a test
   kTest_L(L,strat);
+  write_back();
   return L->GetLmCurrRing();
 }
 
@@ -7234,15 +7260,34 @@ poly redtailBbaBound (LObject* L, sBasisSet::const_iterator end, kStrategy strat
   return L->GetLmCurrRing();
 }
 
-void redtailBbaAlsoLC_Z (LObject* L, kStrategy strat )
+void redtailBbaAlsoLC_Z (LObject* L, kStrategy strat,
+                         bool *out_redTailChange,
+                         bool *out_completeReduce_retry)
 // normalize=FALSE, withT=FALSE, coeff=Z
 {
-  strat->redTailChange=FALSE;
+  // Task 361 (run 581): see redtailBba — flags route to *either* the
+  // strat fields (serial callers) *or* the per-call out pointers
+  // (parallel-bba phase-0(b) drain), never both, so concurrent calls
+  // can't race on strat.
+  bool local_redTailChange = false;
+  bool local_completeReduce_retry = false;
+  auto write_back = [&]() {
+    if (out_redTailChange != nullptr)
+    {
+      *out_redTailChange = local_redTailChange;
+      if (out_completeReduce_retry) *out_completeReduce_retry = local_completeReduce_retry;
+    }
+    else
+    {
+      strat->redTailChange = local_redTailChange ? TRUE : FALSE;
+      if (local_completeReduce_retry) strat->completeReduce_retry = TRUE;
+    }
+  };
 
   poly h, p;
   p = h = L->GetLmTailRing();
   if ((h==NULL) || (pNext(h)==NULL))
-    return;
+  { write_back(); return; }
 
   TObject* With;
   LObject Ln(pNext(h), strat->tailRing);
@@ -7296,13 +7341,13 @@ void redtailBbaAlsoLC_Z (LObject* L, kStrategy strat )
             cnt=REDTAIL_CANONICALIZE;
             /*poly tmp=*/Ln.CanonicalizeP();
           }
-          strat->redTailChange=TRUE;
+          local_redTailChange = true;
           /* reduction cancelling a tail term */
           if (ksReducePolyTailLC_Z(L, With, &Ln))
           {
             // reducing the tail would violate the exp bound
             //  set a flag and hope for a retry (in bba)
-            strat->completeReduce_retry=TRUE;
+            local_completeReduce_retry = true;
             if ((Ln.p != NULL) && (Ln.t_p != NULL)) Ln.p=NULL;
             do
             {
@@ -7325,13 +7370,13 @@ void redtailBbaAlsoLC_Z (LObject* L, kStrategy strat )
           cnt=REDTAIL_CANONICALIZE;
           /*poly tmp=*/Ln.CanonicalizeP();
         }
-        strat->redTailChange=TRUE;
+        local_redTailChange = true;
         /* reduction cancelling a tail term */
         if (ksReducePolyTail_Z(L, With, &Ln))
         {
           // reducing the tail would violate the exp bound
           //  set a flag and hope for a retry (in bba)
-          strat->completeReduce_retry=TRUE;
+          local_completeReduce_retry = true;
           if ((Ln.p != NULL) && (Ln.t_p != NULL)) Ln.p=NULL;
           do
           {
@@ -7353,13 +7398,14 @@ void redtailBbaAlsoLC_Z (LObject* L, kStrategy strat )
   Ln.Delete();
   if (L->p != NULL) pNext(L->p) = pNext(p);
 
-  if (strat->redTailChange)
+  if (local_redTailChange)
   {
     L->length = 0;
     L->pLength = 0;
   }
 
   kTest_L(L, strat);
+  write_back();
   return;
 }
 
