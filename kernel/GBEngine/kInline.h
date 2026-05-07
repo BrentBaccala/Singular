@@ -1073,8 +1073,14 @@ KINLINE void LSetChunk::pop(void) {
 }
 
 KINLINE void LSetChunk::pop_and_erase(void) {
-  /* Tombstone-erase the first live element (polys freed at compact time). */
-  erase(begin());
+  /* Physically discard the head live element (polys freed inline).
+   * Pre-task-360 this was `erase(begin())` where erase() was physical;
+   * run 578 flipped erase() to tombstone-only for the rdlock-shared
+   * design, silently downgrading pop_and_erase too.  Routed through
+   * the named physical_erase primitive (kutil.cc) so erase() can stay
+   * tombstone-only for worker rdlock callers without dragging
+   * pop_and_erase along with it. */
+  physical_erase(begin());
 }
 
 /***************************************************************

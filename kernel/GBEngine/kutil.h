@@ -320,6 +320,16 @@ struct SElement {
 class LSetChunk;  // forward declare (defined later in this header)
 extern __thread LSetChunk* t_local_B_override;
 
+// Forward declare kt_current_ctx (defined in kthread.cc).  Used by
+// inline LSet::erase wrappers to dispatch between tombstone-only erase
+// (when running inside bba_parallel_loop, where worker rdlock holders
+// would UAF on physical removal) and physical erase + poly-free (when
+// running in serial mode).  bba_parallel_loop sets kt_current_ctx at
+// entry (kthread.cc:2070) and clears it at exit (kthread.cc:2373); the
+// dispatch is one atomic load + branch per LSet::erase call.
+struct SweepContext;
+extern SweepContext* kt_current_ctx;
+
 // strat_B(strat) is the LSetChunk enterOnePair/chainCrit should write into.
 // Returns *t_local_B_override if set, else strat->B.  Defined after
 // skStrategy as an inline function (needs both LSetChunk and skStrategy
@@ -1736,6 +1746,17 @@ public:
   KINLINE const LObject& top(void);
   iterator erase(iterator it);
   unordered_iterator erase(unordered_iterator it);
+  // physical_erase: the pre-task-360 erase contract.  Removes the
+  // tree node and frees the LObject's polys.  Returns the iterator
+  // following the erased entry (matches std::multiset::erase /
+  // LSetChunk::erase convention).  Out-of-line for access to
+  // file-static kLSet_free_polys.  Caller must hold wrlock or be
+  // single-threaded — physical removal is unsafe under rdlock-shared
+  // (UAF in concurrent reader scans).  The post-task-360 erase()
+  // overloads above are tombstone-only because they're called from
+  // worker rdlock paths; physical_erase is the named primitive for
+  // serial code paths and bulk-cleanup that want immediate poly-free.
+  iterator physical_erase(iterator it);
 
   // Free polys for every entry (live and tombstoned), then drop the
   // multiset, flat_, sev_flat_, sevSig_flat_, and pair_index.  O(N) in
@@ -2219,7 +2240,14 @@ public:
   }
 
   // ----- Erase via wrapper iterator -------------------------------
+  //
+  // Dispatches between physical erase (serial mode) and tombstone-only
+  // erase (parallel mode, where worker rdlock holders would UAF on
+  // physical removal).  kt_current_ctx is non-NULL only inside
+  // bba_parallel_loop (kthread.cc:2070 / :2373).  Single load + branch
+  // per call.
   iterator erase(iterator it) {
+    if (kt_current_ctx == NULL) return physical_erase(it);
     if (it.chunk_ == nullptr) return it;
     LSetChunk* c = it.chunk_;
     auto next_inner = c->erase(it.inner_);
@@ -2229,7 +2257,24 @@ public:
     return iterator(c, next_inner);
   }
 
-  // erase via wrapper filtered_iterator.
+  // physical_erase: pre-task-360 erase semantics (physical tree
+  // removal + immediate poly-free).  Used directly by serial-only
+  // callers that want to bypass the dispatch in erase().  The
+  // dispatch in erase() routes here automatically when
+  // kt_current_ctx == NULL.
+  iterator physical_erase(iterator it) {
+    if (it.chunk_ == nullptr) return it;
+    LSetChunk* c = it.chunk_;
+    auto next_inner = c->physical_erase(it.inner_);
+    return iterator(c, next_inner);
+  }
+
+  // erase via wrapper filtered_iterator.  Stays tombstone-only —
+  // filtered_iterator is the worker-rdlock chunked-scan pattern, so
+  // even when kt_current_ctx == NULL a filtered_iterator caller is
+  // (by convention) inside a chunked-LSet scan that doesn't want
+  // physical removal.  Serial callers that want physical-erase use
+  // the iterator overload above.
   filtered_iterator erase(filtered_iterator fit) {
     if (fit.chunk_ == nullptr) return fit;
     LSetChunk* c = fit.chunk_;

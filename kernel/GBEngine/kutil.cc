@@ -1438,6 +1438,61 @@ void LSet::clear_and_erase() {
   free_successors_unlocked();
 }
 
+// LSetChunk::physical_erase — the pre-task-360 erase contract.
+// Physically removes the tree node at `it` AND frees the LObject's
+// polys via kLSet_free_polys.  Mirrors LSetChunk::pop()'s tree-erase
+// steps (pair_index, sev_flat_, sevSig_flat_, multiset, live_count)
+// and adds the poly-free pop() doesn't do (because pop() transfers
+// ownership to the caller, while physical_erase is the discard path).
+//
+// Concurrency contract: physical tree mutation is unsafe under
+// rdlock-shared — concurrent reader scans dereference flat_ pointers
+// into the freed tree node.  Caller must hold wrlock or be single-
+// threaded.  bba_parallel_loop (kthread.cc) sets kt_current_ctx at
+// entry (kthread.cc:2070) and clears it at exit (kthread.cc:2373);
+// the assume() below guards against future plumbing of physical_erase
+// into the parallel path without first taking wrlock.
+//
+// Workflow note: the post-task-360 erase() overloads in this file
+// are tombstone-only because they're called from worker rdlock
+// scans during phase-1 chainCritNormal.  physical_erase is the
+// named primitive for serial code paths (and for bulk cleanup via
+// the unrolled clear_and_erase fast path) that want the original
+// physical-remove + free-polys semantics.
+LSetChunk::iterator LSetChunk::physical_erase(iterator it) {
+  // Physical removal requires single-threaded execution or wrlock.
+  // bba_parallel_loop's hot paths under worker rdlock use erase()
+  // (tombstone) and pop() (wrlock-protected); physical_erase is for
+  // serial paths and post-join cleanup, so kt_current_ctx must be
+  // NULL here.
+  assume(kt_current_ctx == NULL);
+
+  if (it == end()) return it;
+
+  // Free everything the entry owns (lcm, t_p in some cases, sig).
+  // kLSet_free_polys is careful not to free p1/p2 (T's polys, shared)
+  // and is the canonical helper also used by compact and
+  // clear_and_erase.
+  LObject& Lp = const_cast<LObject&>(*it);
+  kStrategy strat = this->key_comp().strat;
+  kLSet_free_polys(Lp, strat);
+
+  // Tree + auxiliary-structure removal mirrors LSetChunk::pop().
+  if (Lp.p1 != NULL && Lp.p2 != NULL) {
+    auto key = canonicalize_pair(Lp.p1, Lp.p2);
+    pair_index.erase(key);
+  }
+  if (Lp.flat_index < (int)sev_flat_.size()) sev_flat_[Lp.flat_index] = 0;
+  if (Lp.flat_index < (int)sevSig_flat_.size()) sevSig_flat_[Lp.flat_index] = 0;
+
+  // writable_set::erase returns the iterator after the erased element
+  // (std::multiset::erase convention).
+  iterator next_it = writable_set<LObject, CompareLObject>::erase(it);
+  --live_count_;
+  return next_it;
+}
+
+
 // Tombstone an L entry: record the erase, mark the LObject as deleted,
 // remove from the dedup pair_index, and zero sev_flat_/sevSig_flat_ so
 // the cache-friendly unordered and filtered scans skip the slot.  Does
