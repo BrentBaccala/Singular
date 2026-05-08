@@ -1073,7 +1073,15 @@ public:
 // T[i] = T[i-1] shifts, and BlockArray<TObject>::insert() does the same
 // under the hood, and std::atomic<bool> is not copy-assignable.
 static inline bool tobject_published_load(const sTObject &t) {
-  return __atomic_load_n(&t.published, __ATOMIC_ACQUIRE);
+  // Serial-mode elision: outside bba_parallel_loop, kt_current_ctx is
+  // NULL (set/cleared in kthread.cc:2070/:2375). enterT publishes
+  // synchronously on serial paths, so every reader observes
+  // published=true by the time it matters; the byte load + acquire
+  // fence is dead weight and adds a 2nd-cache-line miss per probe in
+  // hot loops like kFindDivisibleByInT. Short-circuit on the
+  // kt_current_ctx test (L1-resident global, well-predicted branch).
+  return kt_current_ctx == NULL
+      || __atomic_load_n(&t.published, __ATOMIC_ACQUIRE);
 }
 static inline void tobject_publish(sTObject &t) {
   __atomic_store_n(&t.published, true, __ATOMIC_RELEASE);
