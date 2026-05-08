@@ -52,6 +52,16 @@
 #include <cstring>
 #include <climits>
 
+// Global ctx pointer used as the parallel-mode runtime signal.
+// NULL  ⟺ outside bba_parallel_loop (serial mode); non-NULL ⟺ inside
+// the parallel loop.  Read by LSet::erase to dispatch between
+// physical (serial) and tombstone-only (parallel rdlock) semantics
+// (task 363; commit f392b3c33), so this must be defined and
+// maintained regardless of KTHREAD_INSTRUMENT.  Originally introduced
+// (task 358; run 571) for gdb-driven kt_dump_stats calls.  Set at
+// bba_parallel_loop entry, cleared at parallel_shutdown.
+SweepContext *kt_current_ctx = NULL;
+
 /* ------------------------------------------------------------------ */
 /*  Instrumentation helpers (task 277; run 482)                       */
 /* ------------------------------------------------------------------ */
@@ -60,12 +70,6 @@
 #  define KT_TS(ctx, tid)     ((ctx)->tstats[tid])
 #  define KT_TIME_START(var)  long var = kt_now_ns()
 #  define KT_TIME_DELTA(var)  (kt_now_ns() - (var))
-
-// Global ctx pointer for gdb-driven kt_dump_stats(kt_current_ctx)
-// (task 358; run 571).  Set at bba_parallel_loop
-// entry, cleared at parallel_shutdown.  NULL when no parallel-bba run
-// is in flight.
-SweepContext *kt_current_ctx = NULL;
 
 // Thread-local thread_id so KTHREAD_INSTRUMENT-guarded sites in other
 // translation units (kutil.cc chainCritNormal) can find their
@@ -2063,11 +2067,12 @@ void bba_parallel_loop(SweepContext *ctx)
     strat->sevT.ensure_capacity((int)reserve_n);
   }
 
-#ifdef KTHREAD_INSTRUMENT
-  // Expose ctx for gdb-driven kt_dump_stats calls.  Set even when
-  // stats_enabled is false — kt_dump_stats itself is gated by
-  // KT_STATS(ctx), so a no-stats run still safely no-ops.
+  // Expose ctx as the parallel-mode runtime signal (read by
+  // LSet::erase dispatch) and for gdb-driven kt_dump_stats calls.
+  // Set unconditionally — required for correct erase semantics
+  // regardless of KTHREAD_INSTRUMENT.
   kt_current_ctx = ctx;
+#ifdef KTHREAD_INSTRUMENT
   // Main thread runs as thread_id 0.
   kt_my_thread_id = 0;
   if (KT_STATS(ctx))
@@ -2367,10 +2372,10 @@ parallel_shutdown:
   // we don't want it cluttering normal runs' stderr (which would
   // also break the regress.cmd diff tests).
   if (KT_STATS(ctx)) kt_dump_stats(ctx);
-  // Clear globals so a re-entry of bba_parallel_loop starts fresh
-  // and a stray gdb call to kt_dump_stats(kt_current_ctx) after the
-  // run finishes is a no-op (NULL deref would be an obvious bug).
-  kt_current_ctx = NULL;
   kt_my_thread_id = -1;
 #endif
+  // Clear the parallel-mode signal so post-loop serial paths see
+  // NULL (LSet::erase dispatches to physical_erase) and a stray gdb
+  // call to kt_dump_stats(kt_current_ctx) is a NULL no-op.
+  kt_current_ctx = NULL;
 }
