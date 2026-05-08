@@ -514,7 +514,14 @@ public:
 
     iterator& operator++() {
       pos_++;
-      skip_deleted_forward();
+      // Caller-gated elision: in serial mode sBasisSet::erase
+      // physically removes the element, so no tombstones can exist;
+      // skipping over them is dead weight.  Function-level dispatch
+      // is insufficient because libSingular.so's default visibility
+      // forces self-calls through the PLT (see the
+      // TObjectIterator::skip_unpublished_forward analysis in
+      // docs/profile-parallel-bba-43277bf8d-c200-1.md).
+      if (kt_current_ctx != NULL) skip_deleted_forward();
       return *this;
     }
     iterator operator++(int) {
@@ -524,7 +531,7 @@ public:
     }
     iterator& operator--() {
       pos_--;
-      skip_deleted_backward();
+      if (kt_current_ctx != NULL) skip_deleted_backward();
       return *this;
     }
     iterator operator--(int) {
@@ -558,7 +565,7 @@ public:
 
     const_iterator& operator++() {
       pos_++;
-      skip_deleted_forward();
+      if (kt_current_ctx != NULL) skip_deleted_forward();
       return *this;
     }
     const_iterator operator++(int) {
@@ -611,14 +618,14 @@ public:
   // --- Iterators ---
   iterator begin() {
     iterator it(this, 0);
-    it.skip_deleted_forward();
+    if (kt_current_ctx != NULL) it.skip_deleted_forward();
     return it;
   }
   iterator end() { return iterator(this, count.load(std::memory_order_relaxed)); }
 
   const_iterator begin() const {
     const_iterator it(this, 0);
-    it.skip_deleted_forward();
+    if (kt_current_ctx != NULL) it.skip_deleted_forward();
     return it;
   }
   const_iterator end() const { return const_iterator(this, count.load(std::memory_order_relaxed)); }
@@ -628,7 +635,7 @@ public:
   // (sLObject::checked) from a mutable strat->S.
   const_iterator cbegin() const {
     const_iterator it(this, 0);
-    it.skip_deleted_forward();
+    if (kt_current_ctx != NULL) it.skip_deleted_forward();
     return it;
   }
   const_iterator cend() const { return const_iterator(this, count.load(std::memory_order_relaxed)); }
@@ -668,7 +675,16 @@ public:
   // are atomically incremented so serial readers stay consistent with
   // the parallel writers.
   void erase(iterator it) {
-    if (order_ == SORDER_MONFIRST) {
+    // Serial-mode dispatch (mirrors LSet::erase, commit f392b3c33):
+    // outside bba_parallel_loop, no peer drainer is reading S under
+    // shared lock, so we can physically remove the element.  This
+    // avoids tombstone accumulation that would otherwise force every
+    // skip_deleted_forward / skip_deleted_backward to walk past
+    // dead entries on each iteration.  Physical erase shifts
+    // subsequent elements down (BlockArray<SElement>::erase), so
+    // iterator stability after erase requires the erase_and_next
+    // pattern (already used by the relevant call sites).
+    if (order_ == SORDER_MONFIRST || kt_current_ctx == NULL) {
       __atomic_add_fetch(&erase_call_count_, 1, __ATOMIC_RELAXED);
       BlockArray<SElement>::erase(it.pos_);
       live_count_--;
