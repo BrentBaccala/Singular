@@ -1122,6 +1122,13 @@ class TObjectIterator {
   // Acquire-load on published — pairs with tobject_publish's release
   // store in enterT.  Once a reader observes published=true, all other
   // field writes that preceded the publish are visible.
+  //
+  // The skip is gated at the call site (constructor / operator++) by
+  // a kt_current_ctx == NULL check, so this function is only entered
+  // when running under bba_parallel_loop.  Without that gating the
+  // PLT-based dispatch to this function dominates serial-mode wall
+  // (libSingular.so is built with default visibility, so even
+  // self-calls to skip_unpublished_forward go through PLT).
   void skip_unpublished_forward() {
     while (pos_ < set_->size()
            && !tobject_published_load((*set_)[pos_])) pos_++;
@@ -1130,7 +1137,7 @@ class TObjectIterator {
 public:
   TObjectIterator() : set_(NULL), pos_(0) {}
   TObjectIterator(BlockArray<TObject>* s, int pos) : set_(s), pos_(pos) {
-    skip_unpublished_forward();
+    if (kt_current_ctx != NULL) skip_unpublished_forward();
   }
 
   TObject& operator*()  const { return (*set_)[pos_]; }
@@ -1143,7 +1150,7 @@ public:
 
   TObjectIterator& operator++() {
     pos_++;
-    skip_unpublished_forward();
+    if (kt_current_ctx != NULL) skip_unpublished_forward();
     return *this;
   }
   TObjectIterator operator++(int) {
@@ -1160,6 +1167,8 @@ class ConstTObjectIterator {
   const BlockArray<TObject>* set_;
   int pos_;
 
+  // See TObjectIterator::skip_unpublished_forward for the call-site
+  // gating rationale.
   void skip_unpublished_forward() {
     while (pos_ < set_->size()
            && !tobject_published_load((*set_)[pos_])) pos_++;
@@ -1169,7 +1178,7 @@ public:
   ConstTObjectIterator() : set_(NULL), pos_(0) {}
   ConstTObjectIterator(const BlockArray<TObject>* s, int pos)
       : set_(s), pos_(pos) {
-    skip_unpublished_forward();
+    if (kt_current_ctx != NULL) skip_unpublished_forward();
   }
 
   const TObject& operator*()  const { return (*set_)[pos_]; }
@@ -1179,7 +1188,7 @@ public:
 
   ConstTObjectIterator& operator++() {
     pos_++;
-    skip_unpublished_forward();
+    if (kt_current_ctx != NULL) skip_unpublished_forward();
     return *this;
   }
   ConstTObjectIterator operator++(int) {
