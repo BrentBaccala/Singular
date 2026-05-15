@@ -97,6 +97,40 @@ __thread uint64_t t_local_my_arrival = UINT64_MAX;
 // vector before phase 1.  See kutil.h for rationale.
 __thread std::vector<SElement*>* t_local_pairtest_hits = NULL;
 
+// --- Bench-only elision toggles (task 363; run 587) ---
+// See kutil.h for full rationale.  Read once at siInit() time via
+// kt_bench_toggles_init(); SERIAL-MODE-ONLY: each elision site gates
+// on (g_bench_elide_X && kt_current_ctx == NULL) so parallel-mode
+// behaviour is unchanged.
+bool g_bench_elide_sbasis_rwlock     = false;
+bool g_bench_elide_blockarray_atomic = false;
+bool g_bench_elide_lset_wrapper      = false;
+
+static inline bool kt_env_truthy(const char *name) {
+  const char *v = getenv(name);
+  if (v == NULL) return false;
+  if (v[0] == '\0' || v[0] == '0' || v[0] == 'f' || v[0] == 'F' ||
+      v[0] == 'n' || v[0] == 'N') return false;
+  return true;
+}
+
+void kt_bench_toggles_init() {
+  static bool initialized = false;
+  if (initialized) return;
+  initialized = true;
+  g_bench_elide_sbasis_rwlock     = kt_env_truthy("SINGULAR_BENCH_ELIDE_SBASIS_RWLOCK");
+  g_bench_elide_blockarray_atomic = kt_env_truthy("SINGULAR_BENCH_ELIDE_BLOCKARRAY_ATOMIC");
+  g_bench_elide_lset_wrapper      = kt_env_truthy("SINGULAR_BENCH_ELIDE_LSET_WRAPPER");
+}
+
+// Static-constructor: ensure bench toggles are initialized at process
+// startup, before any bba run.  Saves needing to thread a call from
+// siInit through kutil.h's include surface.
+namespace {
+  struct KtBenchTogglesInit { KtBenchTogglesInit() { kt_bench_toggles_init(); } };
+  KtBenchTogglesInit _kt_bench_toggles_init_instance;
+}
+
 // Arrival-id filter for S iteration during the parallel phase-1 drain.
 // Returns true if the entry should be processed (its arrival_id is
 // strictly less than the current drainer's my_arrival).  In serial mode

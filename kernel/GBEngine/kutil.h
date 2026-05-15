@@ -61,6 +61,15 @@ typedef int* intset;
 typedef int64  wlen_type;
 typedef wlen_type* wlen_set;
 
+// Forward declarations for bench-only elision toggles (task 363; run 587)
+// — needed in BlockArray::operator[] and sBasisSet's lock wrappers below.
+// Full declarations / rationale near line ~330 (alongside kt_current_ctx).
+struct SweepContext;
+extern SweepContext* kt_current_ctx;
+extern bool g_bench_elide_blockarray_atomic;
+extern bool g_bench_elide_sbasis_rwlock;
+extern bool g_bench_elide_lset_wrapper;
+
 // Block-allocated array: elements are stored in fixed-size blocks
 // indexed via a two-level directory.  blocks[b] is a calloc'd block
 // of BLOCK_SIZE elements; operator[](i) returns blocks[i>>SHIFT][i&MASK].
@@ -104,18 +113,47 @@ protected:
 public:
   BlockArray() : blocks(nullptr), num_blocks(0), dir_capacity(0), count(0) {}
 
+  // Bench toggle (task 363; run 587): when g_bench_elide_blockarray_atomic
+  // is set AND we're in serial mode (kt_current_ctx == NULL), use a
+  // relaxed load instead of acquire on the directory pointer.  No-op
+  // in parallel mode — parallel readers MUST stay acquire to pair
+  // with ensure_capacity's release-store.  See kutil.h header comment
+  // for the contract.
+  //
+  // The toggle's branch is __builtin_expect-marked false to keep the
+  // common-case fast path branch-predicted correctly: when no toggle
+  // is set (production behaviour), the branch falls through and the
+  // hot-path operator[] is identical to its pre-task-363 form.
+  // Note that on x86-64, acquire-load on a naturally-aligned word is
+  // implemented as a plain MOV — no fence, no LOCK prefix — so even
+  // without the toggle the cost is just the load itself.
   Elem& operator[](int i) {
-    Elem** dir = blocks.load(std::memory_order_acquire);
+    Elem** dir;
+    if (__builtin_expect(g_bench_elide_blockarray_atomic && kt_current_ctx == NULL, 0)) {
+      dir = blocks.load(std::memory_order_relaxed);
+    } else {
+      dir = blocks.load(std::memory_order_acquire);
+    }
     return dir[i >> BLOCK_SHIFT][i & BLOCK_MASK];
   }
   const Elem& operator[](int i) const {
-    Elem** dir = blocks.load(std::memory_order_acquire);
+    Elem** dir;
+    if (__builtin_expect(g_bench_elide_blockarray_atomic && kt_current_ctx == NULL, 0)) {
+      dir = blocks.load(std::memory_order_relaxed);
+    } else {
+      dir = blocks.load(std::memory_order_acquire);
+    }
     return dir[i >> BLOCK_SHIFT][i & BLOCK_MASK];
   }
 
   // Return pointer to element i (stable across growth — see class comment)
   Elem* addr(int i) {
-    Elem** dir = blocks.load(std::memory_order_acquire);
+    Elem** dir;
+    if (__builtin_expect(g_bench_elide_blockarray_atomic && kt_current_ctx == NULL, 0)) {
+      dir = blocks.load(std::memory_order_relaxed);
+    } else {
+      dir = blocks.load(std::memory_order_acquire);
+    }
     return &dir[i >> BLOCK_SHIFT][i & BLOCK_MASK];
   }
 
@@ -320,15 +358,42 @@ struct SElement {
 class LSetChunk;  // forward declare (defined later in this header)
 extern __thread LSetChunk* t_local_B_override;
 
-// Forward declare kt_current_ctx (defined in kthread.cc).  Used by
-// inline LSet::erase wrappers to dispatch between tombstone-only erase
-// (when running inside bba_parallel_loop, where worker rdlock holders
-// would UAF on physical removal) and physical erase + poly-free (when
-// running in serial mode).  bba_parallel_loop sets kt_current_ctx at
-// entry (kthread.cc:2070) and clears it at exit (kthread.cc:2373); the
-// dispatch is one atomic load + branch per LSet::erase call.
-struct SweepContext;
-extern SweepContext* kt_current_ctx;
+// kt_current_ctx is forward-declared near the top of this header for
+// early use in BlockArray's bench-elision gates.  Defined in kthread.cc.
+// Used by inline LSet::erase wrappers to dispatch between tombstone-only
+// erase (when running inside bba_parallel_loop, where worker rdlock
+// holders would UAF on physical removal) and physical erase + poly-free
+// (when running in serial mode).  bba_parallel_loop sets kt_current_ctx
+// at entry (kthread.cc:2070) and clears it at exit (kthread.cc:2373);
+// the dispatch is one atomic load + branch per LSet::erase call.
+
+// --- Bench-only elision toggles (task 363; run 587) ---
+//
+// Three runtime knobs to attribute the parallel-bba T=1 structural gap
+// (post-f392b3c33) among three suspected serial-mode overheads:
+//
+//   SINGULAR_BENCH_ELIDE_SBASIS_RWLOCK=1   skip rwlock/sBasisSet plumbing
+//   SINGULAR_BENCH_ELIDE_BLOCKARRAY_ATOMIC=1 use relaxed load on
+//                                          BlockArray<Elem>::blocks
+//                                          (read on every T access)
+//   SINGULAR_BENCH_ELIDE_LSET_WRAPPER=1    short-circuit chunked LSet
+//                                          to first/only chunk in serial
+//                                          mode (skip chunk-walk indirection)
+//
+// All three are SERIAL-MODE ONLY: each elision site is gated on
+// (g_bench_elide_X && kt_current_ctx == NULL).  Parallel-mode behaviour
+// is unchanged.  Toggles are read ONCE at process startup (from
+// kt_bench_toggles_init() in kutil.cc, invoked at the top of siInit)
+// into module-static booleans — getenv on every call would itself
+// perturb the measurement.
+//
+// **Measurement scaffolding, not permanent feature**.  After the
+// attribution-report task lands, the user decides whether to keep
+// (convert to proper kt_current_ctx dispatch like f392b3c33), revert,
+// or leave behind a documented dev knob.
+// g_bench_elide_* are forward-declared near the top of this header for
+// early use in BlockArray's gates and sBasisSet's lock wrappers.
+void kt_bench_toggles_init();
 
 // strat_B(strat) is the LSetChunk enterOnePair/chainCrit should write into.
 // Returns *t_local_B_override if set, else strat->B.  Defined after
@@ -603,12 +668,38 @@ public:
   // were using the mutex prior to task 299 (run 506) continue to get the same
   // serialisation semantics unchanged.
   // See ~/project/docs/parallel-bba-thread-safety-report.md for rationale.
-  void lock()            { pthread_rwlock_wrlock(&rwlock_); }
-  void unlock()          { pthread_rwlock_unlock(&rwlock_); }
-  void lock_exclusive()  { pthread_rwlock_wrlock(&rwlock_); }
-  void unlock_exclusive(){ pthread_rwlock_unlock(&rwlock_); }
-  void lock_shared()     { pthread_rwlock_rdlock(&rwlock_); }
-  void unlock_shared()   { pthread_rwlock_unlock(&rwlock_); }
+  //
+  // Bench toggle (task 363; run 587): when g_bench_elide_sbasis_rwlock is
+  // set AND we're in serial mode (kt_current_ctx == NULL), make the
+  // pthread call a no-op.  Note: at T=1 serial mode, no caller in the
+  // current tree actually invokes these wrappers — all sBasisSet rwlock
+  // acquisition happens in kthread.cc parallel paths.  The toggle is
+  // wired up for completeness in case future serial-mode code paths
+  // acquire it.
+  void lock() {
+    if (g_bench_elide_sbasis_rwlock && kt_current_ctx == NULL) return;
+    pthread_rwlock_wrlock(&rwlock_);
+  }
+  void unlock() {
+    if (g_bench_elide_sbasis_rwlock && kt_current_ctx == NULL) return;
+    pthread_rwlock_unlock(&rwlock_);
+  }
+  void lock_exclusive() {
+    if (g_bench_elide_sbasis_rwlock && kt_current_ctx == NULL) return;
+    pthread_rwlock_wrlock(&rwlock_);
+  }
+  void unlock_exclusive() {
+    if (g_bench_elide_sbasis_rwlock && kt_current_ctx == NULL) return;
+    pthread_rwlock_unlock(&rwlock_);
+  }
+  void lock_shared() {
+    if (g_bench_elide_sbasis_rwlock && kt_current_ctx == NULL) return;
+    pthread_rwlock_rdlock(&rwlock_);
+  }
+  void unlock_shared() {
+    if (g_bench_elide_sbasis_rwlock && kt_current_ctx == NULL) return;
+    pthread_rwlock_unlock(&rwlock_);
+  }
   pthread_rwlock_t* raw_rwlock() { return &rwlock_; }
 
   SOrderMode order() const { return order_; }
@@ -2060,7 +2151,21 @@ private:
   // O(k) global-min scan over chunk tops (task 360, step 6c).
   // Returns wrapper iterator to the global minimum, or end() if
   // empty.  Caller must hold rdlock or wrlock.
+  //
+  // Bench toggle (task 363; run 587): when g_bench_elide_lset_wrapper
+  // is set AND we're in serial mode (kt_current_ctx == NULL), skip
+  // the chunk-walk and go straight to the head chunk.  At T=1 there
+  // is only ever one chunk (compact runs in refill_and_publish which
+  // is parallel-only; serial bba's compact at exitBuchMora has
+  // nothing to do because we already physical-erase), so this is
+  // semantically identical and bypasses the iterator + acquire-load
+  // indirection.
   iterator find_global_min_unlocked() {
+    if (g_bench_elide_lset_wrapper && kt_current_ctx == NULL) {
+      LSetChunk::iterator it = chunk_.begin();
+      if (it == chunk_.end()) return iterator();
+      return iterator(&chunk_, it);
+    }
     LSetChunk*           winner = nullptr;
     LSetChunk::iterator  winner_it;
     for (LSetChunk* c = &chunk_; c != nullptr;
@@ -2241,6 +2346,13 @@ public:
   void pop(void) {
     // Pop the global minimum.  Walk to find which chunk hosts it,
     // then call that chunk's pop() to physically remove.
+    //
+    // Bench toggle (task 363; run 587): serial-mode short-circuit
+    // to head chunk — see find_global_min_unlocked for rationale.
+    if (g_bench_elide_lset_wrapper && kt_current_ctx == NULL) {
+      if (!chunk_.empty()) chunk_.pop();
+      return;
+    }
     LSetChunk*           winner = nullptr;
     LSetChunk::iterator  winner_it;
     for (LSetChunk* c = &chunk_; c != nullptr;
@@ -2259,6 +2371,12 @@ public:
     // erase() so polys are freed at compact time (vs immediately
     // by pop, which transfers them to the caller).  Used at error-
     // path L-clear (kthread.cc parallel_shutdown).
+    //
+    // Bench toggle (task 363; run 587): serial-mode short-circuit.
+    if (g_bench_elide_lset_wrapper && kt_current_ctx == NULL) {
+      if (!chunk_.empty()) chunk_.pop_and_erase();
+      return;
+    }
     LSetChunk*           winner = nullptr;
     LSetChunk::iterator  winner_it;
     for (LSetChunk* c = &chunk_; c != nullptr;
