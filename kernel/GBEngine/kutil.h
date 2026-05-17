@@ -157,6 +157,30 @@ public:
     return &dir[i >> BLOCK_SHIFT][i & BLOCK_MASK];
   }
 
+  // const overload of addr(): same stable-pointer / lockless-reader
+  // contract, used by the block-wise SIMD sev scan which holds a
+  // `const BlockArray<unsigned long>&`.  Must take the SAME atomic
+  // directory-load path as operator[]/addr so the acquire-load still
+  // pairs with ensure_capacity's release-store (see ensure_capacity's
+  // memory-ordering comment); do NOT cache the directory across calls.
+  const Elem* addr(int i) const {
+    Elem** dir;
+    if (__builtin_expect(g_bench_elide_blockarray_atomic && kt_current_ctx == NULL, 0)) {
+      dir = blocks.load(std::memory_order_relaxed);
+    } else {
+      dir = blocks.load(std::memory_order_acquire);
+    }
+    return &dir[i >> BLOCK_SHIFT][i & BLOCK_MASK];
+  }
+
+  // Block geometry, exposed for the block-wise SIMD sev scan.  Elements
+  // are contiguous within a block: indices i .. (i | BLOCK_MASK) of one
+  // block share the same inner allocation, so a SIMD kernel may run on
+  // that contiguous span.  block_size() is the run length; the in-block
+  // remaining run from index i is contiguous_run(i).
+  static constexpr int block_size() { return BLOCK_SIZE; }
+  static int contiguous_run(int i) { return BLOCK_SIZE - (i & BLOCK_MASK); }
+
   // Number of elements in use
   int size() const { return count.load(std::memory_order_acquire); }
   bool empty() const { return size() == 0; }

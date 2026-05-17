@@ -62,9 +62,23 @@ VAR long sba_interreduction_operations;
 
 #include "kernel/GBEngine/kutil.h"
 #include "kernel/GBEngine/kthread.h"
-// SIMD sev scan disabled: BlockArray elements are not contiguous across blocks.
-// Re-enable when SIMD scan is adapted for block-allocated arrays.
-#if 0 && defined(__x86_64__) && defined(__GNUC__)
+// SIMD sev pre-filter scan, adapted for the block-allocated strat->sevT
+// (BlockArray<unsigned long>).  BlockArray elements are NOT contiguous
+// across block boundaries, but ARE contiguous in runs of BLOCK_SIZE
+// (1024) within a single block (kutil.h).  The proven contiguous SSE4/
+// AVX2 kernels below are reused byte-for-byte; the block-wise driver
+// kSevScanBlocked() walks block by block, clamping each SIMD batch to
+// the in-block contiguous run and to tl, so ascending-index first-match
+// semantics are preserved and no read crosses a block boundary.  This
+// is correct at SINGULAR_THREADS>1: BlockArray blocks are growth-stable
+// (ensure_capacity never moves existing blocks) and the per-block base
+// pointer is obtained through the same atomic directory-load as
+// operator[]/addr (see addr(int) const in kutil.h).
+// KSEV_FORCE_SCALAR (build-time, -DKSEV_FORCE_SCALAR) forces the scalar
+// fallback even on x86_64 — used only to build a same-libs scalar
+// reference for output-equivalence diffing.  Undefined in normal builds,
+// so production behaviour is unchanged.
+#if defined(__x86_64__) && defined(__GNUC__) && !defined(KSEV_FORCE_SCALAR)
 #define HAVE_SIMD_SEV_SCAN 1
 #include <immintrin.h>
 
@@ -172,6 +186,82 @@ static inline int kSevScanSSE4(const unsigned long* sevT, unsigned long not_sev,
     j += 2;
   }
   return j;
+}
+
+// Block-wise driver for the SIMD sev pre-filter scan over the
+// block-allocated strat->sevT (BlockArray<unsigned long>).
+//
+// Returns the LOWEST index g in [j, tl] with (sevT[g] & not_sev) == 0
+// — a possible divisor candidate the caller must still revalidate
+// (sevT is only a necessary, not sufficient, divisibility test) — or
+// tl + 1 if there is no such index.  "Lowest index wins": ascending
+// block-by-block iteration reproduces the scalar fallback loop's
+// first-match index exactly.
+//
+// Implementation: walk block by block.  Within each block sevT is
+// contiguous (kutil.h), so the proven contiguous SSE4/AVX2 kernels run
+// unmodified on the in-block span [j, block_last], where block_last is
+// clamped to both the in-block contiguous run and tl — no SIMD load
+// ever crosses a BlockArray block boundary and no slot past tl is
+// touched.  Those kernels return the start of the first SIMD *batch*
+// containing a candidate (or a value past their scannable range,
+// including a 1-3 / 1-element scalar tail they don't vectorize), so a
+// small per-batch scalar pass narrows the kernel's batch-granular
+// answer down to the exact lowest candidate index within the block,
+// preserving first-match semantics across the whole [j, tl] range.
+//
+// The per-block base pointer is obtained via sevT.addr(j), which takes
+// the SAME atomic acquire directory-load as operator[] (kutil.h) —
+// safe for the lockless parallel-sweep readers — and is re-fetched for
+// every block (never cached across the scan, so a concurrent
+// ensure_capacity regrow can't leave us on a stale directory).
+static inline int kSevScanBlocked(const BlockArray<unsigned long>& sevT,
+                                  unsigned long not_sev, int j, int tl)
+{
+  const bool have_avx2 = __builtin_cpu_supports("avx2");
+  const bool have_sse4 = have_avx2 ? false : __builtin_cpu_supports("sse4.1");
+  const int blk_mask = sevT.block_size() - 1;
+  while (j <= tl)
+  {
+    // Contiguous run inside the current block, clamped to tl.
+    int off = j & blk_mask;                            // offset within block
+    int block_last = j + (sevT.block_size() - off) - 1;// last idx of block
+    if (block_last > tl) block_last = tl;
+    // Real block-base pointer (addr(j) backed off to the block start).
+    // We pass this directly to the contiguous kernels and use
+    // BLOCK-RELATIVE indices [off, rel_last]; the kernels index their
+    // pointer as base[k], so every access stays inside the block's
+    // calloc'd 1024-element allocation — no out-of-bounds pointer is
+    // ever formed (the earlier absolute-index bias was UB and corrupted
+    // the heap at -O3).  base is re-fetched per block via addr()'s
+    // atomic acquire directory load (never cached across the scan, so a
+    // concurrent ensure_capacity regrow can't strand us on a stale dir).
+    const unsigned long* base = sevT.addr(j) - off;
+    int rel_last = block_last - (j - off);             // = block_last & mask, clamped
+    int rel;
+    if (have_avx2)
+      rel = kSevScanAVX2(base, not_sev, off, rel_last);
+    else if (have_sse4)
+      rel = kSevScanSSE4(base, not_sev, off, rel_last);
+    else
+      rel = off;   // no SSE4/AVX2: scalar scan of the whole block below
+    // The kernel returns the start of the first SIMD batch containing a
+    // candidate, OR a value past its vectorizable range (a 1-3 / 1-elem
+    // scalar tail it does not process; or > rel_last when the whole
+    // block is clear).  A scalar pass from `rel` to rel_last narrows
+    // that to the exact lowest candidate — and, since _mm*_cmpeq_epi64
+    // is exact, never misses one nor false-returns.  block_base is the
+    // absolute index of base[0], so the absolute hit index is
+    // block_base + s.
+    int block_base = j - off;
+    for (int s = rel; s <= rel_last; s++)
+    {
+      if (!(base[s] & not_sev))
+        return block_base + s;  // exact lowest candidate, absolute, ascending
+    }
+    j = block_last + 1;         // block clear; advance to next block
+  }
+  return tl + 1;                // no candidate in [j, tl]
 }
 #endif
 #include "misc/options.h"
@@ -474,59 +564,38 @@ int kFindDivisibleByInT(const kStrategy strat, const LObject* L, const int start
     else
     {
 #if defined(HAVE_SIMD_SEV_SCAN) && !defined(PDEBUG) && !defined(PDIV_DEBUG)
-      // SIMD fast path: scan sevT in batches to skip non-candidates.
-      // AVX2 tests 4 entries (256-bit), SSE4 tests 2 entries (128-bit).
-      // sevT[j] is written before tobject_publish(T[j]) in enterT, so
-      // a SIMD batch over sevT may see a candidate for an
-      // in-flight slot; the per-match tobject_published_load gate below
-      // ensures we only dereference T[j].p / .t_p after observing
-      // published=true (acquire-synchronised with enterT's release).
-      if (__builtin_cpu_supports("avx2"))
+      // SIMD fast path: block-wise scan of sevT to skip non-candidates.
+      // kSevScanBlocked walks strat->sevT (a BlockArray) block by block,
+      // running the contiguous SSE4/AVX2 kernel within each block, and
+      // returns the lowest index j with (sevT[j] & not_sev)==0 — a
+      // necessary-but-not-sufficient divisor candidate — or tl+1 if
+      // none.  Ascending iteration reproduces the scalar fallback's
+      // first-match index exactly ("lowest index wins").
+      //
+      // sevT[j] is written before tobject_publish(T[j]) in enterT, so a
+      // prefilter hit may name an in-flight slot; the per-candidate
+      // tobject_published_load gate below ensures we only dereference
+      // T[j].p after observing published=true (acquire-synchronised
+      // with enterT's release).  The driver only replaces the
+      // prefilter; this validation is unchanged.
       {
-        int j = start;
         const int tl = strat->T.size()-1;
+        int j = start;
         loop
         {
-          j = kSevScanAVX2(sevT, not_sev, j, tl);
-          int batch_end = j + 3;
-          if (batch_end > tl) batch_end = tl;
-          for (; j <= batch_end; j++)
-          {
-            if (!(sevT[j] & not_sev)
-            && tobject_published_load(T[j])
-            && (T[j].p != NULL)
-            && p_LmDivisibleBy(T[j].p, p, r))
-            {
-              return j;
-            }
-          }
+          j = kSevScanBlocked(sevT, not_sev, j, tl);
           if (j > tl) return -1;
+          if (!(sevT[j] & not_sev)
+          && tobject_published_load(T[j])
+          && (T[j].p != NULL)
+          && p_LmDivisibleBy(T[j].p, p, r))
+          {
+            return j;
+          }
+          j++;   // candidate revalidation failed; resume past it
         }
       }
-      else if (__builtin_cpu_supports("sse4.1"))
-      {
-        int j = start;
-        const int tl = strat->T.size()-1;
-        loop
-        {
-          j = kSevScanSSE4(sevT, not_sev, j, tl);
-          int batch_end = j + 1;
-          if (batch_end > tl) batch_end = tl;
-          for (; j <= batch_end; j++)
-          {
-            if (!(sevT[j] & not_sev)
-            && tobject_published_load(T[j])
-            && (T[j].p != NULL)
-            && p_LmDivisibleBy(T[j].p, p, r))
-            {
-              return j;
-            }
-          }
-          if (j > tl) return -1;
-        }
-      }
-      else
-#endif
+#else
       {
       for (auto it = iterator_at_T(T, start); it != t_end; ++it)
       {
@@ -545,6 +614,7 @@ int kFindDivisibleByInT(const kStrategy strat, const LObject* L, const int start
       }
       return -1;
       }
+#endif
     }
   }
   else
@@ -573,52 +643,27 @@ int kFindDivisibleByInT(const kStrategy strat, const LObject* L, const int start
     else
     {
 #if defined(HAVE_SIMD_SEV_SCAN) && !defined(PDEBUG) && !defined(PDIV_DEBUG)
-      // SIMD fast path for t_p: scan sevT in batches to skip non-candidates.
-      // See note above on the tobject_published_load gate.
-      if (__builtin_cpu_supports("avx2"))
+      // SIMD fast path for t_p: block-wise scan of sevT (see the L->p
+      // path above for the kSevScanBlocked contract and the
+      // tobject_published_load gate rationale — identical here, only
+      // the divisibility test uses T[j].t_p).
       {
-        int j = start;
         const int tl = strat->T.size()-1;
+        int j = start;
         loop
         {
-          j = kSevScanAVX2(sevT, not_sev, j, tl);
-          int batch_end = j + 3;
-          if (batch_end > tl) batch_end = tl;
-          for (; j <= batch_end; j++)
-          {
-            if (!(sevT[j] & not_sev)
-            && tobject_published_load(T[j])
-            && p_LmDivisibleBy(T[j].t_p, p, r))
-            {
-              return j;
-            }
-          }
+          j = kSevScanBlocked(sevT, not_sev, j, tl);
           if (j > tl) return -1;
+          if (!(sevT[j] & not_sev)
+          && tobject_published_load(T[j])
+          && p_LmDivisibleBy(T[j].t_p, p, r))
+          {
+            return j;
+          }
+          j++;   // candidate revalidation failed; resume past it
         }
       }
-      else if (__builtin_cpu_supports("sse4.1"))
-      {
-        int j = start;
-        const int tl = strat->T.size()-1;
-        loop
-        {
-          j = kSevScanSSE4(sevT, not_sev, j, tl);
-          int batch_end = j + 1;
-          if (batch_end > tl) batch_end = tl;
-          for (; j <= batch_end; j++)
-          {
-            if (!(sevT[j] & not_sev)
-            && tobject_published_load(T[j])
-            && p_LmDivisibleBy(T[j].t_p, p, r))
-            {
-              return j;
-            }
-          }
-          if (j > tl) return -1;
-        }
-      }
-      else
-#endif
+#else
       {
       for (auto it = iterator_at_T(T, start); it != t_end; ++it)
       {
@@ -636,6 +681,7 @@ int kFindDivisibleByInT(const kStrategy strat, const LObject* L, const int start
       }
       return -1;
       }
+#endif
     }
   }
 }
