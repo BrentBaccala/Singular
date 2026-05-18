@@ -1704,21 +1704,16 @@ void LSetChunk::compact() {
   // We repack flat_ so only live entries remain, updating each live
   // LObject's flat_index to its new position.
   //
-  // We do this by calling reorder-ish code directly.  writable_set
-  // exposes a reorder() that rebuilds flat_ from data_; reuse that.
-  // But reorder() also invalidates comparator-ordered positions — fine
-  // here because no tree keys changed, we just need the flat_index
-  // repacked.  writable_set::reorder does: data_.swap(old) then
-  // re-insert pointers; flat_ cleared and rebuilt.  That's overkill
-  // since we don't need to re-sort the tree — but it's correct and
-  // cheap (tree has log-n inserts).
-  //
-  // Alternative: implement a tighter repack.  For clarity/correctness
-  // we just delegate to the base reorder.  Note: that is safe because
-  // CompareLObject is deterministic given the same (p, lcm, p1, p2,
-  // ecart, length, seq) — pointers in tree still compare the same
-  // way after reorder.
-  writable_set<LObject, CompareLObject>::reorder();
+  // The Phase-1 erase loop above already removed every tombstoned node
+  // from data_ via writable_set::erase_at (single-node data_.erase) —
+  // removing a node never reorders surviving nodes, so the tree is
+  // already correct and tombstone-free.  We therefore do NOT need
+  // reorder()'s O(n log n) swap + re-insert-all tree rebuild (which
+  // produces an identically-ordered tree).  We only need the O(n)
+  // in-order flat repack — repack_flat() is the tail of reorder()
+  // minus the swap+reinsert loop, producing IDENTICAL flat_ ordering
+  // and flat_index assignment (same ascending data_ traversal).
+  writable_set<LObject, CompareLObject>::repack_flat();
   deleted_count_ = 0;
 
   // Rebuild sev_flat_, sevSig_flat_, pair_index against the compacted

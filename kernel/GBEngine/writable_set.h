@@ -479,6 +479,23 @@ public:
     Compare& key_comp() { return comp_; }
     Compare& value_comp() { return comp_; }
 
+    // repack_flat() - O(n) in-order rebuild of flat_ / flat_index from
+    // the current data_ tree, WITHOUT the O(n log n) swap + re-insert-all
+    // tree rebuild that reorder() does.  Use this when the tree is
+    // already in the correct comparator order (e.g. after a sequence of
+    // single-node data_.erase() calls, which never reorder surviving
+    // nodes) and only the flat_ side-array needs to be repacked to drop
+    // physically-removed slots.  Produces flat_ ordering and flat_index
+    // assignment IDENTICAL to reorder() (same ascending data_ traversal).
+    void repack_flat() {
+        flat_.clear();
+        flat_.reserve(data_.size());
+        for (auto it = data_.begin(); it != data_.end(); ++it) {
+            (*it)->flat_index = flat_.size();
+            flat_.push_back(it);
+        }
+    }
+
     // Reorder - rebuilds the tree with current comparison function
     // without copying or deleting the objects
     void reorder() {
