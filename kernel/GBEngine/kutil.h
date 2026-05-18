@@ -69,6 +69,10 @@ extern SweepContext* kt_current_ctx;
 extern bool g_bench_elide_blockarray_atomic;
 extern bool g_bench_elide_sbasis_rwlock;
 extern bool g_bench_elide_lset_wrapper;
+// Serial compact-on-pop knob (task 368): 0=off 1=threshold 2=everypop.
+// Read once at startup from SINGULAR_BENCH_SERIAL_COMPACT; used only
+// at serial-mode (kt_current_ctx == NULL) LSet::pop / pop_and_erase.
+extern int g_bench_serial_compact;
 
 // Block-allocated array: elements are stored in fixed-size blocks
 // indexed via a two-level directory.  blocks[b] is a calloc'd block
@@ -2361,6 +2365,31 @@ public:
     return chunk_.key_comp()(lobject, *min_it);
   }
 
+  // Serial compact-on-pop hook (task 368).  Called at the END of a
+  // serial-mode pop()/pop_and_erase(), AFTER the physical erase has
+  // completed and every local iterator (winner_it, etc.) has gone out
+  // of scope, before returning.  compact() invalidates ALL outstanding
+  // strat->L iterators — every serial pop()/pop_and_erase() caller
+  // (bba/sba serial driver in kstd2.cc, pop_and_prepare in kthread.cc)
+  // does `P = top(); pop();` with NO strat->L iterator held across the
+  // pop, so this is safe.  Serial mode is single-threaded (no
+  // concurrent rdlock/wrlock holders), so calling LSet::compact()
+  // directly without the wrlock is safe (the wrlock contract exists
+  // only to exclude concurrent readers, of which there are none at
+  // T=1; find_global_min_unlocked's comment already treats serial
+  // compact as safe, just never-triggered).  No-op unless the knob is
+  // enabled AND we are in serial mode.
+  inline void maybe_serial_compact_on_pop(void) {
+    if (g_bench_serial_compact == 0) return;          // off: true no-op
+    if (kt_current_ctx != NULL) return;               // serial only
+    if (g_bench_serial_compact == 1) {                // threshold
+      if (!needs_compact()) return;
+    }
+    // mode 2 (everypop): always — compact() early-returns when
+    // deleted_count_ == 0, so this is "compact if anything to compact".
+    compact();
+  }
+
   // ----- Top / Pop -------------------------------------------------
   const LObject& top(void) {
     iterator it = find_global_min_unlocked();
@@ -2375,19 +2404,23 @@ public:
     // to head chunk — see find_global_min_unlocked for rationale.
     if (g_bench_elide_lset_wrapper && kt_current_ctx == NULL) {
       if (!chunk_.empty()) chunk_.pop();
+      maybe_serial_compact_on_pop();   // task 368 (serial only)
       return;
     }
-    LSetChunk*           winner = nullptr;
-    LSetChunk::iterator  winner_it;
-    for (LSetChunk* c = &chunk_; c != nullptr;
-         c = c->next.load(std::memory_order_acquire)) {
-      auto it = c->begin();
-      if (it == c->end()) continue;
-      if (winner == nullptr || chunk_.key_comp()(*it, *winner_it)) {
-        winner = c; winner_it = it;
+    {
+      LSetChunk*           winner = nullptr;
+      LSetChunk::iterator  winner_it;
+      for (LSetChunk* c = &chunk_; c != nullptr;
+           c = c->next.load(std::memory_order_acquire)) {
+        auto it = c->begin();
+        if (it == c->end()) continue;
+        if (winner == nullptr || chunk_.key_comp()(*it, *winner_it)) {
+          winner = c; winner_it = it;
+        }
       }
-    }
-    if (winner != nullptr) winner->pop();
+      if (winner != nullptr) winner->pop();
+    }   // winner_it out of scope before compact()
+    maybe_serial_compact_on_pop();     // task 368 (serial only)
   }
 
   void pop_and_erase(void) {
@@ -2399,19 +2432,23 @@ public:
     // Bench toggle (task 363; run 587): serial-mode short-circuit.
     if (g_bench_elide_lset_wrapper && kt_current_ctx == NULL) {
       if (!chunk_.empty()) chunk_.pop_and_erase();
+      maybe_serial_compact_on_pop();   // task 368 (serial only)
       return;
     }
-    LSetChunk*           winner = nullptr;
-    LSetChunk::iterator  winner_it;
-    for (LSetChunk* c = &chunk_; c != nullptr;
-         c = c->next.load(std::memory_order_acquire)) {
-      auto it = c->begin();
-      if (it == c->end()) continue;
-      if (winner == nullptr || chunk_.key_comp()(*it, *winner_it)) {
-        winner = c; winner_it = it;
+    {
+      LSetChunk*           winner = nullptr;
+      LSetChunk::iterator  winner_it;
+      for (LSetChunk* c = &chunk_; c != nullptr;
+           c = c->next.load(std::memory_order_acquire)) {
+        auto it = c->begin();
+        if (it == c->end()) continue;
+        if (winner == nullptr || chunk_.key_comp()(*it, *winner_it)) {
+          winner = c; winner_it = it;
+        }
       }
-    }
-    if (winner != nullptr) winner->pop_and_erase();
+      if (winner != nullptr) winner->pop_and_erase();
+    }   // winner_it out of scope before compact()
+    maybe_serial_compact_on_pop();     // task 368 (serial only)
   }
 
   // ----- Erase via wrapper iterator -------------------------------

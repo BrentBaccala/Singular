@@ -106,6 +106,27 @@ bool g_bench_elide_sbasis_rwlock     = false;
 bool g_bench_elide_blockarray_atomic = false;
 bool g_bench_elide_lset_wrapper      = false;
 
+// --- Serial compact-on-pop knob (task 368) ---
+// SINGULAR_BENCH_SERIAL_COMPACT controls whether serial-mode (T=1)
+// LSet::pop() / pop_and_erase() compact strat->L after the physical
+// erase, to keep deleted LObjects from accumulating the whole run and
+// being skip-walked by pop()/find_global_min (the +4.43 s
+// std::_Rb_tree_increment top line of the T=1 gap; task 367
+// parallel-bba-rbtree-increment-rootcause.md).
+//
+// Modes (read once at startup into g_bench_serial_compact):
+//   0 = off        (default; TRUE no-op — current behaviour, non-bench
+//                    / default builds entirely unaffected)
+//   1 = threshold  (compact only when LSet::needs_compact() — the
+//                    d>l && d>COMPACT_TOMB_MIN_ABS / chunk-count
+//                    predicate; kutil.h:2622-2628)
+//   2 = everypop   (compact whenever deleted_count_ > 0; compact()
+//                    early-returns on deleted_count_==0 so this is
+//                    "compact if there is anything to compact")
+// SERIAL-MODE ONLY: every use site gates on kt_current_ctx == NULL,
+// so parallel-mode behaviour is byte-for-byte unchanged.
+int g_bench_serial_compact = 0;
+
 static inline bool kt_env_truthy(const char *name) {
   const char *v = getenv(name);
   if (v == NULL) return false;
@@ -121,6 +142,22 @@ void kt_bench_toggles_init() {
   g_bench_elide_sbasis_rwlock     = kt_env_truthy("SINGULAR_BENCH_ELIDE_SBASIS_RWLOCK");
   g_bench_elide_blockarray_atomic = kt_env_truthy("SINGULAR_BENCH_ELIDE_BLOCKARRAY_ATOMIC");
   g_bench_elide_lset_wrapper      = kt_env_truthy("SINGULAR_BENCH_ELIDE_LSET_WRAPPER");
+
+  // Serial compact-on-pop knob (task 368): off (default) / threshold /
+  // everypop.  Parsed once here; getenv per pop would itself perturb
+  // the very measurement this knob feeds.
+  {
+    const char *v = getenv("SINGULAR_BENCH_SERIAL_COMPACT");
+    if (v == NULL || v[0] == '\0') {
+      g_bench_serial_compact = 0;
+    } else if (v[0] == 't' || v[0] == 'T') {       // "threshold"
+      g_bench_serial_compact = 1;
+    } else if (v[0] == 'e' || v[0] == 'E') {       // "everypop"
+      g_bench_serial_compact = 2;
+    } else {                                       // "off" / 0 / anything else
+      g_bench_serial_compact = 0;
+    }
+  }
 }
 
 // Static-constructor: ensure bench toggles are initialized at process
