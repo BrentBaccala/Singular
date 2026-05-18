@@ -127,6 +127,27 @@ bool g_bench_elide_lset_wrapper      = false;
 // so parallel-mode behaviour is byte-for-byte unchanged.
 int g_bench_serial_compact = 0;
 
+// --- Serial L-erase contract knob (task 370) ---
+// SINGULAR_BENCH_SERIAL_LSET_ERASE controls whether serial-mode (T=1)
+// chainCritNormal chain-crit deletions (the strat->L.erase(it) calls
+// where `it` is a filtered_iterator from ufbegin_lcm(sev_p), at
+// kutil.cc:3903 / :3968 / :4027) use the tombstone-then-compact path
+// or the immediate physical-erase contract.
+//
+// Modes (read once at startup into g_bench_serial_lset_erase):
+//   0 = tombstone  (default; TRUE no-op — current behaviour, the
+//                    LSet::erase(filtered_iterator) tombstone path;
+//                    non-bench / default builds entirely unaffected)
+//   1 = physical   (serial mode only: route those deletions through
+//                    LSet::physical_erase(filtered_iterator) — one
+//                    tree node removed + that LObject's polys freed
+//                    per delete, no tombstone, no later compact())
+// SERIAL-MODE ONLY: the use site gates on (g_bench_serial_lset_erase
+// == PHYSICAL && kt_current_ctx == NULL), so parallel-mode behaviour
+// is byte-for-byte unchanged.  physical_erase is the existing
+// pre-task-360 named primitive; this knob does not re-implement it.
+int g_bench_serial_lset_erase = KT_SERIAL_LSET_ERASE_TOMBSTONE;
+
 static inline bool kt_env_truthy(const char *name) {
   const char *v = getenv(name);
   if (v == NULL) return false;
@@ -156,6 +177,21 @@ void kt_bench_toggles_init() {
       g_bench_serial_compact = 2;
     } else {                                       // "off" / 0 / anything else
       g_bench_serial_compact = 0;
+    }
+  }
+
+  // Serial L-erase contract knob (task 370): tombstone (default) /
+  // physical.  Parsed once here; getenv per erase would itself
+  // perturb the very measurement this knob feeds (mirrors the
+  // task-368 SINGULAR_BENCH_SERIAL_COMPACT rationale).
+  {
+    const char *v = getenv("SINGULAR_BENCH_SERIAL_LSET_ERASE");
+    if (v == NULL || v[0] == '\0') {
+      g_bench_serial_lset_erase = KT_SERIAL_LSET_ERASE_TOMBSTONE;
+    } else if (v[0] == 'p' || v[0] == 'P') {       // "physical"
+      g_bench_serial_lset_erase = KT_SERIAL_LSET_ERASE_PHYSICAL;
+    } else {                                       // "tombstone" / anything else
+      g_bench_serial_lset_erase = KT_SERIAL_LSET_ERASE_TOMBSTONE;
     }
   }
 }
@@ -1631,6 +1667,57 @@ LSetChunk::filtered_iterator LSetChunk::erase(LSetChunk::filtered_iterator fit) 
     __atomic_fetch_add(&erase_call_count_, 1, __ATOMIC_RELAXED);
     __atomic_fetch_add(&deleted_count_, 1, __ATOMIC_RELAXED);
     __atomic_fetch_sub(&live_count_, 1, __ATOMIC_RELAXED);
+  }
+  return filtered_iterator(this, fit.pos_ + 1, fit.sev1_, fit.sev2_, fit.sev_array_);
+}
+
+// LSetChunk::physical_erase(filtered_iterator) — task 370.
+// The pre-task-360 physical-erase contract reached through the
+// cache-friendly sev scan (the chainCritNormal chain-crit deletion
+// path uses a filtered_iterator from ufbegin_lcm(sev_p)).  Mirrors
+// physical_erase(iterator) exactly — frees the entry's polys via
+// kLSet_free_polys and physically removes its multiset tree node plus
+// the pair_index / sev_flat_ / sevSig_flat_ slot — but addresses the
+// entry by its flat position (fit.pos_, which IS the flat index, the
+// same index erase(filtered_iterator) zeroes) and uses
+// writable_set::erase_at(pos) for the tree-node removal (no ordered
+// iterator is available here; erase_at is the existing flat-index
+// physical-removal primitive, also used by compact()).
+//
+// Iteration contract: identical to erase(filtered_iterator) — returns
+// filtered_iterator(this, fit.pos_ + 1, ...).  erase_at sets
+// flat_[pos_] = data_.end() so the just-erased slot reads as deleted
+// to flat_ptr()/advance(); pos_-based iteration is unaffected by the
+// tree-node removal (only that one slot changes).  No tombstone is
+// recorded (deleted_count_ untouched), so compact()/compact-on-pop is
+// a no-op for entries removed this way.
+//
+// Concurrency: physical tree mutation is unsafe under rdlock-shared.
+// Single-threaded / wrlock only; asserts kt_current_ctx == NULL (the
+// LSet wrapper only routes here when kt_current_ctx == NULL).
+LSetChunk::filtered_iterator
+LSetChunk::physical_erase(LSetChunk::filtered_iterator fit) {
+  assume(kt_current_ctx == NULL);
+  LObject* lp = flat_ptr(fit.pos_);
+  if (lp != nullptr && !lobject_deleted_load(*lp)) {
+    // Free everything the entry owns (lcm, t_p in some cases, sig) —
+    // same canonical helper used by physical_erase(iterator),
+    // compact() and clear_and_erase().
+    kStrategy strat = this->key_comp().strat;
+    kLSet_free_polys(*lp, strat);
+
+    // pair_index + sev sentinels, mirroring physical_erase(iterator).
+    if (lp->p1 != NULL && lp->p2 != NULL) {
+      auto key = canonicalize_pair(lp->p1, lp->p2);
+      pair_index.erase(key);
+    }
+    if (fit.pos_ < sev_flat_.size()) sev_flat_[fit.pos_] = 0;
+    if (fit.pos_ < sevSig_flat_.size()) sevSig_flat_[fit.pos_] = 0;
+
+    // Physical tree-node removal by flat index (erase_at deletes the
+    // node, frees the wrapper, sets flat_[pos_] = data_.end()).
+    writable_set<LObject, CompareLObject>::erase_at(fit.pos_);
+    --live_count_;
   }
   return filtered_iterator(this, fit.pos_ + 1, fit.sev1_, fit.sev2_, fit.sev_array_);
 }

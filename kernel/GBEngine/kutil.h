@@ -74,6 +74,20 @@ extern bool g_bench_elide_lset_wrapper;
 // at serial-mode (kt_current_ctx == NULL) LSet::pop / pop_and_erase.
 extern int g_bench_serial_compact;
 
+// Serial L-erase contract knob (task 370): 0=tombstone 1=physical.
+// Read once at startup from SINGULAR_BENCH_SERIAL_LSET_ERASE; used
+// only at serial-mode (kt_current_ctx == NULL) LSet::erase via the
+// filtered_iterator overload (the chainCritNormal chain-crit deletion
+// path).  0=tombstone is the current behaviour (true no-op; non-bench
+// / default builds entirely unaffected); 1=physical routes those
+// serial deletions through LSet::physical_erase (immediate tree-node
+// removal + poly-free at deletion time, the next-opt erase contract /
+// the pre-task-360 named primitive LSetChunk::physical_erase).
+// Parallel mode never takes the physical branch (gated kt_current_ctx
+// == NULL), so T>1 is byte- and TSan-identical regardless of value.
+extern int g_bench_serial_lset_erase;
+enum { KT_SERIAL_LSET_ERASE_TOMBSTONE = 0, KT_SERIAL_LSET_ERASE_PHYSICAL = 1 };
+
 // Block-allocated array: elements are stored in fixed-size blocks
 // indexed via a two-level directory.  blocks[b] is a calloc'd block
 // of BLOCK_SIZE elements; operator[](i) returns blocks[i>>SHIFT][i&MASK].
@@ -1727,6 +1741,15 @@ public:
   }
   // Erase via filtered_iterator; returns next valid filtered position
   filtered_iterator erase(filtered_iterator it);
+  // physical_erase via filtered_iterator (task 370): the pre-task-360
+  // erase contract reached through the cache-friendly sev scan.
+  // Frees the entry's polys (kLSet_free_polys) AND physically removes
+  // its multiset tree node + pair_index / sev_flat_ / sevSig_flat_
+  // slot — no tombstone, no deferred compact.  Returns the next valid
+  // filtered position (same iteration contract as erase()).  Same
+  // safety contract as physical_erase(iterator): caller must hold
+  // wrlock or be single-threaded (it asserts kt_current_ctx == NULL).
+  filtered_iterator physical_erase(filtered_iterator it);
 
   // Direct access to sev_flat_ for index-based pair iteration (B dedup)
   const unsigned long* sev_flat_data() const { return sev_flat_.data(); }
@@ -2481,16 +2504,48 @@ public:
     return iterator(c, next_inner);
   }
 
-  // erase via wrapper filtered_iterator.  Stays tombstone-only —
-  // filtered_iterator is the worker-rdlock chunked-scan pattern, so
-  // even when kt_current_ctx == NULL a filtered_iterator caller is
-  // (by convention) inside a chunked-LSet scan that doesn't want
-  // physical removal.  Serial callers that want physical-erase use
-  // the iterator overload above.
+  // erase via wrapper filtered_iterator.  Default (tombstone) path
+  // stays tombstone-only — filtered_iterator is the worker-rdlock
+  // chunked-scan pattern, so by convention even when kt_current_ctx
+  // == NULL a filtered_iterator caller is inside a chunked-LSet scan
+  // that doesn't want physical removal.
+  //
+  // Task 370 knob: when SINGULAR_BENCH_SERIAL_LSET_ERASE=physical
+  // (g_bench_serial_lset_erase == PHYSICAL) AND we are in serial mode
+  // (kt_current_ctx == NULL), route through physical_erase instead —
+  // the A/B comparator for per-delete physical erase (next-opt
+  // contract) vs deferred tombstone + everypop compact (task 368).
+  // The gate is one global load + one branch on the hot path; the
+  // default (g_bench_serial_lset_erase == 0) compiles to exactly the
+  // pre-task-370 tombstone code (true no-op for non-bench / default
+  // builds).  Parallel mode (kt_current_ctx != NULL) is never routed
+  // to physical_erase, so T>1 is byte- and TSan-identical.
   filtered_iterator erase(filtered_iterator fit) {
     if (fit.chunk_ == nullptr) return fit;
+    if (g_bench_serial_lset_erase == KT_SERIAL_LSET_ERASE_PHYSICAL
+        && kt_current_ctx == NULL)
+      return physical_erase(fit);
     LSetChunk* c = fit.chunk_;
     auto next_inner = c->erase(fit.inner_);
+    fit.inner_ = next_inner;
+    fit.cross_chunk_advance();
+    return fit;
+  }
+
+  // physical_erase via wrapper filtered_iterator (task 370): the
+  // pre-task-360 physical-erase contract reached through the
+  // chunk-aware sev scan.  Forwards to the chunk's
+  // physical_erase(filtered_iterator) (immediate tree-node removal +
+  // poly-free), then re-establishes the wrapper filtered_iterator
+  // (cross-chunk-aware) at the next position — mirroring exactly how
+  // the tombstone erase(filtered_iterator) forwards to the chunk.
+  // Serial-only / wrlock-only (the chunk method asserts
+  // kt_current_ctx == NULL); reached only via the gated erase() above
+  // or by an explicit serial caller.
+  filtered_iterator physical_erase(filtered_iterator fit) {
+    if (fit.chunk_ == nullptr) return fit;
+    LSetChunk* c = fit.chunk_;
+    auto next_inner = c->physical_erase(fit.inner_);
     fit.inner_ = next_inner;
     fit.cross_chunk_advance();
     return fit;
