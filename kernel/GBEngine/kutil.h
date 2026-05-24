@@ -88,20 +88,31 @@ extern int g_bench_serial_compact;
 extern int g_bench_serial_lset_erase;
 enum { KT_SERIAL_LSET_ERASE_TOMBSTONE = 0, KT_SERIAL_LSET_ERASE_PHYSICAL = 1 };
 
-// Serial plain-load scan knob (prototype): when true, the hot
-// chainCritNormal chain-criterion scan (filtered_iterator::advance)
-// reads the sev_flat_ deletion sentinel with a PLAIN non-atomic load
-// instead of __atomic_load_n(ACQUIRE).  The atomic acquire emits the
-// same x86 mov as a plain load, BUT it is a compiler optimization
-// barrier: GCC will not unroll the scan loop across an atomic load.
-// next-opt's advance (plain load) is 4x-unrolled; parallel-bba's
-// (atomic) is a scalar non-unrolled loop, which is the bulk of the
-// advance 16.5%->23.0% self-time gap.  SERIAL-MODE ONLY: a plain load
-// is racy against concurrent worker writers, so this must only be set
-// at SINGULAR_THREADS=1.  Default false -> atomic path -> byte- and
-// TSan-identical to the shipped behaviour.  Read once at startup from
-// SINGULAR_BENCH_SERIAL_PLAIN_SCAN.
-extern bool g_bench_serial_plain_scan;
+// Plain-load scan / unroll recovery (production, auto-selected by
+// serial mode).  The hot chainCritNormal chain-criterion scan
+// (filtered_iterator::advance) reads the sev_flat_ deletion sentinel
+// with __atomic_load_n(ACQUIRE) so worker-drain scans (kt_current_ctx
+// != NULL) synchronize release/acquire with concurrent sev_flat_
+// writers.  On x86 that emits the same `mov` as a plain load, BUT it is
+// a compiler optimization barrier: GCC will not unroll the scan loop
+// across an atomic load.  next-opt's advance (plain load) is
+// 4x-unrolled; the atomic version is a scalar non-unrolled loop — the
+// bulk of the advance 16.5%->23.0% self-time gap (task 379 profile
+// mis-attributed this to container layout).
+//
+// In serial mode (kt_current_ctx == NULL) there are no concurrent
+// writers, so advance() reads the sentinel with a PLAIN load, which the
+// compiler unrolls.  Measured c200-1, staging-5104053-redsb, T=1:
+// 14.58s (atomic) -> 13.19s (plain), byte-identical output, i.e. ~1/3
+// of the +4.13s gap to next-opt.  This is the same kt_current_ctx ==
+// NULL serial-mode invariant the compact-on-pop / lset-erase knobs
+// already rely on for safe mutation.
+//
+// SINGULAR_BENCH_FORCE_ATOMIC_SCAN forces the atomic path even when
+// serial — for A/B measurement of the unroll effect (reproduces the
+// 14.58s atomic baseline).  No effect in parallel mode (already atomic).
+// Read once at startup.
+extern bool g_bench_force_atomic_scan;
 
 // Block-allocated array: elements are stored in fixed-size blocks
 // indexed via a two-level directory.  blocks[b] is a calloc'd block
@@ -1755,11 +1766,17 @@ public:
       const unsigned long* del = owner_->sev_flat_.data();
       const unsigned long* sev = sev_array_->data();
       const size_t sz = sev_array_->size();
-      // Prototype knob: serial-mode plain-load scan.  The dispatch is
-      // ONCE per advance() call (outside the inner per-element loop), so
-      // the plain-load while-loop below has no atomic in its body and
-      // the compiler is free to unroll it (matching next-opt's advance).
-      if (g_bench_serial_plain_scan) {
+      // Serial mode (no parallel sweep active) has no concurrent
+      // sev_flat_ writers, so the deletion sentinel is read with a PLAIN
+      // load — which the compiler can unroll, unlike the atomic acquire
+      // (a compiler optimization barrier).  The dispatch is ONCE per
+      // advance() call (outside the inner per-element loop), so the
+      // plain-load while-loop below has no atomic in its body and GCC
+      // unrolls it (matching next-opt's advance).  Worker-drain scans
+      // (kt_current_ctx != NULL) take the atomic path for release/acquire
+      // sync.  FORCE_ATOMIC_SCAN keeps the atomic path even when serial
+      // for A/B measurement.  See the g_bench_force_atomic_scan comment.
+      if (kt_current_ctx == NULL && !g_bench_force_atomic_scan) {
         while (pos_ < sz) {
           if (del[pos_] == 0) { ++pos_; continue; }   // sole deletion signal (plain load)
           unsigned long s = sev[pos_];

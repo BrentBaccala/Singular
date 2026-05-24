@@ -106,11 +106,12 @@ bool g_bench_elide_sbasis_rwlock     = false;
 bool g_bench_elide_blockarray_atomic = false;
 bool g_bench_elide_lset_wrapper      = false;
 
-// Serial plain-load scan knob (prototype) — see kutil.h for the full
-// rationale.  When true, filtered_iterator::advance reads the deletion
-// sentinel with a plain load so GCC can unroll the scan loop.  SERIAL
-// MODE ONLY (racy under concurrent writers).  Default false.
-bool g_bench_serial_plain_scan       = false;
+// Force-atomic-scan measurement knob — see kutil.h for the full
+// rationale.  filtered_iterator::advance auto-selects a plain (unrollable)
+// load for the deletion sentinel in serial mode (kt_current_ctx == NULL);
+// when this is true it keeps the atomic acquire even when serial, to A/B
+// the unroll effect.  No effect in parallel mode.  Default false.
+bool g_bench_force_atomic_scan       = false;
 
 // --- Serial compact-on-pop knob (task 368) ---
 // SINGULAR_BENCH_SERIAL_COMPACT controls whether serial-mode (T=1)
@@ -169,7 +170,7 @@ void kt_bench_toggles_init() {
   g_bench_elide_sbasis_rwlock     = kt_env_truthy("SINGULAR_BENCH_ELIDE_SBASIS_RWLOCK");
   g_bench_elide_blockarray_atomic = kt_env_truthy("SINGULAR_BENCH_ELIDE_BLOCKARRAY_ATOMIC");
   g_bench_elide_lset_wrapper      = kt_env_truthy("SINGULAR_BENCH_ELIDE_LSET_WRAPPER");
-  g_bench_serial_plain_scan       = kt_env_truthy("SINGULAR_BENCH_SERIAL_PLAIN_SCAN");
+  g_bench_force_atomic_scan       = kt_env_truthy("SINGULAR_BENCH_FORCE_ATOMIC_SCAN");
 
   // Serial compact-on-pop knob (task 368): off (default) / threshold /
   // everypop.  Parsed once here; getenv per pop would itself perturb
