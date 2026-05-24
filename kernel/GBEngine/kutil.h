@@ -88,6 +88,21 @@ extern int g_bench_serial_compact;
 extern int g_bench_serial_lset_erase;
 enum { KT_SERIAL_LSET_ERASE_TOMBSTONE = 0, KT_SERIAL_LSET_ERASE_PHYSICAL = 1 };
 
+// Serial plain-load scan knob (prototype): when true, the hot
+// chainCritNormal chain-criterion scan (filtered_iterator::advance)
+// reads the sev_flat_ deletion sentinel with a PLAIN non-atomic load
+// instead of __atomic_load_n(ACQUIRE).  The atomic acquire emits the
+// same x86 mov as a plain load, BUT it is a compiler optimization
+// barrier: GCC will not unroll the scan loop across an atomic load.
+// next-opt's advance (plain load) is 4x-unrolled; parallel-bba's
+// (atomic) is a scalar non-unrolled loop, which is the bulk of the
+// advance 16.5%->23.0% self-time gap.  SERIAL-MODE ONLY: a plain load
+// is racy against concurrent worker writers, so this must only be set
+// at SINGULAR_THREADS=1.  Default false -> atomic path -> byte- and
+// TSan-identical to the shipped behaviour.  Read once at startup from
+// SINGULAR_BENCH_SERIAL_PLAIN_SCAN.
+extern bool g_bench_serial_plain_scan;
+
 // Block-allocated array: elements are stored in fixed-size blocks
 // indexed via a two-level directory.  blocks[b] is a calloc'd block
 // of BLOCK_SIZE elements; operator[](i) returns blocks[i>>SHIFT][i&MASK].
@@ -1740,6 +1755,23 @@ public:
       const unsigned long* del = owner_->sev_flat_.data();
       const unsigned long* sev = sev_array_->data();
       const size_t sz = sev_array_->size();
+      // Prototype knob: serial-mode plain-load scan.  The dispatch is
+      // ONCE per advance() call (outside the inner per-element loop), so
+      // the plain-load while-loop below has no atomic in its body and
+      // the compiler is free to unroll it (matching next-opt's advance).
+      if (g_bench_serial_plain_scan) {
+        while (pos_ < sz) {
+          if (del[pos_] == 0) { ++pos_; continue; }   // sole deletion signal (plain load)
+          unsigned long s = sev[pos_];
+          if (sev2_ == 0) {
+            if (sev1_ & ~s) { ++pos_; continue; }       // divisibility: skip
+          } else {
+            if ((s & ~sev1_) && (sev2_ & ~s)) { ++pos_; continue; }  // incomp: skip
+          }
+          break;
+        }
+        return;
+      }
       while (pos_ < sz) {
         if (sev_flat_is_deleted_acq_(&del[pos_])) { ++pos_; continue; } // sole deletion signal
         unsigned long s = sev[pos_];

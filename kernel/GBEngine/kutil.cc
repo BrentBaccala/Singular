@@ -106,6 +106,12 @@ bool g_bench_elide_sbasis_rwlock     = false;
 bool g_bench_elide_blockarray_atomic = false;
 bool g_bench_elide_lset_wrapper      = false;
 
+// Serial plain-load scan knob (prototype) — see kutil.h for the full
+// rationale.  When true, filtered_iterator::advance reads the deletion
+// sentinel with a plain load so GCC can unroll the scan loop.  SERIAL
+// MODE ONLY (racy under concurrent writers).  Default false.
+bool g_bench_serial_plain_scan       = false;
+
 // --- Serial compact-on-pop knob (task 368) ---
 // SINGULAR_BENCH_SERIAL_COMPACT controls whether serial-mode (T=1)
 // LSet::pop() / pop_and_erase() compact strat->L after the physical
@@ -163,6 +169,7 @@ void kt_bench_toggles_init() {
   g_bench_elide_sbasis_rwlock     = kt_env_truthy("SINGULAR_BENCH_ELIDE_SBASIS_RWLOCK");
   g_bench_elide_blockarray_atomic = kt_env_truthy("SINGULAR_BENCH_ELIDE_BLOCKARRAY_ATOMIC");
   g_bench_elide_lset_wrapper      = kt_env_truthy("SINGULAR_BENCH_ELIDE_LSET_WRAPPER");
+  g_bench_serial_plain_scan       = kt_env_truthy("SINGULAR_BENCH_SERIAL_PLAIN_SCAN");
 
   // Serial compact-on-pop knob (task 368): off (default) / threshold /
   // everypop.  Parsed once here; getenv per pop would itself perturb
