@@ -1589,6 +1589,51 @@ private:
   // the array contains junk that is never queried.
   std::vector<unsigned long> sevSig_flat_;
 
+  // --- sev_flat_ as the SOLE deletion record for the hot scan (task 379) ---
+  //
+  // Task 379 (A): sev_flat_ == 0 is the single deletion signal read by
+  // the hot chainCritNormal chain-criterion scan (filtered_iterator::
+  // advance).  Previously advance() additionally chased flat_ptr(pos_)
+  // and did an atomic byte load of LObject.deleted per element; that
+  // atomic load was the measured +1.0 s of the T=1 next-opt gap
+  // (~/project/reports/parallel-bba-serial-lset-physical-erase-profile.md
+  // F3/F6).  To trust sev_flat_ alone, its zeroing stores are promoted
+  // to RELEASE and the scan load to ACQUIRE:
+  //   * Deletion / pop / physical-erase / compact zero the slot with a
+  //     release store (sev_flat_store_zero_rel_), publishing the prior
+  //     pair_index / tree mutation to the acquiring scanner.
+  //   * The scan reads each slot with an acquire load
+  //     (sev_flat_is_deleted_acq_).  On x86 an aligned acquire load is
+  //     the same instruction as a plain load — the hot loop pays nothing.
+  //   * sevSig_flat_ is NOT a deleted-detector (it can legitimately be
+  //     0); its store stays plain — it is only the filter array.  del is
+  //     ALWAYS sev_flat_ even when the scan filters on sevSig_flat_.
+  //
+  // sev_flat_ == 0 covers tombstones (erased), initial generators
+  // (sev_lcm == 0, processed by the drain but skipped by the scan),
+  // popped-but-not-compacted slots, AND physical holes (flat_[i] ==
+  // data_.end(), produced only by erase_at in physical_erase/compact,
+  // both of which zero sev_flat_ under wrlock/serial — see physical-hole
+  // analysis in the task-379 commit message).  The drain still
+  // distinguishes generator (deleted==false → process) from tombstone
+  // (deleted==true → skip) via LObject.deleted, which this task leaves
+  // in place as the cold drain's record (deferred to (B)).
+  static inline bool sev_flat_is_deleted_acq_(const unsigned long* p) {
+    return __atomic_load_n(p, __ATOMIC_ACQUIRE) == 0;
+  }
+  // Erase arbiter: atomically swap the slot to 0 (acq_rel) and report
+  // the prior value.  Exactly one thread sees a nonzero prior value
+  // (the winner); concurrent peers attempting the same erase see 0.
+  unsigned long sev_flat_xchg_zero_(size_t i) {
+    return __atomic_exchange_n(&sev_flat_[i], 0UL, __ATOMIC_ACQ_REL);
+  }
+  // Non-arbiter zeroing (erase, pop, physical_erase, compact precursor):
+  // release store so a concurrent acquire reader that observes the 0
+  // also observes prior cleanup writes.
+  void sev_flat_store_zero_rel_(size_t i) {
+    __atomic_store_n(&sev_flat_[i], 0UL, __ATOMIC_RELEASE);
+  }
+
   // --- Tombstone / erase instrumentation ---
   // live_count_: number of non-tombstoned entries (i.e. size()).
   // deleted_count_: number of currently-tombstoned entries (decremented on
@@ -1672,15 +1717,31 @@ public:
       // Use sev_array_ (which may be sev_flat_ or sevSig_flat_) for the
       // actual filter check. This avoids the problem that sevSig can
       // legitimately be 0, which would be confused with the deleted sentinel.
-      // Also skip over logically-deleted entries (LObject.deleted==true),
-      // which happens on tombstone-on-erase before compact() has run.
+      //
+      // Correctness invariant (task 379 (A)): the chainCritNormal scan
+      // trusts sev_flat_ == 0 ALONE — no per-element flat_ptr() chase or
+      // LObject.deleted atomic byte load.  Sound iff:
+      //   (i) every deletion path zeroes sev_flat_ with RELEASE before
+      //       the entry could be re-scanned (erase / pop / physical_erase
+      //       / compact all use sev_flat_store_zero_rel_); and
+      //   (ii) a live entry never transiently reads sev_flat_ == 0 (a new
+      //        entry's live sev_lcm is published by insert() before the
+      //        entry becomes scan-visible — the wrlock release that makes
+      //        it visible release/acquire-syncs with the scanner's rdlock).
+      // sev_flat_ == 0 also catches physical holes (flat_[i] ==
+      // data_.end()): the only hole-producing paths are erase_at, used
+      // exclusively by physical_erase/compact, both of which zero
+      // sev_flat_ under wrlock/serial (exclusive of this rdlock scanner).
+      // A stale-LIVE read (scanner sees old nonzero sev_flat_ for a
+      // just-erased entry) is harmless: the entry's monomials are not
+      // freed until compact under wrlock, which excludes the rdlock
+      // scanner, so the scanner at worst considers a soon-dead pair,
+      // never a freed one.
       const unsigned long* del = owner_->sev_flat_.data();
       const unsigned long* sev = sev_array_->data();
       const size_t sz = sev_array_->size();
       while (pos_ < sz) {
-        if (del[pos_] == 0) { ++pos_; continue; }     // deleted sentinel
-        LObject* lp = owner_->flat_ptr(pos_);
-        if (lp == nullptr || lobject_deleted_load(*lp)) { ++pos_; continue; }
+        if (sev_flat_is_deleted_acq_(&del[pos_])) { ++pos_; continue; } // sole deletion signal
         unsigned long s = sev[pos_];
         if (sev2_ == 0) {
           if (sev1_ & ~s) { ++pos_; continue; }       // divisibility: skip

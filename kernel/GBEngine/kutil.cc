@@ -1589,7 +1589,7 @@ LSetChunk::iterator LSetChunk::physical_erase(iterator it) {
     auto key = canonicalize_pair(Lp.p1, Lp.p2);
     pair_index.erase(key);
   }
-  if (Lp.flat_index < (int)sev_flat_.size()) sev_flat_[Lp.flat_index] = 0;
+  if (Lp.flat_index < (int)sev_flat_.size()) sev_flat_store_zero_rel_(Lp.flat_index);
   if (Lp.flat_index < (int)sevSig_flat_.size()) sevSig_flat_[Lp.flat_index] = 0;
 
   // writable_set::erase returns the iterator after the erased element
@@ -1631,8 +1631,11 @@ LSetChunk::iterator LSetChunk::erase(LSetChunk::iterator it) {
     return it;
   }
   // Mark the sev_flat_ and sevSig_flat_ entries as sentinel (0).
-  // Plain stores — concurrent readers tolerate the 0 sentinel.
-  if (Lp.flat_index < sev_flat_.size()) sev_flat_[Lp.flat_index] = 0;
+  // sev_flat_ store is RELEASE (task 379): it is the sole deletion signal
+  // the chainCritNormal scan reads, so it must publish the prior cleanup
+  // (LObject.deleted CAS above, which remains the drain's record).
+  // sevSig_flat_ is only the filter array — plain store.
+  if (Lp.flat_index < sev_flat_.size()) sev_flat_store_zero_rel_(Lp.flat_index);
   if (Lp.flat_index < sevSig_flat_.size()) sevSig_flat_[Lp.flat_index] = 0;
   __atomic_fetch_add(&erase_call_count_, 1, __ATOMIC_RELAXED);
   int new_deleted = __atomic_add_fetch(&deleted_count_, 1, __ATOMIC_RELAXED);
@@ -1649,7 +1652,8 @@ LSetChunk::unordered_iterator LSetChunk::erase(LSetChunk::unordered_iterator it)
     ++it;
     return it;
   }
-  if (Lp.flat_index < sev_flat_.size()) sev_flat_[Lp.flat_index] = 0;
+  // Release store (task 379): sole deletion signal for the hot scan.
+  if (Lp.flat_index < sev_flat_.size()) sev_flat_store_zero_rel_(Lp.flat_index);
   if (Lp.flat_index < sevSig_flat_.size()) sevSig_flat_[Lp.flat_index] = 0;
   __atomic_fetch_add(&erase_call_count_, 1, __ATOMIC_RELAXED);
   int new_deleted = __atomic_add_fetch(&deleted_count_, 1, __ATOMIC_RELAXED);
@@ -1662,7 +1666,8 @@ LSetChunk::unordered_iterator LSetChunk::erase(LSetChunk::unordered_iterator it)
 LSetChunk::filtered_iterator LSetChunk::erase(LSetChunk::filtered_iterator fit) {
   LObject* lp = flat_ptr(fit.pos_);
   if (lp != nullptr && lobject_deleted_cas(*lp)) {
-    if (fit.pos_ < sev_flat_.size()) sev_flat_[fit.pos_] = 0;
+    // Release store (task 379): sole deletion signal for the hot scan.
+    if (fit.pos_ < sev_flat_.size()) sev_flat_store_zero_rel_(fit.pos_);
     if (fit.pos_ < sevSig_flat_.size()) sevSig_flat_[fit.pos_] = 0;
     __atomic_fetch_add(&erase_call_count_, 1, __ATOMIC_RELAXED);
     __atomic_fetch_add(&deleted_count_, 1, __ATOMIC_RELAXED);
@@ -1711,7 +1716,8 @@ LSetChunk::physical_erase(LSetChunk::filtered_iterator fit) {
       auto key = canonicalize_pair(lp->p1, lp->p2);
       pair_index.erase(key);
     }
-    if (fit.pos_ < sev_flat_.size()) sev_flat_[fit.pos_] = 0;
+    // Release store (task 379): sole deletion signal for the hot scan.
+    if (fit.pos_ < sev_flat_.size()) sev_flat_store_zero_rel_(fit.pos_);
     if (fit.pos_ < sevSig_flat_.size()) sevSig_flat_[fit.pos_] = 0;
 
     // Physical tree-node removal by flat index (erase_at deletes the

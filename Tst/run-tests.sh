@@ -38,15 +38,27 @@ fi
 # Create log directory
 mkdir -p "$LOGDIR"
 
+# Per-test execution timeout (seconds), passed to regress.cmd via -A.
+# Without it regress.cmd's default is 0 = no timeout, so a single hung
+# Singular (e.g. heap corruption under SINGULAR_THREADS>1 that lands the
+# process in its SIGSEGV-handler restart loop) blocks the whole run
+# indefinitely.  REGRESS_TIMEOUT=0 disables the cap (legacy behaviour).
+REGRESS_TIMEOUT="${REGRESS_TIMEOUT:-300}"
+TIMEOUT_ARGS=""
+if [ "$REGRESS_TIMEOUT" -gt 0 ] 2>/dev/null; then
+    TIMEOUT_ARGS="-A $REGRESS_TIMEOUT"
+fi
+
 echo "Branch:    $BRANCH"
 echo "Binary:    $SINGULAR"
 echo "Lists:     $LISTS"
 echo "Log:       $LOGFILE"
+echo "Per-test timeout: ${REGRESS_TIMEOUT}s"
 echo ""
 
 cd "$SCRIPT_DIR"
 
-nohup ./regress.cmd -s "$SINGULAR" $LISTS > "$LOGFILE" 2>&1 &
+nohup ./regress.cmd $TIMEOUT_ARGS -s "$SINGULAR" $LISTS > "$LOGFILE" 2>&1 &
 PID=$!
 
 echo "PID: $PID"

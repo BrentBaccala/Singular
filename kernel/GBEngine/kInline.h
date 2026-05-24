@@ -1065,8 +1065,10 @@ KINLINE void LSetChunk::pop(void) {
     auto key = canonicalize_pair(Lp.p1, Lp.p2);
     pair_index.erase(key);
   }
-  // Mark sev_flat_ entry as sentinel (0) so cache-friendly scans skip it
-  if (Lp.flat_index < sev_flat_.size()) sev_flat_[Lp.flat_index] = 0;
+  // Mark sev_flat_ entry as sentinel (0) so cache-friendly scans skip it.
+  // Release store (task 379): sev_flat_==0 is the sole deletion signal the
+  // chainCritNormal scan reads; publish the prior pair_index/tree mutation.
+  if (Lp.flat_index < sev_flat_.size()) sev_flat_store_zero_rel_(Lp.flat_index);
   if (Lp.flat_index < sevSig_flat_.size()) sevSig_flat_[Lp.flat_index] = 0;
   writable_set<LObject, CompareLObject>::erase(it);
   --live_count_;
