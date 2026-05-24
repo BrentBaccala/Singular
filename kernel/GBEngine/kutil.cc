@@ -113,6 +113,9 @@ bool g_bench_elide_lset_wrapper      = false;
 // the unroll effect.  No effect in parallel mode.  Default false.
 bool g_bench_force_atomic_scan       = false;
 
+// Set at bba() entry from get_singular_threads() <= 1.  See kutil.h.
+bool g_bba_serial_run                = false;
+
 // --- Serial compact-on-pop knob (task 368) ---
 // SINGULAR_BENCH_SERIAL_COMPACT controls whether serial-mode (T=1)
 // LSet::pop() / pop_and_erase() compact strat->L after the physical

@@ -114,6 +114,15 @@ enum { KT_SERIAL_LSET_ERASE_TOMBSTONE = 0, KT_SERIAL_LSET_ERASE_PHYSICAL = 1 };
 // Read once at startup.
 extern bool g_bench_force_atomic_scan;
 
+// True iff this is a fully-serial run (SINGULAR_THREADS <= 1, so
+// bba_parallel_loop is never entered and no worker thread is ever
+// spawned anywhere in the process).  Set once at bba() entry from
+// get_singular_threads().  filtered_iterator::advance reads it to decide
+// whether the deletion-sentinel scan may use the plain (unrollable)
+// load.  Default false (atomic — always correct) for any chainCritNormal
+// caller that does not set it.
+extern bool g_bba_serial_run;
+
 // Block-allocated array: elements are stored in fixed-size blocks
 // indexed via a two-level directory.  blocks[b] is a calloc'd block
 // of BLOCK_SIZE elements; operator[](i) returns blocks[i>>SHIFT][i&MASK].
@@ -1766,17 +1775,20 @@ public:
       const unsigned long* del = owner_->sev_flat_.data();
       const unsigned long* sev = sev_array_->data();
       const size_t sz = sev_array_->size();
-      // Serial mode (no parallel sweep active) has no concurrent
+      // Fully-serial run (g_bba_serial_run: SINGULAR_THREADS <= 1, so no
+      // worker is ever spawned anywhere in the process) has no concurrent
       // sev_flat_ writers, so the deletion sentinel is read with a PLAIN
       // load — which the compiler can unroll, unlike the atomic acquire
       // (a compiler optimization barrier).  The dispatch is ONCE per
       // advance() call (outside the inner per-element loop), so the
       // plain-load while-loop below has no atomic in its body and GCC
-      // unrolls it (matching next-opt's advance).  Worker-drain scans
-      // (kt_current_ctx != NULL) take the atomic path for release/acquire
-      // sync.  FORCE_ATOMIC_SCAN keeps the atomic path even when serial
-      // for A/B measurement.  See the g_bench_force_atomic_scan comment.
-      if (kt_current_ctx == NULL && !g_bench_force_atomic_scan) {
+      // unrolls it (matching next-opt's advance).  A T>1 run keeps the
+      // atomic path for ALL scans — including its serial-phase scans
+      // (kt_current_ctx == NULL is NOT a safe gate here: a T>1 run's
+      // serial-phase scans interleave with released worker writes and
+      // need the acquire).  FORCE_ATOMIC_SCAN keeps the atomic path even
+      // when serial, for A/B measurement.
+      if (g_bba_serial_run && !g_bench_force_atomic_scan) {
         while (pos_ < sz) {
           if (del[pos_] == 0) { ++pos_; continue; }   // sole deletion signal (plain load)
           unsigned long s = sev[pos_];

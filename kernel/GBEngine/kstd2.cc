@@ -2848,6 +2848,15 @@ ideal bba (ideal F, ideal Q,intvec *w,bigintmat *hilb,kStrategy strat)
   BITSET save;
   SI_SAVE_OPT1(save);
 
+  // A fully-serial run (SINGULAR_THREADS <= 1) never enters
+  // bba_parallel_loop, so no worker thread is ever spawned and the
+  // chainCritNormal deletion-sentinel scan has no concurrent writers —
+  // letting filtered_iterator::advance use a plain (unrollable) load.
+  // Set before initBuchMora, which generates the initial pairs.  A T>1
+  // run leaves this false so every scan (including serial-phase ones)
+  // keeps the atomic acquire.
+  g_bba_serial_run = (get_singular_threads() <= 1);
+
   initBuchMoraCrit(strat); /*set Gebauer, honey, sugarCrit*/
   if(rField_is_Ring(currRing))
     initBuchMoraPosRing(strat);
